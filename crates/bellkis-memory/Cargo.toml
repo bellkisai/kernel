@@ -6,6 +6,7 @@ license.workspace = true
 description = "Echo Memory engine — push-based AI memory where memories find you"
 
 [dependencies]
+bloomfilter.workspace = true
 bellkis-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -17,7 +18,9 @@ tracing.workspace = true
 fastembed.workspace = true
 simsimd.workspace = true
 memmap2.workspace = true
+crc32fast.workspace = true
 rand.workspace = true
+rand_distr.workspace = true
 regex.workspace = true
 sysinfo.workspace = true
 

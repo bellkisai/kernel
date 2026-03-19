@@ -1,12 +1,14 @@
-//! In-memory vector store with JSON persistence.
+//! In-memory vector store with binary + JSON persistence.
 //!
-//! Phase 1: Vec-based storage with parallel embedding array for fast similarity search.
-//! Phase 2 will add mmap-backed binary persistence for zero-copy reads.
+//! Primary format: binary (`.shrm`) via `crate::persistence` — structured header,
+//! flat embedding array, CRC32 checksum. Falls back to JSON for migration.
 
 use bellkis_core::{BellkisError, MemoryEntry, MemoryId, Result};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::instrument;
+
+use crate::persistence;
 
 /// In-memory vector store for Echo Memory.
 ///
@@ -81,6 +83,13 @@ impl EchoStore {
         self.entries.get_mut(index)
     }
 
+    /// Get the internal index for a MemoryId.
+    ///
+    /// Used by the LSH index to track swap-remove index changes.
+    pub fn index_of(&self, id: &MemoryId) -> Option<usize> {
+        self.id_to_index.get(id).copied()
+    }
+
     /// Number of stored memories.
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -111,15 +120,56 @@ impl EchoStore {
         self.entries.get_mut(index)
     }
 
-    /// Serialize the store to a JSON file.
+    /// Save the store to a binary file.
     ///
-    /// Phase 1 uses JSON for simplicity and debuggability.
-    /// Phase 2 will use a binary format (mmap + rkyv) for performance.
+    /// Uses the SHRM binary format: 64-byte header + flat f32 embedding array
+    /// + CRC32 checksum + JSON metadata. See `crate::persistence` for format details.
     #[instrument(skip(self), fields(entries = self.entries.len()))]
     pub fn save(&self, path: &Path) -> Result<()> {
+        persistence::save_binary(self, path)
+    }
+
+    /// Load a store from disk.
+    ///
+    /// Tries binary format first. If the binary file does not exist, falls back
+    /// to JSON for migration from the old format. Returns empty store if neither exists.
+    #[instrument(fields(path = %path.display()))]
+    pub fn load(path: &Path) -> Result<Self> {
+        // Try binary first
+        if path.exists() {
+            // Check if it's a valid binary file by looking at magic bytes
+            if let Ok(data) = std::fs::read(path) {
+                if data.len() >= 4 && &data[0..4] == b"SHRM" {
+                    return persistence::load_binary(path);
+                }
+            }
+            // Not binary — try JSON fallback
+            tracing::info!(
+                path = %path.display(),
+                "Binary magic not found, attempting JSON fallback"
+            );
+            return Self::load_json(path);
+        }
+
+        // Check for a sibling .json file (migration scenario: path is .shrm but .json exists)
+        let json_path = path.with_extension("json");
+        if json_path.exists() {
+            tracing::info!(
+                json_path = %json_path.display(),
+                "Found legacy JSON store, migrating"
+            );
+            return Self::load_json(&json_path);
+        }
+
+        tracing::info!(path = %path.display(), "No store file found, starting empty");
+        Ok(Self::new())
+    }
+
+    /// Save the store to a JSON file (legacy format, for backward compatibility).
+    #[instrument(skip(self), fields(entries = self.entries.len()))]
+    pub fn save_json(&self, path: &Path) -> Result<()> {
         let start = std::time::Instant::now();
 
-        // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -132,21 +182,19 @@ impl EchoStore {
             entries = self.entries.len(),
             path = %path.display(),
             elapsed_ms = elapsed.as_millis(),
-            "Store saved to disk"
+            "Store saved to JSON (legacy)"
         );
 
         Ok(())
     }
 
-    /// Load a store from a JSON file.
-    ///
-    /// Rebuilds the parallel embedding array and index map from deserialized entries.
+    /// Load a store from a JSON file (legacy format, for backward compatibility).
     #[instrument(fields(path = %path.display()))]
-    pub fn load(path: &Path) -> Result<Self> {
+    pub fn load_json(path: &Path) -> Result<Self> {
         let start = std::time::Instant::now();
 
         if !path.exists() {
-            tracing::info!(path = %path.display(), "No store file found, starting empty");
+            tracing::info!(path = %path.display(), "No JSON store file found, starting empty");
             return Ok(Self::new());
         }
 
@@ -166,7 +214,7 @@ impl EchoStore {
             entries = store.len(),
             path = %path.display(),
             elapsed_ms = elapsed.as_millis(),
-            "Store loaded from disk"
+            "Store loaded from JSON (legacy)"
         );
 
         Ok(store)
@@ -251,9 +299,9 @@ mod tests {
     #[test]
     fn save_and_load_roundtrip() {
         let dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let path = dir.path().join("test_store.json");
+        let path = dir.path().join("test_store.shrm");
 
-        // Create and save
+        // Create and save (now uses binary format)
         let mut store = EchoStore::new();
         let entry = make_entry("persistent memory");
         let id = entry.id.clone();
@@ -269,8 +317,44 @@ mod tests {
     }
 
     #[test]
+    fn save_json_and_load_json_roundtrip() {
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let path = dir.path().join("test_store.json");
+
+        let mut store = EchoStore::new();
+        let entry = make_entry("json legacy");
+        let id = entry.id.clone();
+        store.add(entry);
+        store.save_json(&path).expect("Should save JSON");
+
+        let loaded = EchoStore::load_json(&path).expect("Should load JSON");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.get(&id).unwrap().content, "json legacy");
+    }
+
+    #[test]
+    fn load_falls_back_to_json() {
+        // When a file exists but has no SHRM magic, load() should fall back to JSON
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let path = dir.path().join("test_store.shrm");
+
+        let mut store = EchoStore::new();
+        let entry = make_entry("json fallback test");
+        let id = entry.id.clone();
+        store.add(entry);
+
+        // Save as JSON to the .shrm path (simulating legacy file)
+        store.save_json(&path).expect("Should save JSON");
+
+        // load() should detect non-binary and fall back to JSON
+        let loaded = EchoStore::load(&path).expect("Should load via fallback");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.get(&id).unwrap().content, "json fallback test");
+    }
+
+    #[test]
     fn load_nonexistent_returns_empty() {
-        let path = Path::new("/tmp/nonexistent_store_12345.json");
+        let path = Path::new("/tmp/nonexistent_store_12345.shrm");
         let store = EchoStore::load(path).expect("Should return empty store");
         assert!(store.is_empty());
     }

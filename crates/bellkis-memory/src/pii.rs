@@ -28,10 +28,25 @@ impl PiiFilter {
     /// Panics if any built-in regex pattern fails to compile (indicates a bug).
     pub fn new() -> Self {
         let pattern_defs: Vec<(&str, PiiType)> = vec![
-            // API keys: OpenAI sk-, Stripe pk_, AWS AKIA
-            (r"sk-[a-zA-Z0-9]{20,}", PiiType::ApiKey),
-            (r"pk_[a-zA-Z0-9]{20,}", PiiType::ApiKey),
+            // API keys — longer/more-specific prefixes first to handle overlaps
+            // OpenAI project keys: sk-proj-...
+            (r"sk-proj-[a-zA-Z0-9_-]{20,}", PiiType::ApiKey),
+            // Anthropic keys: sk-ant-...
+            (r"sk-ant-[a-zA-Z0-9_-]{20,}", PiiType::ApiKey),
+            // Generic sk- keys (OpenAI legacy, Stripe, etc.) — allow dashes/underscores
+            (r"sk-[a-zA-Z0-9_-]{20,}", PiiType::ApiKey),
+            // Publishable keys: pk_...
+            (r"pk_[a-zA-Z0-9_-]{20,}", PiiType::ApiKey),
+            // AWS access keys: AKIA...
             (r"AKIA[A-Z0-9]{16}", PiiType::ApiKey),
+            // Groq keys: gsk_...
+            (r"gsk_[a-zA-Z0-9]{20,}", PiiType::ApiKey),
+            // xAI/Grok keys: xai-...
+            (r"xai-[a-zA-Z0-9]{20,}", PiiType::ApiKey),
+            // GitHub personal access tokens: ghp_...
+            (r"ghp_[a-zA-Z0-9]{36}", PiiType::ApiKey),
+            // GitLab personal access tokens: glpat-...
+            (r"glpat-[a-zA-Z0-9_-]{20,}", PiiType::ApiKey),
             // Credit card numbers (16 digits with optional separators)
             (r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", PiiType::CreditCard),
             // SSN (US format)
@@ -183,6 +198,60 @@ mod tests {
     }
 
     #[test]
+    fn detects_openai_project_keys() {
+        let filter = PiiFilter::new();
+        let text = "Key: sk-proj-abc123def456ghi789jkl";
+        let matches = filter.scan(text);
+        assert!(!matches.is_empty(), "should detect OpenAI project key");
+        assert_eq!(matches[0].pattern_type, PiiType::ApiKey);
+    }
+
+    #[test]
+    fn detects_anthropic_keys() {
+        let filter = PiiFilter::new();
+        let text = "Key: sk-ant-abc123def456ghi789";
+        let matches = filter.scan(text);
+        assert!(!matches.is_empty(), "should detect Anthropic key");
+        assert_eq!(matches[0].pattern_type, PiiType::ApiKey);
+    }
+
+    #[test]
+    fn detects_groq_keys() {
+        let filter = PiiFilter::new();
+        let text = "Key: gsk_abc123def456ghi789jklmno";
+        let matches = filter.scan(text);
+        assert!(!matches.is_empty(), "should detect Groq key");
+        assert_eq!(matches[0].pattern_type, PiiType::ApiKey);
+    }
+
+    #[test]
+    fn detects_xai_keys() {
+        let filter = PiiFilter::new();
+        let text = "Key: xai-abc123def456ghi789jklmno";
+        let matches = filter.scan(text);
+        assert!(!matches.is_empty(), "should detect xAI key");
+        assert_eq!(matches[0].pattern_type, PiiType::ApiKey);
+    }
+
+    #[test]
+    fn detects_github_tokens() {
+        let filter = PiiFilter::new();
+        let text = "Token: ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+        let matches = filter.scan(text);
+        assert!(!matches.is_empty(), "should detect GitHub PAT");
+        assert_eq!(matches[0].pattern_type, PiiType::ApiKey);
+    }
+
+    #[test]
+    fn detects_gitlab_tokens() {
+        let filter = PiiFilter::new();
+        let text = "Token: glpat-abc123def456ghi789jkl";
+        let matches = filter.scan(text);
+        assert!(!matches.is_empty(), "should detect GitLab token");
+        assert_eq!(matches[0].pattern_type, PiiType::ApiKey);
+    }
+
+    #[test]
     fn detects_aws_keys() {
         let filter = PiiFilter::new();
         let text = "AWS key: AKIAIOSFODNN7EXAMPLE";
@@ -252,6 +321,30 @@ mod tests {
     }
 
     #[test]
+    fn mask_sk_proj_key_preserves_surrounding_text() {
+        let filter = PiiFilter::new();
+        let text = "The project sk-proj-test123456789abcdef was created";
+        let (masked, _) = filter.mask(text);
+
+        assert!(
+            masked.contains("The project "),
+            "should preserve text before key, got: {masked}"
+        );
+        assert!(
+            masked.contains(" was created"),
+            "should preserve text after key, got: {masked}"
+        );
+        assert!(
+            masked.contains("[MASKED:api_key]"),
+            "should mask the key, got: {masked}"
+        );
+        assert!(
+            !masked.contains("sk-proj-test123456789abcdef"),
+            "should not contain original key"
+        );
+    }
+
+    #[test]
     fn classify_public_for_clean_text() {
         let filter = PiiFilter::new();
         assert_eq!(filter.classify("Hello world"), SensitivityLevel::Public);
@@ -280,6 +373,24 @@ mod tests {
         let filter = PiiFilter::new();
         assert_eq!(
             filter.classify("password=hunter2"),
+            SensitivityLevel::Restricted
+        );
+    }
+
+    #[test]
+    fn classify_restricted_for_groq_key() {
+        let filter = PiiFilter::new();
+        assert_eq!(
+            filter.classify("Use gsk_abc123def456ghi789jklmno"),
+            SensitivityLevel::Restricted
+        );
+    }
+
+    #[test]
+    fn classify_restricted_for_xai_key() {
+        let filter = PiiFilter::new();
+        assert_eq!(
+            filter.classify("Use xai-abc123def456ghi789jklmno"),
             SensitivityLevel::Restricted
         );
     }

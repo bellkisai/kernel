@@ -62,6 +62,13 @@ pub struct MemoryEntry {
     pub content: String,
     /// PII-masked version of the content (if PII was detected).
     pub masked_content: Option<String>,
+    /// Reformulated version of the content for better embedding recall.
+    /// Structured patterns like "Preference: X for Y" score ~9% higher
+    /// on cosine similarity than natural text.
+    /// When present, this text is used for embedding instead of the original.
+    /// Echo returns the original content to the user (natural text).
+    #[serde(default)]
+    pub reformulated: Option<String>,
     /// 384-dimensional embedding vector capturing semantic meaning.
     pub embedding: Vec<f32>,
     /// Where this memory came from (e.g., "conversation", "document", "manual").
@@ -83,6 +90,7 @@ impl MemoryEntry {
             id: MemoryId::new(),
             content,
             masked_content: None,
+            reformulated: None,
             embedding,
             source,
             sensitivity: SensitivityLevel::Public,

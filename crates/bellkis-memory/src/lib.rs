@@ -13,14 +13,19 @@
 //! ## Phase 1 (KS1)
 //! Flat brute-force similarity. Phase 2 adds LSH, Bloom filters, Hebbian learning.
 
+pub mod bloom;
 pub mod embedder;
+pub mod lsh;
+pub mod persistence;
 pub mod similarity;
 pub mod pii;
+pub mod reformulator;
 pub mod store;
 pub mod echo;
 
 // Re-export the main types
 pub use echo::EchoEngine;
 pub use pii::PiiFilter;
+pub use reformulator::MemoryReformulator;
 pub use store::EchoStore;
 pub use bellkis_core::{EchoConfig, EchoResult, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel};

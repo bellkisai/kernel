@@ -52,6 +52,14 @@ pub struct EchoConfig {
     pub quantization: QuantizationMode,
     /// Embedding dimension (384 for all-MiniLM-L6-v2).
     pub embedding_dim: usize,
+    /// Whether to use LSH for sub-linear candidate retrieval.
+    /// When true, echo queries use locality-sensitive hashing to narrow
+    /// candidates before exact cosine similarity. Disable for testing/debugging.
+    pub use_lsh: bool,
+    /// Whether to use Bloom filter pre-screening before LSH.
+    /// When true, queries that definitely have no matching memories are
+    /// rejected in O(1) before any embedding similarity work.
+    pub use_bloom: bool,
 }
 
 impl Default for EchoConfig {
@@ -64,6 +72,8 @@ impl Default for EchoConfig {
             data_dir: dirs_default(),
             quantization: QuantizationMode::F32,
             embedding_dim: 384,
+            use_lsh: true,
+            use_bloom: true,
         }
     }
 }
