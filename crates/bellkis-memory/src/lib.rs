@@ -14,6 +14,7 @@
 //! Flat brute-force similarity. Phase 2 adds LSH, Bloom filters, Hebbian learning.
 
 pub mod bloom;
+pub mod consolidation;
 pub mod embedder;
 pub mod hebbian;
 pub mod lsh;
@@ -25,9 +26,10 @@ pub mod store;
 pub mod echo;
 
 // Re-export the main types
+pub use consolidation::ConsolidationResult;
 pub use echo::EchoEngine;
 pub use hebbian::HebbianGraph;
 pub use pii::PiiFilter;
 pub use reformulator::MemoryReformulator;
 pub use store::EchoStore;
-pub use bellkis_core::{EchoConfig, EchoResult, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel};
+pub use bellkis_core::{EchoConfig, EchoResult, MemoryCategory, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel};

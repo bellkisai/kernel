@@ -12,11 +12,13 @@ use bellkis_core::{
 };
 use chrono::Utc;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::instrument;
 
 use crate::bloom::TopicFilter;
+use crate::consolidation::{self, ConsolidationResult};
 use crate::embedder::Embedder;
 use crate::hebbian::HebbianGraph;
 use crate::lsh::CosineHash;
@@ -61,6 +63,8 @@ pub struct EchoEngine {
     hebbian: RwLock<HebbianGraph>,
     /// Running statistics.
     stats: Mutex<EchoStats>,
+    /// Handle to the background consolidation task (if started).
+    consolidation_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl EchoEngine {
@@ -99,6 +103,7 @@ impl EchoEngine {
             hebbian: RwLock::new(HebbianGraph::new(604_800.0, 0.01)),
             config,
             stats: Mutex::new(EchoStats::default()),
+            consolidation_handle: Mutex::new(None),
         })
     }
 
@@ -157,9 +162,11 @@ impl EchoEngine {
             embedder.embed(embed_text)?
         };
 
-        // 4. Build entry
+        // 4. Build entry with auto-categorization for adaptive decay
+        let category = self.reformulator.categorize(text);
         let mut entry = MemoryEntry::new(text.to_string(), embedding.clone(), source.to_string());
         entry.sensitivity = sensitivity;
+        entry.category = category;
         if !pii_matches.is_empty() {
             entry.masked_content = Some(masked_text);
         }
@@ -168,7 +175,8 @@ impl EchoEngine {
 
         tracing::debug!(
             reformulated = reformulated.is_some(),
-            "Memory reformulation step"
+            category = ?category,
+            "Memory reformulation + categorization step"
         );
 
         // 4. Add to store, LSH index, and Bloom filter
@@ -193,6 +201,7 @@ impl EchoEngine {
         tracing::info!(
             memory_id = %id,
             sensitivity = ?sensitivity,
+            category = ?category,
             pii_matches = pii_matches.len(),
             "Memory stored"
         );
@@ -602,7 +611,62 @@ impl EchoEngine {
             hebbian: RwLock::new(hebbian),
             config,
             stats: Mutex::new(EchoStats::default()),
+            consolidation_handle: Mutex::new(None),
         })
+    }
+
+    /// Run a consolidation pass immediately, acquiring all necessary locks.
+    ///
+    /// This is the manual trigger for maintenance. It acquires write locks on
+    /// the store, Hebbian graph, and Bloom filter, then delegates to
+    /// [`consolidation::consolidate`].
+    pub async fn consolidate_now(&self) -> ConsolidationResult {
+        let mut store = self.store.write().await;
+        let mut hebbian = self.hebbian.write().await;
+        let mut bloom = self.bloom.write().await;
+        let mut bloom_dirty = self.bloom_dirty.lock().unwrap_or_else(|e| e.into_inner());
+
+        consolidation::consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &self.config,
+        )
+    }
+
+    /// Spawn a background consolidation task that runs every `interval_secs` seconds.
+    ///
+    /// The task loops indefinitely, sleeping for the interval then running a
+    /// full consolidation pass. Results are logged via `tracing::info!`.
+    ///
+    /// The engine must be wrapped in an `Arc` for the background task to hold
+    /// a reference. Only one consolidation task can be active at a time; calling
+    /// this while a task is already running replaces the previous handle.
+    pub fn start_consolidation(self: &Arc<Self>, interval_secs: u64) {
+        let engine = Arc::clone(self);
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+                let result = engine.consolidate_now().await;
+                tracing::info!(
+                    pruned = result.hebbian_edges_pruned,
+                    merged = result.duplicates_merged,
+                    bloom = result.bloom_rebuilt,
+                    decayed = result.echo_counts_decayed,
+                    ms = result.duration_ms,
+                    "Consolidation complete"
+                );
+            }
+        });
+
+        if let Ok(mut guard) = self.consolidation_handle.lock() {
+            // Abort previous task if one is running
+            if let Some(prev) = guard.take() {
+                prev.abort();
+            }
+            *guard = Some(handle);
+        }
     }
 
     /// Get the path to the store file.

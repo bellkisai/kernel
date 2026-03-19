@@ -12,7 +12,7 @@ pub mod traits;
 
 // Re-export commonly used types at crate root
 pub use error::{BellkisError, Result};
-pub use memory::{MemoryId, MemoryEntry, EchoResult, MemoryStats, SensitivityLevel};
+pub use memory::{MemoryCategory, MemoryId, MemoryEntry, EchoResult, MemoryStats, SensitivityLevel};
 pub use config::{EchoConfig, QuantizationMode};
 pub use pii::{PiiMatch, PiiType};
 pub use traits::{Provider, ModelBackend};

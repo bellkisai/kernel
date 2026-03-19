@@ -32,6 +32,48 @@ impl fmt::Display for MemoryId {
     }
 }
 
+/// Category classification for adaptive memory decay.
+///
+/// Different types of memories should persist for different durations.
+/// Project context stays relevant for weeks; preferences last months;
+/// one-off conversations fade in days.  This is Echo Memory's
+/// differentiator over MuninnDB's uniform ACT-R decay (d=0.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MemoryCategory {
+    /// Current work, active context — half-life: 14 days.
+    ActiveProject,
+    /// Tool choices, coding style, workflow preferences — half-life: 60 days.
+    Preference,
+    /// One-time discussions, quick questions — half-life: 3 days.
+    Conversation,
+    /// Name, location, language, personal facts — half-life: 365 days.
+    Identity,
+    /// Learned information, technical knowledge — half-life: 30 days.
+    Fact,
+    /// Uncategorized memories — half-life: 7 days.
+    Default,
+}
+
+impl MemoryCategory {
+    /// Half-life in seconds for this category's decay rate.
+    pub fn half_life_secs(&self) -> f64 {
+        match self {
+            Self::ActiveProject => 14.0 * 86400.0,   // 14 days
+            Self::Preference => 60.0 * 86400.0,      // 60 days
+            Self::Conversation => 3.0 * 86400.0,     // 3 days
+            Self::Identity => 365.0 * 86400.0,       // 1 year
+            Self::Fact => 30.0 * 86400.0,            // 30 days
+            Self::Default => 7.0 * 86400.0,          // 7 days
+        }
+    }
+}
+
+impl Default for MemoryCategory {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
 /// Sensitivity classification for stored memories.
 ///
 /// Controls where a memory can be pushed during echo activation.
@@ -75,6 +117,9 @@ pub struct MemoryEntry {
     pub source: String,
     /// Sensitivity classification controlling push behavior.
     pub sensitivity: SensitivityLevel,
+    /// Category for adaptive decay — different memory types fade at different rates.
+    #[serde(default)]
+    pub category: MemoryCategory,
     /// When this memory was created.
     pub created_at: DateTime<Utc>,
     /// When this memory was last activated by an echo cycle.
@@ -94,6 +139,7 @@ impl MemoryEntry {
             embedding,
             source,
             sensitivity: SensitivityLevel::Public,
+            category: MemoryCategory::Default,
             created_at: Utc::now(),
             last_echoed: None,
             echo_count: 0,
@@ -203,5 +249,93 @@ mod tests {
         let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.content, "test");
         assert_eq!(deserialized.embedding.len(), 3);
+    }
+
+    #[test]
+    fn memory_entry_default_category() {
+        let entry = MemoryEntry::new("test".into(), vec![], "test".into());
+        assert_eq!(entry.category, MemoryCategory::Default);
+    }
+
+    // --- MemoryCategory half-life tests ---
+
+    #[test]
+    fn category_half_life_active_project() {
+        assert_eq!(MemoryCategory::ActiveProject.half_life_secs(), 14.0 * 86400.0);
+    }
+
+    #[test]
+    fn category_half_life_preference() {
+        assert_eq!(MemoryCategory::Preference.half_life_secs(), 60.0 * 86400.0);
+    }
+
+    #[test]
+    fn category_half_life_conversation() {
+        assert_eq!(MemoryCategory::Conversation.half_life_secs(), 3.0 * 86400.0);
+    }
+
+    #[test]
+    fn category_half_life_identity() {
+        assert_eq!(MemoryCategory::Identity.half_life_secs(), 365.0 * 86400.0);
+    }
+
+    #[test]
+    fn category_half_life_fact() {
+        assert_eq!(MemoryCategory::Fact.half_life_secs(), 30.0 * 86400.0);
+    }
+
+    #[test]
+    fn category_half_life_default() {
+        assert_eq!(MemoryCategory::Default.half_life_secs(), 7.0 * 86400.0);
+    }
+
+    #[test]
+    fn category_default_is_default() {
+        assert_eq!(MemoryCategory::default(), MemoryCategory::Default);
+    }
+
+    // --- MemoryCategory serialization roundtrip ---
+
+    #[test]
+    fn category_serialization_roundtrip() {
+        let categories = [
+            MemoryCategory::ActiveProject,
+            MemoryCategory::Preference,
+            MemoryCategory::Conversation,
+            MemoryCategory::Identity,
+            MemoryCategory::Fact,
+            MemoryCategory::Default,
+        ];
+        for cat in &categories {
+            let json = serde_json::to_string(cat).unwrap();
+            let deserialized: MemoryCategory = serde_json::from_str(&json).unwrap();
+            assert_eq!(*cat, deserialized, "Roundtrip failed for {cat:?}");
+        }
+    }
+
+    #[test]
+    fn category_preserved_in_memory_entry_serialization() {
+        let mut entry = MemoryEntry::new("test".into(), vec![1.0], "test".into());
+        entry.category = MemoryCategory::Identity;
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.category, MemoryCategory::Identity);
+    }
+
+    #[test]
+    fn category_defaults_on_missing_field() {
+        // Simulates deserializing a legacy MemoryEntry without the category field.
+        // The #[serde(default)] attribute should fill in MemoryCategory::Default.
+        let json = r#"{
+            "id":"00000000-0000-0000-0000-000000000000",
+            "content":"legacy","masked_content":null,"reformulated":null,
+            "embedding":[],"source":"test",
+            "sensitivity":"Public",
+            "created_at":"2025-01-01T00:00:00Z",
+            "last_echoed":null,"echo_count":0
+        }"#;
+        let entry: MemoryEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.category, MemoryCategory::Default);
     }
 }

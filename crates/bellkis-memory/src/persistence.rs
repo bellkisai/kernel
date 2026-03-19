@@ -21,7 +21,7 @@
 //! 64+N*D*4  M     Metadata: JSON-serialized Vec<MemoryMeta>
 //! ```
 
-use bellkis_core::{BellkisError, MemoryEntry, MemoryId, Result, SensitivityLevel};
+use bellkis_core::{BellkisError, MemoryCategory, MemoryEntry, MemoryId, Result, SensitivityLevel};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::io::{Seek, SeekFrom, Write};
@@ -56,6 +56,8 @@ pub struct MemoryMeta {
     pub reformulated: Option<String>,
     pub source: String,
     pub sensitivity: SensitivityLevel,
+    #[serde(default)]
+    pub category: MemoryCategory,
     pub created_at: DateTime<Utc>,
     pub last_echoed: Option<DateTime<Utc>>,
     pub echo_count: u32,
@@ -71,6 +73,7 @@ impl MemoryMeta {
             reformulated: entry.reformulated.clone(),
             source: entry.source.clone(),
             sensitivity: entry.sensitivity,
+            category: entry.category,
             created_at: entry.created_at,
             last_echoed: entry.last_echoed,
             echo_count: entry.echo_count,
@@ -87,6 +90,7 @@ impl MemoryMeta {
             embedding,
             source: self.source,
             sensitivity: self.sensitivity,
+            category: self.category,
             created_at: self.created_at,
             last_echoed: self.last_echoed,
             echo_count: self.echo_count,

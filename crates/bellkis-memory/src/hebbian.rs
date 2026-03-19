@@ -29,6 +29,14 @@ pub struct CoActivation {
 /// Edges are stored with the invariant `a < b` to avoid duplicates.
 /// An adjacency index provides O(degree) neighbor lookups for the
 /// echo boost pass.
+///
+/// **Design note (KS4):** The Hebbian graph uses a single `half_life` for ALL
+/// edges (default: 7 days).  Category-aware adaptive decay (see
+/// [`MemoryCategory`](bellkis_core::MemoryCategory)) affects *memory*
+/// persistence, not *association* persistence.  Memories decay at
+/// per-category rates; the links between them decay uniformly.  This
+/// keeps the association graph simple and avoids the complexity of
+/// per-edge decay curves.
 pub struct HebbianGraph {
     /// (memory_index_a, memory_index_b) -> co-activation record.
     /// Invariant: a < b for every key.
