@@ -1,0 +1,60 @@
+[workspace]
+members = ["crates/*", "examples/*"]
+resolver = "2"
+
+# Root package: enables workspace-level integration tests (tests/*.rs)
+[package]
+name = "bellkis-kernel-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Integration tests for the Bellkis AI-OS kernel"
+publish = false
+
+# No library — this package exists only to host integration tests
+[lib]
+path = "src/lib.rs"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/bellkisai/kernel"
+description = "The AI Operating System kernel — Echo Memory, provider routing, context assembly"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Async
+tokio = { version = "1", features = ["full"] }
+# Error handling
+thiserror = "2"
+anyhow = "1"
+# Logging
+tracing = "0.1"
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+# Echo Memory
+fastembed = "5"
+simsimd = "6"
+memmap2 = "0.9"
+rand = "0.8"
+regex = "1"
+sysinfo = "0.32"
+# Internal crates
+bellkis-core = { path = "crates/bellkis-core" }
+bellkis-memory = { path = "crates/bellkis-memory" }
+bellkis-router = { path = "crates/bellkis-router" }
+bellkis-context = { path = "crates/bellkis-context" }
+bellkis-security = { path = "crates/bellkis-security" }
+bellkis-kernel = { path = "crates/bellkis-kernel" }
+
+# Workspace-root integration tests (tests/*.rs)
+[dev-dependencies]
+bellkis-core = { path = "crates/bellkis-core" }
+bellkis-memory = { path = "crates/bellkis-memory" }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"

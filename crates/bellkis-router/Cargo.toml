@@ -1,0 +1,10 @@
+[package]
+name = "bellkis-router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Provider routing with cascade fallback and cost optimization"
+
+[dependencies]
+bellkis-core.workspace = true
+serde.workspace = true

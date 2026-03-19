@@ -1,0 +1,13 @@
+[package]
+name = "bellkis-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bellkis AI-OS kernel — facade crate re-exporting all subsystems"
+
+[dependencies]
+bellkis-core.workspace = true
+bellkis-memory.workspace = true
+bellkis-router.workspace = true
+bellkis-context.workspace = true
+bellkis-security.workspace = true

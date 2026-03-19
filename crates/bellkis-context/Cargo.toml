@@ -1,0 +1,10 @@
+[package]
+name = "bellkis-context"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Context assembler — smart prompt compilation with Echo Memory integration"
+
+[dependencies]
+bellkis-core.workspace = true
+serde.workspace = true

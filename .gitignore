@@ -1,0 +1,46 @@
+# Build artifacts
+target/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Cargo lock (library crate — don't commit)
+# Note: for applications, Cargo.lock SHOULD be committed
+# Since this is a library workspace, we exclude it
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Debug / profiling
+*.pdb
+*.dSYM/
+perf.data
+flamegraph.svg
+
+# Test artifacts
+*.profraw
+coverage/
+
+# Echo Memory data (local testing)
+.bellkis-kernel/
+
+# Model cache (fastembed downloads)
+# Committed separately or bundled in release
+.fastembed_cache/
+**/.fastembed_cache/
