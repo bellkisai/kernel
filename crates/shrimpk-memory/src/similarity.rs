@@ -104,7 +104,10 @@ mod tests {
     fn identical_vectors_have_similarity_one() {
         let a = vec![1.0, 2.0, 3.0, 4.0];
         let sim = cosine_similarity(&a, &a);
-        assert!((sim - 1.0).abs() < 1e-5, "identical vectors should have similarity ~1.0, got {sim}");
+        assert!(
+            (sim - 1.0).abs() < 1e-5,
+            "identical vectors should have similarity ~1.0, got {sim}"
+        );
     }
 
     #[test]
@@ -112,7 +115,10 @@ mod tests {
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![0.0, 1.0, 0.0];
         let sim = cosine_similarity(&a, &b);
-        assert!(sim.abs() < 1e-5, "orthogonal vectors should have similarity ~0.0, got {sim}");
+        assert!(
+            sim.abs() < 1e-5,
+            "orthogonal vectors should have similarity ~0.0, got {sim}"
+        );
     }
 
     #[test]
@@ -120,7 +126,10 @@ mod tests {
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![-1.0, -2.0, -3.0];
         let sim = cosine_similarity(&a, &b);
-        assert!((sim + 1.0).abs() < 1e-5, "opposite vectors should have similarity ~-1.0, got {sim}");
+        assert!(
+            (sim + 1.0).abs() < 1e-5,
+            "opposite vectors should have similarity ~-1.0, got {sim}"
+        );
     }
 
     #[test]
@@ -140,7 +149,10 @@ mod tests {
         let a = vec![0.0, 0.0, 0.0];
         let b = vec![1.0, 2.0, 3.0];
         let sim = cosine_similarity(&a, &b);
-        assert!(sim.abs() < 1e-5, "zero vector should give similarity 0.0, got {sim}");
+        assert!(
+            sim.abs() < 1e-5,
+            "zero vector should give similarity 0.0, got {sim}"
+        );
     }
 
     #[test]
@@ -150,11 +162,7 @@ mod tests {
         let emb_b = vec![0.0, 1.0, 0.0]; // similarity = 0.0
         let emb_c = vec![0.7, 0.7, 0.0]; // similarity ~0.707
 
-        let candidates: Vec<(usize, &[f32])> = vec![
-            (0, &emb_a),
-            (1, &emb_b),
-            (2, &emb_c),
-        ];
+        let candidates: Vec<(usize, &[f32])> = vec![(0, &emb_a), (1, &emb_b), (2, &emb_c)];
 
         let results = rank_candidates(&query, &candidates, 0.5);
 

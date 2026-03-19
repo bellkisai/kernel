@@ -319,8 +319,7 @@ impl HebbianGraph {
             activation_count: self.activation_count,
         };
 
-        let json = serde_json::to_string(&snapshot)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string(&snapshot).map_err(std::io::Error::other)?;
         std::fs::write(path, json)
     }
 
@@ -334,8 +333,8 @@ impl HebbianGraph {
         }
 
         let json = std::fs::read_to_string(path)?;
-        let snapshot: HebbianSnapshot = serde_json::from_str(&json)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let snapshot: HebbianSnapshot =
+            serde_json::from_str(&json).map_err(std::io::Error::other)?;
 
         let lambda = (2.0_f64).ln() / half_life;
         let mut adjacency: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -377,7 +376,10 @@ mod tests {
         // Second co-activation should increase weight
         graph.co_activate(1, 2, 0.3);
         let w2 = graph.get_weight(1, 2);
-        assert!(w2 > w, "Weight should increase after second co-activation: {w2} > {w}");
+        assert!(
+            w2 > w,
+            "Weight should increase after second co-activation: {w2} > {w}"
+        );
         assert_eq!(graph.len(), 1, "Should still be one edge");
     }
 
@@ -428,7 +430,10 @@ mod tests {
 
         assert!(ids.contains(&2), "Should include strongly connected node 2");
         assert!(ids.contains(&4), "Should include connected node 4");
-        assert!(!ids.contains(&3), "Should NOT include weakly connected node 3 (weight 0.005 < 0.1)");
+        assert!(
+            !ids.contains(&3),
+            "Should NOT include weakly connected node 3 (weight 0.005 < 0.1)"
+        );
     }
 
     #[test]
@@ -448,8 +453,15 @@ mod tests {
         let pruned = graph.consolidate_at(t_consolidate);
         assert_eq!(pruned, 1, "Should prune exactly the weak edge");
         assert_eq!(graph.len(), 1, "One edge should remain");
-        assert!(graph.get_weight_at(1, 2, t_consolidate) > 0.0, "Strong edge should survive");
-        assert_eq!(graph.get_weight_at(3, 4, t_consolidate), 0.0, "Pruned edge should be gone");
+        assert!(
+            graph.get_weight_at(1, 2, t_consolidate) > 0.0,
+            "Strong edge should survive"
+        );
+        assert_eq!(
+            graph.get_weight_at(3, 4, t_consolidate),
+            0.0,
+            "Pruned edge should be gone"
+        );
     }
 
     #[test]
@@ -477,7 +489,10 @@ mod tests {
         graph.co_activate(20, 30, 1.0);
 
         // Node 10 should have neighbors 20 and 30
-        let adj_10 = graph.adjacency.get(&10).expect("Node 10 should have adjacency");
+        let adj_10 = graph
+            .adjacency
+            .get(&10)
+            .expect("Node 10 should have adjacency");
         assert!(adj_10.contains(&20));
         assert!(adj_10.contains(&30));
 
@@ -485,12 +500,21 @@ mod tests {
         graph.remove_node(20);
 
         // Node 10 should only have neighbor 30 now
-        let adj_10 = graph.adjacency.get(&10).expect("Node 10 should still have adjacency");
-        assert!(!adj_10.contains(&20), "20 should be removed from 10's neighbors");
+        let adj_10 = graph
+            .adjacency
+            .get(&10)
+            .expect("Node 10 should still have adjacency");
+        assert!(
+            !adj_10.contains(&20),
+            "20 should be removed from 10's neighbors"
+        );
         assert!(adj_10.contains(&30), "30 should remain in 10's neighbors");
 
         // Node 20 should be completely gone from adjacency
-        assert!(graph.adjacency.get(&20).is_none(), "Node 20 should have no adjacency entry");
+        assert!(
+            graph.adjacency.get(&20).is_none(),
+            "Node 20 should have no adjacency entry"
+        );
     }
 
     #[test]
@@ -507,9 +531,15 @@ mod tests {
         graph.consolidate_at(t_consolidate);
 
         // After consolidation, node 1 should only have neighbor 2
-        let adj_1 = graph.adjacency.get(&1).expect("Node 1 should have adjacency");
+        let adj_1 = graph
+            .adjacency
+            .get(&1)
+            .expect("Node 1 should have adjacency");
         assert!(adj_1.contains(&2), "Node 2 should be neighbor of 1");
-        assert!(!adj_1.contains(&3), "Node 3 should be pruned from adjacency");
+        assert!(
+            !adj_1.contains(&3),
+            "Node 3 should be pruned from adjacency"
+        );
 
         // Node 3 should have no adjacency entry (its only edge was pruned)
         assert!(
@@ -531,8 +561,7 @@ mod tests {
 
         graph.save(&path).expect("Should save");
 
-        let loaded = HebbianGraph::load(&path, HALF_LIFE, PRUNE_THRESHOLD)
-            .expect("Should load");
+        let loaded = HebbianGraph::load(&path, HALF_LIFE, PRUNE_THRESHOLD).expect("Should load");
 
         assert_eq!(loaded.len(), original_len, "Edge count should match");
         assert_eq!(
@@ -548,9 +577,15 @@ mod tests {
         assert!(w34 > 0.3, "Weight (3,4) should be close to 0.6, got {w34}");
 
         // Verify adjacency was rebuilt
-        let adj_1 = loaded.adjacency.get(&1).expect("Node 1 should have adjacency");
+        let adj_1 = loaded
+            .adjacency
+            .get(&1)
+            .expect("Node 1 should have adjacency");
         assert!(adj_1.contains(&2));
-        let adj_3 = loaded.adjacency.get(&3).expect("Node 3 should have adjacency");
+        let adj_3 = loaded
+            .adjacency
+            .get(&3)
+            .expect("Node 3 should have adjacency");
         assert!(adj_3.contains(&4));
     }
 

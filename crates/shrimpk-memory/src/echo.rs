@@ -6,11 +6,11 @@
 //! Phase 1: brute-force cosine similarity against all stored embeddings.
 //! Phase 2: LSH for sub-linear candidate retrieval, with brute-force fallback.
 
-use shrimpk_core::{
-    ShrimPKError, EchoConfig, EchoResult, MemoryEntry, MemoryId, MemoryStats, Result,
-    SensitivityLevel,
-};
 use chrono::Utc;
+use shrimpk_core::{
+    EchoConfig, EchoResult, MemoryEntry, MemoryId, MemoryStats, Result, SensitivityLevel,
+    ShrimPKError,
+};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -136,6 +136,27 @@ impl EchoEngine {
             }
         }
 
+        // Check disk limit
+        if self.config.max_disk_bytes > 0 {
+            let usage = shrimpk_core::config::disk_usage(&self.config.data_dir).unwrap_or(0);
+            if usage >= self.config.max_disk_bytes {
+                return Err(ShrimPKError::DiskLimit(format!(
+                    "Disk limit reached ({} / {} bytes). Free space or increase max_disk_bytes.",
+                    usage, self.config.max_disk_bytes
+                )));
+            }
+            // Warn at 80%
+            let threshold = self.config.max_disk_bytes * 80 / 100;
+            if usage >= threshold {
+                tracing::warn!(
+                    usage_bytes = usage,
+                    limit_bytes = self.config.max_disk_bytes,
+                    "Disk usage at {}% of limit",
+                    usage * 100 / self.config.max_disk_bytes
+                );
+            }
+        }
+
         // 1. PII filtering
         let (masked_text, pii_matches) = self.pii_filter.mask(text);
         let sensitivity = self.pii_filter.classify(text);
@@ -149,7 +170,11 @@ impl EchoEngine {
 
         // 2. Try reformulation for better echo recall (~9% higher similarity)
         //    Reformulate the PII-masked text (or original if no PII found)
-        let text_for_reformulation = if !pii_matches.is_empty() { &masked_text } else { text };
+        let text_for_reformulation = if !pii_matches.is_empty() {
+            &masked_text
+        } else {
+            text
+        };
         let reformulated = self.reformulator.reformulate(text_for_reformulation);
 
         // 3. Generate embedding from the BEST text for recall:
@@ -157,7 +182,9 @@ impl EchoEngine {
         //    - Otherwise original text (semantic meaning preserved)
         let embed_text = reformulated.as_deref().unwrap_or(text);
         let embedding = {
-            let mut embedder = self.embedder.lock()
+            let mut embedder = self
+                .embedder
+                .lock()
                 .map_err(|e| ShrimPKError::Embedding(format!("Embedder lock poisoned: {e}")))?;
             embedder.embed(embed_text)?
         };
@@ -185,10 +212,10 @@ impl EchoEngine {
             let index = store.add(entry);
 
             // Insert into LSH index for sub-linear retrieval
-            if self.config.use_lsh {
-                if let Ok(mut lsh) = self.lsh.lock() {
-                    lsh.insert(index as u32, &embedding);
-                }
+            if self.config.use_lsh
+                && let Ok(mut lsh) = self.lsh.lock()
+            {
+                lsh.insert(index as u32, &embedding);
             }
 
             // Insert into Bloom filter for topic pre-screening
@@ -235,7 +262,9 @@ impl EchoEngine {
 
         // 1. Embed the query
         let query_embedding = {
-            let mut embedder = self.embedder.lock()
+            let mut embedder = self
+                .embedder
+                .lock()
                 .map_err(|e| ShrimPKError::Embedding(format!("Embedder lock poisoned: {e}")))?;
             embedder.embed(query)?
         };
@@ -243,7 +272,7 @@ impl EchoEngine {
         // 2. Bloom filter pre-check — skip everything if no fingerprints match
         if self.config.use_bloom {
             let bloom = self.bloom.read().await;
-            if bloom.len() > 0 && !bloom.might_match(query) {
+            if !bloom.is_empty() && !bloom.might_match(query) {
                 tracing::debug!("Bloom filter rejected query — no matching fingerprints");
                 self.record_latency(start.elapsed().as_micros() as u64);
                 return Ok(Vec::new());
@@ -265,7 +294,9 @@ impl EchoEngine {
 
         let candidates: Vec<(usize, &[f32])> = if self.config.use_lsh {
             // Query LSH for candidate indices
-            let lsh_candidates = self.lsh.lock()
+            let lsh_candidates = self
+                .lsh
+                .lock()
                 .map_err(|e| ShrimPKError::Memory(format!("LSH lock poisoned: {e}")))?
                 .query(&query_embedding);
 
@@ -378,9 +409,7 @@ impl EchoEngine {
         // Release read lock before acquiring write lock
         let matched_ids: Vec<(MemoryId, usize)> = top
             .iter()
-            .filter_map(|&(idx, _)| {
-                store.entry_at(idx).map(|e| (e.id.clone(), idx))
-            })
+            .filter_map(|&(idx, _)| store.entry_at(idx).map(|e| (e.id.clone(), idx)))
             .collect();
         drop(store);
 
@@ -430,39 +459,36 @@ impl EchoEngine {
                 }
 
                 // Update LSH index to reflect the swap-remove
-                if self.config.use_lsh {
-                    if let Ok(mut lsh) = self.lsh.lock() {
-                        if let Some(removed_idx) = removed_index {
-                            // Remove the deleted entry from LSH
-                            lsh.remove(removed_idx as u32);
+                if self.config.use_lsh
+                    && let Ok(mut lsh) = self.lsh.lock()
+                    && let Some(removed_idx) = removed_index
+                {
+                    // Remove the deleted entry from LSH
+                    lsh.remove(removed_idx as u32);
 
-                            // If swap-remove moved the last entry to the removed position,
-                            // update its LSH entry: remove old index, re-insert at new index
-                            let last_index = len_before - 1;
-                            if removed_idx != last_index {
-                                lsh.remove(last_index as u32);
-                                if let Some(embedding) = store.all_embeddings().get(removed_idx) {
-                                    lsh.insert(removed_idx as u32, embedding);
-                                }
-                            }
+                    // If swap-remove moved the last entry to the removed position,
+                    // update its LSH entry: remove old index, re-insert at new index
+                    let last_index = len_before - 1;
+                    if removed_idx != last_index {
+                        lsh.remove(last_index as u32);
+                        if let Some(embedding) = store.all_embeddings().get(removed_idx) {
+                            lsh.insert(removed_idx as u32, embedding);
                         }
                     }
                 }
 
                 // Mark Bloom filter as dirty — cannot remove individual items,
                 // rebuild will happen on next persist()
-                if self.config.use_bloom {
-                    if let Ok(mut dirty) = self.bloom_dirty.lock() {
-                        *dirty = true;
-                    }
+                if self.config.use_bloom
+                    && let Ok(mut dirty) = self.bloom_dirty.lock()
+                {
+                    *dirty = true;
                 }
 
                 tracing::info!(memory_id = %id, "Memory forgotten");
                 Ok(())
             }
-            None => Err(ShrimPKError::Memory(format!(
-                "Memory not found: {id}"
-            ))),
+            None => Err(ShrimPKError::Memory(format!("Memory not found: {id}"))),
         }
     }
 
@@ -483,6 +509,8 @@ impl EchoEngine {
         let bytes_per_entry = (self.config.embedding_dim * 4 + 300) as u64;
         let ram_usage = total as u64 * bytes_per_entry;
 
+        let disk_usage = shrimpk_core::config::disk_usage(&self.config.data_dir).unwrap_or(0);
+
         MemoryStats {
             total_memories: total,
             index_size_bytes: (total * self.config.embedding_dim * 4) as u64,
@@ -490,6 +518,8 @@ impl EchoEngine {
             max_capacity: self.config.max_memories,
             avg_echo_latency_ms: avg_latency_ms,
             total_echo_queries: stats.query_count,
+            disk_usage_bytes: disk_usage,
+            max_disk_bytes: self.config.max_disk_bytes,
         }
     }
 
@@ -500,13 +530,12 @@ impl EchoEngine {
     pub async fn persist(&self) -> Result<()> {
         // Rebuild Bloom filter if dirty (deletions occurred since last rebuild)
         if self.config.use_bloom {
-            let needs_rebuild = self.bloom_dirty.lock()
-                .map(|d| *d)
-                .unwrap_or(false);
+            let needs_rebuild = self.bloom_dirty.lock().map(|d| *d).unwrap_or(false);
 
             if needs_rebuild {
                 let store = self.store.read().await;
-                let texts: Vec<String> = store.all_entries()
+                let texts: Vec<String> = store
+                    .all_entries()
                     .iter()
                     .map(|e| e.content.clone())
                     .collect();
@@ -535,9 +564,9 @@ impl EchoEngine {
         // Persist Hebbian graph
         let hebbian_path = self.config.data_dir.join("hebbian.json");
         let hebbian = self.hebbian.read().await;
-        hebbian.save(&hebbian_path).map_err(|e| {
-            ShrimPKError::Persistence(format!("Failed to save Hebbian graph: {e}"))
-        })?;
+        hebbian
+            .save(&hebbian_path)
+            .map_err(|e| ShrimPKError::Persistence(format!("Failed to save Hebbian graph: {e}")))?;
 
         tracing::info!(
             hebbian_edges = hebbian.len(),
@@ -583,11 +612,10 @@ impl EchoEngine {
 
         // Load Hebbian graph from disk
         let hebbian_path = config.data_dir.join("hebbian.json");
-        let hebbian = HebbianGraph::load(&hebbian_path, 604_800.0, 0.01)
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to load Hebbian graph, starting fresh");
-                HebbianGraph::new(604_800.0, 0.01)
-            });
+        let hebbian = HebbianGraph::load(&hebbian_path, 604_800.0, 0.01).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "Failed to load Hebbian graph, starting fresh");
+            HebbianGraph::new(604_800.0, 0.01)
+        });
 
         tracing::info!(
             entries = loaded_store.len(),
@@ -716,7 +744,10 @@ mod tests {
             .expect("Should store");
 
         // Echo with a related query
-        let results = engine.echo("systems programming", 5).await.expect("Should echo");
+        let results = engine
+            .echo("systems programming", 5)
+            .await
+            .expect("Should echo");
         assert!(!results.is_empty(), "Should find related memory");
         assert_eq!(results[0].memory_id, id);
     }
@@ -828,7 +859,10 @@ mod tests {
 
         let engine = EchoEngine::new(config).expect("Should init");
         engine.store("first", "test").await.expect("Should store 1");
-        engine.store("second", "test").await.expect("Should store 2");
+        engine
+            .store("second", "test")
+            .await
+            .expect("Should store 2");
 
         let result = engine.store("third", "test").await;
         assert!(result.is_err(), "Should reject when at capacity");

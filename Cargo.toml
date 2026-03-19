@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "examples/*"]
+members = ["crates/*", "examples/*", "cli"]
 resolver = "2"
 
 # Root package: enables workspace-level integration tests (tests/*.rs)
@@ -20,12 +20,17 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/bellkisai/kernel"
+homepage = "https://github.com/bellkisai/kernel"
 description = "The AI Operating System kernel — Echo Memory, provider routing, context assembly"
+readme = "README.md"
+keywords = ["ai", "memory", "embedding", "llm", "kernel"]
+categories = ["science", "algorithms"]
 
 [workspace.dependencies]
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 # Async
 tokio = { version = "1", features = ["full"] }
 # Error handling
@@ -47,13 +52,14 @@ rand = "0.8"
 rand_distr = "0.4"
 regex = "1"
 sysinfo = "0.32"
-# Internal crates
-shrimpk-core = { path = "crates/shrimpk-core" }
-shrimpk-memory = { path = "crates/shrimpk-memory" }
-shrimpk-router = { path = "crates/shrimpk-router" }
-shrimpk-context = { path = "crates/shrimpk-context" }
-shrimpk-security = { path = "crates/shrimpk-security" }
-shrimpk-kernel = { path = "crates/shrimpk-kernel" }
+dirs = "6"
+# Internal crates (version required for crates.io publish)
+shrimpk-core = { version = "0.1.0", path = "crates/shrimpk-core" }
+shrimpk-memory = { version = "0.1.0", path = "crates/shrimpk-memory" }
+shrimpk-router = { version = "0.1.0", path = "crates/shrimpk-router" }
+shrimpk-context = { version = "0.1.0", path = "crates/shrimpk-context" }
+shrimpk-security = { version = "0.1.0", path = "crates/shrimpk-security" }
+shrimpk-kernel = { version = "0.1.0", path = "crates/shrimpk-kernel" }
 
 # Workspace-root integration tests (tests/*.rs)
 [dev-dependencies]

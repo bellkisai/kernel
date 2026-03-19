@@ -70,15 +70,16 @@ impl CostTracker {
         output_tokens: u64,
         cost: f64,
     ) {
-        let entry = self.usage.entry(provider.clone()).or_insert_with(|| {
-            ProviderUsage {
+        let entry = self
+            .usage
+            .entry(provider.clone())
+            .or_insert_with(|| ProviderUsage {
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cost_usd: 0.0,
                 request_count: 0,
                 last_used: Utc::now(),
-            }
-        });
+            });
 
         entry.total_input_tokens += input_tokens;
         entry.total_output_tokens += output_tokens;
@@ -102,30 +103,30 @@ impl CostTracker {
 
     /// Check if spending is within both daily and monthly budgets.
     pub fn is_within_budget(&self) -> bool {
-        if let Some(daily) = self.daily_budget {
-            if self.daily_total >= daily {
-                return false;
-            }
+        if let Some(daily) = self.daily_budget
+            && self.daily_total >= daily
+        {
+            return false;
         }
-        if let Some(monthly) = self.monthly_budget {
-            if self.monthly_total >= monthly {
-                return false;
-            }
+        if let Some(monthly) = self.monthly_budget
+            && self.monthly_total >= monthly
+        {
+            return false;
         }
         true
     }
 
     /// Check if a proposed cost would stay within budget.
     pub fn would_be_within_budget(&self, additional_cost: f64) -> bool {
-        if let Some(daily) = self.daily_budget {
-            if self.daily_total + additional_cost > daily {
-                return false;
-            }
+        if let Some(daily) = self.daily_budget
+            && self.daily_total + additional_cost > daily
+        {
+            return false;
         }
-        if let Some(monthly) = self.monthly_budget {
-            if self.monthly_total + additional_cost > monthly {
-                return false;
-            }
+        if let Some(monthly) = self.monthly_budget
+            && self.monthly_total + additional_cost > monthly
+        {
+            return false;
         }
         true
     }

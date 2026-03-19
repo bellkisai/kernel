@@ -72,9 +72,7 @@ impl CircuitBreaker {
             CircuitState::Open => {
                 // Check if enough time has passed to attempt recovery.
                 if let Some(last) = self.last_failure {
-                    let elapsed = Utc::now()
-                        .signed_duration_since(last)
-                        .num_seconds();
+                    let elapsed = Utc::now().signed_duration_since(last).num_seconds();
                     if elapsed >= self.recovery_timeout_secs as i64 {
                         self.state = CircuitState::HalfOpen;
                         return true;

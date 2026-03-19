@@ -186,7 +186,12 @@ async fn ingest_corpus(engine: &EchoEngine, corpus: &[String]) -> Duration {
         if (i + 1) % 1000 == 0 {
             let elapsed = start.elapsed();
             let rate = (i + 1) as f64 / elapsed.as_secs_f64();
-            eprintln!("  Ingested {}/{} ({:.0} entries/sec)", i + 1, corpus.len(), rate);
+            eprintln!(
+                "  Ingested {}/{} ({:.0} entries/sec)",
+                i + 1,
+                corpus.len(),
+                rate
+            );
         }
     }
     start.elapsed()
@@ -257,7 +262,8 @@ async fn scale_echo_1k() {
     let corpus = generate_corpus(1_000);
     eprintln!("\n>>> scale_echo_1k: Ingesting 1,000 memories...");
     let ingest_time = ingest_corpus(&engine, &corpus).await;
-    eprintln!("  Ingest complete: {:.2}s ({:.0} entries/sec)",
+    eprintln!(
+        "  Ingest complete: {:.2}s ({:.0} entries/sec)",
         ingest_time.as_secs_f64(),
         1000.0 / ingest_time.as_secs_f64()
     );
@@ -300,7 +306,8 @@ async fn scale_echo_10k() {
     let corpus = generate_corpus(10_000);
     eprintln!("\n>>> scale_echo_10k: Ingesting 10,000 memories (LSH enabled)...");
     let ingest_time = ingest_corpus(&engine_lsh, &corpus).await;
-    eprintln!("  Ingest complete: {:.2}s ({:.0} entries/sec)",
+    eprintln!(
+        "  Ingest complete: {:.2}s ({:.0} entries/sec)",
         ingest_time.as_secs_f64(),
         10_000.0 / ingest_time.as_secs_f64()
     );
@@ -319,7 +326,8 @@ async fn scale_echo_10k() {
 
     eprintln!("  Ingesting 10,000 memories (brute-force)...");
     let ingest_time_bf = ingest_corpus(&engine_bf, &corpus).await;
-    eprintln!("  Ingest complete: {:.2}s ({:.0} entries/sec)",
+    eprintln!(
+        "  Ingest complete: {:.2}s ({:.0} entries/sec)",
         ingest_time_bf.as_secs_f64(),
         10_000.0 / ingest_time_bf.as_secs_f64()
     );
@@ -341,15 +349,25 @@ async fn scale_echo_10k() {
 
     eprintln!();
     eprintln!("=== 10K Comparison: LSH vs Brute-Force ===");
-    eprintln!("  P50: LSH={:.2}ms  BF={:.2}ms  speedup={:.2}x",
+    eprintln!(
+        "  P50: LSH={:.2}ms  BF={:.2}ms  speedup={:.2}x",
         p50_lsh as f64 / 1000.0,
         p50_bf as f64 / 1000.0,
-        if p50_lsh > 0 { p50_bf as f64 / p50_lsh as f64 } else { f64::NAN }
+        if p50_lsh > 0 {
+            p50_bf as f64 / p50_lsh as f64
+        } else {
+            f64::NAN
+        }
     );
-    eprintln!("  P95: LSH={:.2}ms  BF={:.2}ms  speedup={:.2}x",
+    eprintln!(
+        "  P95: LSH={:.2}ms  BF={:.2}ms  speedup={:.2}x",
         p95_lsh as f64 / 1000.0,
         p95_bf as f64 / 1000.0,
-        if p95_lsh > 0 { p95_bf as f64 / p95_lsh as f64 } else { f64::NAN }
+        if p95_lsh > 0 {
+            p95_bf as f64 / p95_lsh as f64
+        } else {
+            f64::NAN
+        }
     );
 
     // Assert P50 < 200ms with LSH
@@ -376,7 +394,8 @@ async fn scale_echo_100k() {
     let corpus = generate_corpus(100_000);
     eprintln!("\n>>> scale_echo_100k: Ingesting 100,000 memories...");
     let ingest_time = ingest_corpus(&engine, &corpus).await;
-    eprintln!("  Ingest complete: {:.2}s ({:.0} entries/sec)",
+    eprintln!(
+        "  Ingest complete: {:.2}s ({:.0} entries/sec)",
         ingest_time.as_secs_f64(),
         100_000.0 / ingest_time.as_secs_f64()
     );
@@ -394,8 +413,14 @@ async fn scale_echo_100k() {
     eprintln!();
     eprintln!("=== 100K Memory Footprint ===");
     eprintln!("  Total memories:   {}", stats.total_memories);
-    eprintln!("  Index size:       {:.2} MB", stats.index_size_bytes as f64 / 1_048_576.0);
-    eprintln!("  RAM usage (est.): {:.2} MB", stats.ram_usage_bytes as f64 / 1_048_576.0);
+    eprintln!(
+        "  Index size:       {:.2} MB",
+        stats.index_size_bytes as f64 / 1_048_576.0
+    );
+    eprintln!(
+        "  RAM usage (est.): {:.2} MB",
+        stats.ram_usage_bytes as f64 / 1_048_576.0
+    );
     eprintln!("  Max capacity:     {}", stats.max_capacity);
 
     // Assert P50 < 500ms
@@ -420,8 +445,14 @@ async fn scale_echo_100k() {
 async fn scale_persistence_benchmark() {
     eprintln!("\n>>> scale_persistence_benchmark");
     eprintln!();
-    eprintln!("{:<8} | {:<12} | {:<12} | {:<12} | {:<8}", "Scale", "Save Time", "Load Time", "File Size", "Verify");
-    eprintln!("{:-<8}-+-{:-<12}-+-{:-<12}-+-{:-<12}-+-{:-<8}", "", "", "", "", "");
+    eprintln!(
+        "{:<8} | {:<12} | {:<12} | {:<12} | {:<8}",
+        "Scale", "Save Time", "Load Time", "File Size", "Verify"
+    );
+    eprintln!(
+        "{:-<8}-+-{:-<12}-+-{:-<12}-+-{:-<12}-+-{:-<8}",
+        "", "", "", "", ""
+    );
 
     for &n in &[1_000usize, 10_000, 100_000] {
         let dir = tempdir().expect("temp dir");
@@ -442,9 +473,7 @@ async fn scale_persistence_benchmark() {
 
         // Measure file size
         let store_path = dir.path().join("echo_store.shrm");
-        let file_size = std::fs::metadata(&store_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = std::fs::metadata(&store_path).map(|m| m.len()).unwrap_or(0);
 
         // Load from binary
         let load_start = Instant::now();
@@ -471,7 +500,11 @@ async fn scale_persistence_benchmark() {
                 .zip(loaded_results.iter())
                 .all(|(a, b)| a.memory_id == b.memory_id);
 
-        let verified = if count_match && results_match { "OK" } else { "FAIL" };
+        let verified = if count_match && results_match {
+            "OK"
+        } else {
+            "FAIL"
+        };
 
         let size_str = if file_size > 1_073_741_824 {
             format!("{:.2} GB", file_size as f64 / 1_073_741_824.0)
@@ -488,7 +521,10 @@ async fn scale_persistence_benchmark() {
             verified
         );
 
-        assert!(count_match, "Count mismatch at {n}: orig={original_count}, loaded={loaded_count}");
+        assert!(
+            count_match,
+            "Count mismatch at {n}: orig={original_count}, loaded={loaded_count}"
+        );
         assert!(results_match, "Echo results mismatch at {n}");
     }
 
@@ -562,16 +598,27 @@ async fn scale_lsh_vs_bruteforce() {
 
         let p50_lsh = percentile(&sorted_lsh, 50.0);
         let p50_bf = percentile(&sorted_bf, 50.0);
-        let speedup = if p50_lsh > 0 { p50_bf as f64 / p50_lsh as f64 } else { f64::NAN };
+        let speedup = if p50_lsh > 0 {
+            p50_bf as f64 / p50_lsh as f64
+        } else {
+            f64::NAN
+        };
 
         eprintln!();
         eprintln!("=== {n} — LSH vs Brute-Force Summary ===");
-        eprintln!("  P50 speedup:   {speedup:.2}x (LSH={:.2}ms, BF={:.2}ms)",
+        eprintln!(
+            "  P50 speedup:   {speedup:.2}x (LSH={:.2}ms, BF={:.2}ms)",
             p50_lsh as f64 / 1000.0,
             p50_bf as f64 / 1000.0
         );
-        eprintln!("  Avg recall:    {avg_recall:.2} ({:.0}%)", avg_recall * 100.0);
-        eprintln!("  Min recall:    {min_recall:.2} ({:.0}%)", min_recall * 100.0);
+        eprintln!(
+            "  Avg recall:    {avg_recall:.2} ({:.0}%)",
+            avg_recall * 100.0
+        );
+        eprintln!(
+            "  Min recall:    {min_recall:.2} ({:.0}%)",
+            min_recall * 100.0
+        );
     }
 
     eprintln!("\n  PASS: LSH vs brute-force comparison complete");
@@ -649,19 +696,32 @@ async fn scale_memory_footprint() {
         if n >= 100_000 {
             eprintln!();
             eprintln!("  === 100K Detailed Memory Breakdown ===");
-            eprintln!("  Embeddings array:  {:.2} MB ({} entries x 384 x 4B)",
-                embedding_array_bytes as f64 / 1_048_576.0, stats.total_memories);
-            eprintln!("  LSH hyperplanes:   {:.2} MB (16 tables x 10 planes x 384 dims)",
-                lsh_hyperplane_bytes as f64 / 1_048_576.0);
-            eprintln!("  LSH reverse index: {:.2} MB (est.)",
-                lsh_reverse_index_est as f64 / 1_048_576.0);
-            eprintln!("  LSH buckets:       {:.2} MB (est.)",
-                lsh_bucket_est as f64 / 1_048_576.0);
-            eprintln!("  Entry metadata:    {:.2} MB (est.)",
-                metadata_est as f64 / 1_048_576.0);
+            eprintln!(
+                "  Embeddings array:  {:.2} MB ({} entries x 384 x 4B)",
+                embedding_array_bytes as f64 / 1_048_576.0,
+                stats.total_memories
+            );
+            eprintln!(
+                "  LSH hyperplanes:   {:.2} MB (16 tables x 10 planes x 384 dims)",
+                lsh_hyperplane_bytes as f64 / 1_048_576.0
+            );
+            eprintln!(
+                "  LSH reverse index: {:.2} MB (est.)",
+                lsh_reverse_index_est as f64 / 1_048_576.0
+            );
+            eprintln!(
+                "  LSH buckets:       {:.2} MB (est.)",
+                lsh_bucket_est as f64 / 1_048_576.0
+            );
+            eprintln!(
+                "  Entry metadata:    {:.2} MB (est.)",
+                metadata_est as f64 / 1_048_576.0
+            );
             eprintln!("  --------------------------------");
-            eprintln!("  Total estimated:   {:.2} MB",
-                total_est as f64 / 1_048_576.0);
+            eprintln!(
+                "  Total estimated:   {:.2} MB",
+                total_est as f64 / 1_048_576.0
+            );
         }
     }
 

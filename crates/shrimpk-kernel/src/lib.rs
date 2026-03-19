@@ -8,8 +8,8 @@
 //! use shrimpk_kernel::*; // Gets everything
 //! ```
 
+pub use shrimpk_context;
 pub use shrimpk_core;
 pub use shrimpk_memory;
 pub use shrimpk_router;
-pub use shrimpk_context;
 pub use shrimpk_security;

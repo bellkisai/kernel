@@ -4,15 +4,20 @@
 //! This crate defines the contract layer — shared types used across all kernel crates.
 //! It has zero heavy dependencies (no ML, no async runtime, no I/O).
 
+pub mod config;
 pub mod error;
 pub mod memory;
-pub mod config;
 pub mod pii;
 pub mod traits;
 
 // Re-export commonly used types at crate root
-pub use error::{ShrimPKError, Result};
-pub use memory::{MemoryCategory, MemoryId, MemoryEntry, EchoResult, MemoryStats, SensitivityLevel};
-pub use config::{EchoConfig, QuantizationMode};
+pub use config::{
+    EchoConfig, FileConfig, QuantizationMode, config_dir, config_path, disk_usage,
+    load_config_file, resolve_config, save_config_file,
+};
+pub use error::{Result, ShrimPKError};
+pub use memory::{
+    EchoResult, MemoryCategory, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel,
+};
 pub use pii::{PiiMatch, PiiType};
-pub use traits::{Provider, ModelBackend};
+pub use traits::{ModelBackend, Provider};

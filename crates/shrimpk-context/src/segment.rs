@@ -21,15 +21,9 @@ pub enum ContextSegment {
         source: String,
     },
     /// A RAG document chunk — retrieved from document search.
-    RagDocument {
-        content: String,
-        source: String,
-    },
+    RagDocument { content: String, source: String },
     /// A conversation message — recent chat history.
-    ConversationMessage {
-        role: String,
-        content: String,
-    },
+    ConversationMessage { role: String, content: String },
     /// The current user query — always included, never truncated.
     UserQuery(String),
 }
@@ -42,13 +36,15 @@ impl ContextSegment {
     pub fn token_estimate(&self) -> usize {
         let chars = match self {
             Self::SystemPrompt(s) => s.len(),
-            Self::EchoMemory { content, source, .. } => content.len() + source.len() + 20,
+            Self::EchoMemory {
+                content, source, ..
+            } => content.len() + source.len() + 20,
             Self::RagDocument { content, source } => content.len() + source.len() + 10,
             Self::ConversationMessage { role, content } => role.len() + content.len() + 5,
             Self::UserQuery(s) => s.len(),
         };
         // Ceiling division: round up to avoid underestimation
-        (chars + 3) / 4
+        chars.div_ceil(4)
     }
 
     /// Priority value for assembly ordering.

@@ -55,6 +55,7 @@ const ECHO_DECAY_DAYS: i64 = 30;
 /// * `bloom` - The Bloom filter for topic pre-screening (rebuilt if dirty)
 /// * `bloom_dirty` - Flag indicating the Bloom filter needs a rebuild
 /// * `_config` - Engine configuration (reserved for future threshold tuning)
+#[allow(clippy::field_reassign_with_default)]
 pub fn consolidate(
     store: &mut EchoStore,
     hebbian: &mut HebbianGraph,
@@ -114,9 +115,7 @@ fn merge_near_duplicates(store: &mut EchoStore) -> usize {
 
     // Collect (id, echo_count) for each entry by index
     let entry_info: Vec<_> = (0..n)
-        .filter_map(|i| {
-            store.entry_at(i).map(|e| (e.id.clone(), e.echo_count))
-        })
+        .filter_map(|i| store.entry_at(i).map(|e| (e.id.clone(), e.echo_count)))
         .collect();
 
     // Find pairs to merge. We collect the ID of the "loser" (fewer echoes).
@@ -172,7 +171,7 @@ fn decay_echo_counts(store: &mut EchoStore) -> usize {
 
     let len = store.len();
     for i in 0..len {
-        let should_decay = store.entry_at(i).map_or(false, |entry| {
+        let should_decay = store.entry_at(i).is_some_and(|entry| {
             if entry.echo_count == 0 {
                 return false;
             }
@@ -181,11 +180,9 @@ fn decay_echo_counts(store: &mut EchoStore) -> usize {
             reference_time < cutoff
         });
 
-        if should_decay {
-            if let Some(entry) = store.entry_at_mut(i) {
-                entry.echo_count = entry.echo_count.saturating_sub(1);
-                decayed += 1;
-            }
+        if should_decay && let Some(entry) = store.entry_at_mut(i) {
+            entry.echo_count = entry.echo_count.saturating_sub(1);
+            decayed += 1;
         }
     }
 
@@ -222,7 +219,13 @@ mod tests {
         let mut bloom = TopicFilter::new(1000, 0.01);
         let mut bloom_dirty = false;
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert_eq!(result.hebbian_edges_pruned, 0);
         assert!(!result.bloom_rebuilt);
@@ -250,7 +253,13 @@ mod tests {
 
         assert_eq!(hebbian.len(), 2);
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert_eq!(result.hebbian_edges_pruned, 1, "Should prune the weak edge");
         assert_eq!(hebbian.len(), 1, "Only the strong edge should remain");
@@ -274,11 +283,21 @@ mod tests {
             vec![0.0, 1.0, 0.0],
         ));
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert!(result.bloom_rebuilt, "Bloom should have been rebuilt");
         assert!(!bloom_dirty, "bloom_dirty flag should be cleared");
-        assert_eq!(bloom.len(), 2, "Bloom should contain 2 entries after rebuild");
+        assert_eq!(
+            bloom.len(),
+            2,
+            "Bloom should contain 2 entries after rebuild"
+        );
     }
 
     #[test]
@@ -289,9 +308,18 @@ mod tests {
         let mut bloom = TopicFilter::new(1000, 0.01);
         let mut bloom_dirty = false; // clean
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
-        assert!(!result.bloom_rebuilt, "Bloom should NOT have been rebuilt when clean");
+        assert!(
+            !result.bloom_rebuilt,
+            "Bloom should NOT have been rebuilt when clean"
+        );
     }
 
     #[test]
@@ -329,7 +357,13 @@ mod tests {
 
         assert_eq!(store.len(), 3);
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert_eq!(result.duplicates_merged, 1, "Should merge exactly one pair");
         assert_eq!(store.len(), 2, "Two memories should remain");
@@ -372,7 +406,13 @@ mod tests {
         let zero_id = zero_entry.id.clone();
         store.add(zero_entry);
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert_eq!(
             result.echo_counts_decayed, 1,
@@ -381,11 +421,17 @@ mod tests {
 
         // The old memory should have echo_count reduced by 1
         let old = store.get(&id).expect("Old memory should still exist");
-        assert_eq!(old.echo_count, 4, "echo_count should be reduced from 5 to 4");
+        assert_eq!(
+            old.echo_count, 4,
+            "echo_count should be reduced from 5 to 4"
+        );
 
         // The recent memory should be untouched
         let rec = store.get(&recent_id).expect("Recent memory should exist");
-        assert_eq!(rec.echo_count, 3, "Recent memory echo_count should be unchanged");
+        assert_eq!(
+            rec.echo_count, 3,
+            "Recent memory echo_count should be unchanged"
+        );
 
         // The zero-count memory should be untouched
         let zero = store.get(&zero_id).expect("Zero-count memory should exist");
@@ -407,7 +453,13 @@ mod tests {
 
         assert_eq!(store.len(), 3);
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert_eq!(result.duplicates_merged, 0, "No duplicates should be found");
         assert_eq!(store.len(), 3, "All memories should remain");
@@ -431,7 +483,13 @@ mod tests {
         let id = entry.id.clone();
         store.add(entry);
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert_eq!(result.echo_counts_decayed, 1);
         let e = store.get(&id).unwrap();
@@ -453,7 +511,13 @@ mod tests {
         store.add(make_entry("dup one", vec![1.0, 0.0, 0.0]));
         store.add(make_entry("dup two", vec![0.99, 0.01, 0.0]));
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         // This proves dedup runs for small stores
         assert_eq!(result.duplicates_merged, 1);
@@ -481,12 +545,27 @@ mod tests {
         old.last_echoed = Some(Utc::now() - Duration::days(60));
         store.add(old);
 
-        let result = consolidate(&mut store, &mut hebbian, &mut bloom, &mut bloom_dirty, &config);
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+        );
 
         assert_eq!(result.hebbian_edges_pruned, 1, "Weak edge should be pruned");
         assert!(result.bloom_rebuilt, "Bloom should be rebuilt");
-        assert_eq!(result.duplicates_merged, 1, "Near-duplicates should be merged");
-        assert_eq!(result.echo_counts_decayed, 1, "Old memory echo count should decay");
-        assert!(result.duration_ms < 10_000, "Should complete in under 10 seconds");
+        assert_eq!(
+            result.duplicates_merged, 1,
+            "Near-duplicates should be merged"
+        );
+        assert_eq!(
+            result.echo_counts_decayed, 1,
+            "Old memory echo count should decay"
+        );
+        assert!(
+            result.duration_ms < 10_000,
+            "Should complete in under 10 seconds"
+        );
     }
 }

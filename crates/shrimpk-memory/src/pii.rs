@@ -4,8 +4,8 @@
 //! phone numbers, passwords) and replaces them with masked tokens.
 //! Masking happens at **store** time, not at echo time.
 
-use shrimpk_core::{PiiMatch, PiiType, SensitivityLevel};
 use regex::Regex;
+use shrimpk_core::{PiiMatch, PiiType, SensitivityLevel};
 use tracing::instrument;
 
 /// A compiled pattern for PII detection.
@@ -48,15 +48,24 @@ impl PiiFilter {
             // GitLab personal access tokens: glpat-...
             (r"glpat-[a-zA-Z0-9_-]{20,}", PiiType::ApiKey),
             // Credit card numbers (16 digits with optional separators)
-            (r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", PiiType::CreditCard),
+            (
+                r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",
+                PiiType::CreditCard,
+            ),
             // SSN (US format)
             (r"\b\d{3}-\d{2}-\d{4}\b", PiiType::Ssn),
             // Email addresses
-            (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", PiiType::Email),
+            (
+                r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+                PiiType::Email,
+            ),
             // Phone numbers (US-style)
             (r"\b\d{3}[\s.\-]?\d{3}[\s.\-]?\d{4}\b", PiiType::PhoneNumber),
             // Passwords following "password:", "pwd:", etc.
-            (r"(?i)(?:password|pwd|passwd|pass)\s*[:=]\s*\S+", PiiType::Password),
+            (
+                r"(?i)(?:password|pwd|passwd|pass)\s*[:=]\s*\S+",
+                PiiType::Password,
+            ),
         ];
 
         let patterns = pattern_defs
@@ -81,11 +90,7 @@ impl PiiFilter {
 
         for pattern in &self.patterns {
             for m in pattern.regex.find_iter(text) {
-                matches.push(PiiMatch::new(
-                    pattern.pii_type.clone(),
-                    m.start(),
-                    m.end(),
-                ));
+                matches.push(PiiMatch::new(pattern.pii_type.clone(), m.start(), m.end()));
             }
         }
 
@@ -123,10 +128,7 @@ impl PiiFilter {
         // Append remaining text after last match
         result.push_str(&text[last_end..]);
 
-        tracing::debug!(
-            matches = non_overlapping.len(),
-            "PII masking complete"
-        );
+        tracing::debug!(matches = non_overlapping.len(), "PII masking complete");
 
         (result, matches)
     }
@@ -305,10 +307,19 @@ mod tests {
         let (masked, matches) = filter.mask(text);
 
         assert!(!matches.is_empty());
-        assert!(masked.contains("[MASKED:email]"), "should mask email, got: {masked}");
-        assert!(masked.contains("Send to"), "should preserve surrounding text");
+        assert!(
+            masked.contains("[MASKED:email]"),
+            "should mask email, got: {masked}"
+        );
+        assert!(
+            masked.contains("Send to"),
+            "should preserve surrounding text"
+        );
         assert!(masked.contains("please"), "should preserve trailing text");
-        assert!(!masked.contains("user@example.com"), "should not contain original email");
+        assert!(
+            !masked.contains("user@example.com"),
+            "should not contain original email"
+        );
     }
 
     #[test]

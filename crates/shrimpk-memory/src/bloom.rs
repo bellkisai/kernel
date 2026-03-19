@@ -49,9 +49,7 @@ impl TopicFilter {
     /// noise from articles, prepositions, etc.
     fn extract_fingerprints(text: &str) -> Vec<String> {
         let lower = text.to_lowercase();
-        let words: Vec<&str> = lower.split_whitespace()
-            .filter(|w| w.len() >= 3)
-            .collect();
+        let words: Vec<&str> = lower.split_whitespace().filter(|w| w.len() >= 3).collect();
 
         let mut fingerprints = Vec::with_capacity(words.len() * 2);
 
@@ -91,7 +89,8 @@ impl TopicFilter {
             return false;
         }
 
-        let hit_count = fingerprints.iter()
+        let hit_count = fingerprints
+            .iter()
             .filter(|fp| self.filter.check(fp))
             .count();
 
@@ -113,6 +112,11 @@ impl TopicFilter {
     /// Number of memory texts inserted.
     pub fn len(&self) -> usize {
         self.entry_count
+    }
+
+    /// Whether the filter has no entries.
+    pub fn is_empty(&self) -> bool {
+        self.entry_count == 0
     }
 
     /// Approximate memory usage in bytes.
@@ -233,17 +237,38 @@ mod tests {
         // Bigrams: ["rust_great", "great_for", "for_systems"]
 
         // Check unigrams present
-        assert!(fps.contains(&"rust".to_string()), "Should have unigram 'rust'");
-        assert!(fps.contains(&"great".to_string()), "Should have unigram 'great'");
-        assert!(fps.contains(&"systems".to_string()), "Should have unigram 'systems'");
+        assert!(
+            fps.contains(&"rust".to_string()),
+            "Should have unigram 'rust'"
+        );
+        assert!(
+            fps.contains(&"great".to_string()),
+            "Should have unigram 'great'"
+        );
+        assert!(
+            fps.contains(&"systems".to_string()),
+            "Should have unigram 'systems'"
+        );
 
         // Check bigrams present
-        assert!(fps.contains(&"rust_great".to_string()), "Should have bigram 'rust_great'");
-        assert!(fps.contains(&"great_for".to_string()), "Should have bigram 'great_for'");
-        assert!(fps.contains(&"for_systems".to_string()), "Should have bigram 'for_systems'");
+        assert!(
+            fps.contains(&"rust_great".to_string()),
+            "Should have bigram 'rust_great'"
+        );
+        assert!(
+            fps.contains(&"great_for".to_string()),
+            "Should have bigram 'great_for'"
+        );
+        assert!(
+            fps.contains(&"for_systems".to_string()),
+            "Should have bigram 'for_systems'"
+        );
 
         // "is" should be filtered (2 chars)
-        assert!(!fps.contains(&"is".to_string()), "Should filter out 'is' (< 3 chars)");
+        assert!(
+            !fps.contains(&"is".to_string()),
+            "Should filter out 'is' (< 3 chars)"
+        );
     }
 
     #[test]

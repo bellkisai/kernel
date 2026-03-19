@@ -90,8 +90,7 @@ impl ContextAssembler {
         user_query: &str,
     ) -> AssembledContext {
         let echo_count = echo_results.len().min(self.config.max_echo_results);
-        let budget = TokenBudget::for_context_window(context_window)
-            .with_echo_count(echo_count);
+        let budget = TokenBudget::for_context_window(context_window).with_echo_count(echo_count);
 
         let mut segments = Vec::new();
         let mut truncated = Vec::new();
@@ -101,8 +100,7 @@ impl ContextAssembler {
         let usable = budget.total.saturating_sub(budget.response_reserve);
 
         // --- Step 1: System prompt (always included, priority 0) ---
-        let sys_text = system_prompt
-            .unwrap_or(&self.config.default_system_prompt);
+        let sys_text = system_prompt.unwrap_or(&self.config.default_system_prompt);
         let sys_segment = ContextSegment::SystemPrompt(sys_text.to_string());
         let sys_tokens = sys_segment.token_estimate();
         used_tokens += sys_tokens;
@@ -185,7 +183,9 @@ impl ContextAssembler {
                 content: content.clone(),
             };
             let tok = seg.token_estimate();
-            if conv_tokens_used + tok <= budget.conversation && used_tokens + conv_tokens_used + tok <= usable {
+            if conv_tokens_used + tok <= budget.conversation
+                && used_tokens + conv_tokens_used + tok <= usable
+            {
                 conv_tokens_used += tok;
                 conv_segments.push(seg);
             } else {
@@ -210,7 +210,10 @@ impl ContextAssembler {
         // Never truncate echo or system.
         while used_tokens > usable {
             // Try removing conversation messages (from the oldest).
-            if let Some(pos) = segments.iter().position(|s| matches!(s, ContextSegment::ConversationMessage { .. })) {
+            if let Some(pos) = segments
+                .iter()
+                .position(|s| matches!(s, ContextSegment::ConversationMessage { .. }))
+            {
                 let removed = segments.remove(pos);
                 let tok = removed.token_estimate();
                 used_tokens = used_tokens.saturating_sub(tok);
@@ -221,7 +224,10 @@ impl ContextAssembler {
                 continue;
             }
             // Try removing RAG chunks (from the last).
-            if let Some(pos) = segments.iter().rposition(|s| matches!(s, ContextSegment::RagDocument { .. })) {
+            if let Some(pos) = segments
+                .iter()
+                .rposition(|s| matches!(s, ContextSegment::RagDocument { .. }))
+            {
                 let removed = segments.remove(pos);
                 let tok = removed.token_estimate();
                 used_tokens = used_tokens.saturating_sub(tok);
@@ -307,8 +313,14 @@ mod tests {
 
         let result = assembler.assemble(8_000, None, &echoes, &[], &conv, "query");
 
-        let echo_pos = result.segments.iter().position(|s| matches!(s, ContextSegment::EchoMemory { .. }));
-        let conv_pos = result.segments.iter().position(|s| matches!(s, ContextSegment::ConversationMessage { .. }));
+        let echo_pos = result
+            .segments
+            .iter()
+            .position(|s| matches!(s, ContextSegment::EchoMemory { .. }));
+        let conv_pos = result
+            .segments
+            .iter()
+            .position(|s| matches!(s, ContextSegment::ConversationMessage { .. }));
 
         assert!(echo_pos.is_some(), "echo segment missing");
         assert!(conv_pos.is_some(), "conversation segment missing");
@@ -333,22 +345,36 @@ mod tests {
         let echoes = vec![make_echo("important memory", 0.95)];
         // Create large conversation that will exceed budget.
         let conv: Vec<(String, String)> = (0..100)
-            .map(|i| ("user".to_string(), format!("message {} {}", i, "x".repeat(200))))
+            .map(|i| {
+                (
+                    "user".to_string(),
+                    format!("message {} {}", i, "x".repeat(200)),
+                )
+            })
             .collect();
 
         // Tiny context window to force truncation.
         let result = assembler.assemble(500, None, &echoes, &[], &conv, "q");
 
         // Echo must still be present.
-        let has_echo = result.segments.iter().any(|s| matches!(s, ContextSegment::EchoMemory { .. }));
+        let has_echo = result
+            .segments
+            .iter()
+            .any(|s| matches!(s, ContextSegment::EchoMemory { .. }));
         assert!(has_echo, "echo memories must never be truncated");
 
         // System prompt must still be present.
-        let has_system = result.segments.iter().any(|s| matches!(s, ContextSegment::SystemPrompt(_)));
+        let has_system = result
+            .segments
+            .iter()
+            .any(|s| matches!(s, ContextSegment::SystemPrompt(_)));
         assert!(has_system, "system prompt must never be truncated");
 
         // Something should have been truncated.
-        assert!(!result.truncated.is_empty(), "truncation log should not be empty");
+        assert!(
+            !result.truncated.is_empty(),
+            "truncation log should not be empty"
+        );
     }
 
     #[test]
@@ -358,17 +384,29 @@ mod tests {
         let result = assembler.assemble(
             8_000,
             Some("custom system prompt"),
-            &[],     // no echoes
-            &[],     // no RAG
+            &[], // no echoes
+            &[], // no RAG
             &[("user".to_string(), "hi".to_string())],
             "what's up?",
         );
 
-        assert!(result.segments.len() >= 3, "should have system + conv + query");
+        assert!(
+            result.segments.len() >= 3,
+            "should have system + conv + query"
+        );
 
-        let has_system = result.segments.iter().any(|s| matches!(s, ContextSegment::SystemPrompt(_)));
-        let has_query = result.segments.iter().any(|s| matches!(s, ContextSegment::UserQuery(_)));
-        let has_conv = result.segments.iter().any(|s| matches!(s, ContextSegment::ConversationMessage { .. }));
+        let has_system = result
+            .segments
+            .iter()
+            .any(|s| matches!(s, ContextSegment::SystemPrompt(_)));
+        let has_query = result
+            .segments
+            .iter()
+            .any(|s| matches!(s, ContextSegment::UserQuery(_)));
+        let has_conv = result
+            .segments
+            .iter()
+            .any(|s| matches!(s, ContextSegment::ConversationMessage { .. }));
 
         assert!(has_system);
         assert!(has_query);
@@ -395,7 +433,10 @@ mod tests {
 
         let result = assembler.assemble(1_000, None, &[], &rag, &conv, "query");
 
-        assert!(!result.truncated.is_empty(), "should have truncation entries");
+        assert!(
+            !result.truncated.is_empty(),
+            "should have truncation entries"
+        );
 
         let usable = result.budget.total - result.budget.response_reserve;
         assert!(
@@ -410,14 +451,7 @@ mod tests {
     fn system_prompt_override_works() {
         let assembler = ContextAssembler::new(make_config());
 
-        let result = assembler.assemble(
-            8_000,
-            Some("custom override"),
-            &[],
-            &[],
-            &[],
-            "q",
-        );
+        let result = assembler.assemble(8_000, Some("custom override"), &[], &[], &[], "q");
 
         if let ContextSegment::SystemPrompt(ref text) = result.segments[0] {
             assert_eq!(text, "custom override");

@@ -70,7 +70,8 @@ impl TokenBudget {
     /// This is the conversation budget minus any overhead. If the sum of
     /// fixed allocations exceeds total, returns 0.
     pub fn conversation_budget(&self) -> usize {
-        let fixed = self.system_prompt + self.echo_memories + self.rag_context + self.response_reserve;
+        let fixed =
+            self.system_prompt + self.echo_memories + self.rag_context + self.response_reserve;
         self.total.saturating_sub(fixed)
     }
 }
@@ -92,10 +93,10 @@ mod tests {
     #[test]
     fn budget_proportions_small_window() {
         let budget = TokenBudget::for_context_window(4_096);
-        assert_eq!(budget.system_prompt, 204);   // 5% of 4096
-        assert_eq!(budget.echo_memories, 614);   // 15% of 4096
-        assert_eq!(budget.rag_context, 819);     // 20% of 4096
-        assert_eq!(budget.conversation, 1_433);  // 35% of 4096
+        assert_eq!(budget.system_prompt, 204); // 5% of 4096
+        assert_eq!(budget.echo_memories, 614); // 15% of 4096
+        assert_eq!(budget.rag_context, 819); // 20% of 4096
+        assert_eq!(budget.conversation, 1_433); // 35% of 4096
         assert_eq!(budget.response_reserve, 1_024); // 25% of 4096
     }
 
@@ -112,7 +113,7 @@ mod tests {
         let budget = TokenBudget::for_context_window(100_000).with_echo_count(10);
         // 10 results: 5 extra beyond threshold, shift 5% = 5000 tokens
         assert_eq!(budget.echo_memories, 20_000); // 15000 + 5000
-        assert_eq!(budget.conversation, 30_000);  // 35000 - 5000
+        assert_eq!(budget.conversation, 30_000); // 35000 - 5000
     }
 
     #[test]
@@ -127,7 +128,7 @@ mod tests {
         let budget = TokenBudget::for_context_window(100_000).with_echo_count(50);
         // 50 results: 45 extra, capped at 10 → shift 10% = 10000
         assert_eq!(budget.echo_memories, 25_000); // 15000 + 10000
-        assert_eq!(budget.conversation, 25_000);  // 35000 - 10000
+        assert_eq!(budget.conversation, 25_000); // 35000 - 10000
     }
 
     #[test]

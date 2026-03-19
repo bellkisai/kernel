@@ -22,9 +22,9 @@
 //!
 //!     cargo test --test echo_head_to_head -- --ignored --nocapture
 
+use serde::{Deserialize, Serialize};
 use shrimpk_core::EchoConfig;
 use shrimpk_memory::EchoEngine;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tempfile::tempdir;
 
@@ -66,7 +66,10 @@ struct OllamaModel {
 // ===========================================================================
 
 const MEMORIES: &[(&str, &str)] = &[
-    ("I prefer FastAPI for building REST APIs because of async and auto-docs", "coding"),
+    (
+        "I prefer FastAPI for building REST APIs because of async and auto-docs",
+        "coding",
+    ),
     ("Python 3.12 is my main programming language", "coding"),
     ("PostgreSQL for all database work, never MySQL", "coding"),
     ("I deploy everything to AWS using Terraform", "infra"),
@@ -74,18 +77,30 @@ const MEMORIES: &[(&str, &str)] = &[
     ("TypeScript strict mode for all frontend work", "coding"),
     ("Docker Compose for local development environments", "infra"),
     ("I run Ollama locally to avoid API costs", "ai"),
-    ("My current project is Bellkis, an AI desktop hub built with Tauri and Rust", "project"),
+    (
+        "My current project is Bellkis, an AI desktop hub built with Tauri and Rust",
+        "project",
+    ),
     ("I use GitHub Actions for CI/CD with matrix builds", "infra"),
-    ("For testing I prefer pytest with fixtures and parametrize", "coding"),
+    (
+        "For testing I prefer pytest with fixtures and parametrize",
+        "coding",
+    ),
     ("Redis for caching, PostgreSQL for persistence", "infra"),
     ("I use pnpm instead of npm for package management", "coding"),
-    ("Tailwind CSS with shadcn/ui for all frontend styling", "coding"),
+    (
+        "Tailwind CSS with shadcn/ui for all frontend styling",
+        "coding",
+    ),
     ("My preferred quantization for local models is Q4_K_M", "ai"),
     ("I live in Israel and work in the tech industry", "personal"),
     ("I prefer dark theme in all applications", "personal"),
     ("Coffee with oat milk, no sugar, every morning", "personal"),
     ("I run 5K three times a week in the evening", "personal"),
-    ("My favorite travel destination is Japan, especially Kyoto", "personal"),
+    (
+        "My favorite travel destination is Japan, especially Kyoto",
+        "personal",
+    ),
 ];
 
 // ===========================================================================
@@ -93,16 +108,40 @@ const MEMORIES: &[(&str, &str)] = &[
 // ===========================================================================
 
 const PROMPTS: &[(&str, &[&str])] = &[
-    ("What framework should I use for a new REST API?", &["FastAPI", "async", "Python"]),
+    (
+        "What framework should I use for a new REST API?",
+        &["FastAPI", "async", "Python"],
+    ),
     ("Help me set up a database for my project", &["PostgreSQL"]),
-    ("What's my deployment workflow?", &["AWS", "Terraform", "Docker"]),
-    ("Recommend an IDE setup for TypeScript development", &["VS Code", "Vim", "TypeScript"]),
-    ("How should I handle caching in my application?", &["Redis", "PostgreSQL"]),
-    ("What testing framework should I use?", &["pytest", "fixtures"]),
-    ("Tell me about my current project", &["Bellkis", "Tauri", "Rust"]),
-    ("What's the best way to run AI models locally?", &["Ollama", "Q4_K_M"]),
+    (
+        "What's my deployment workflow?",
+        &["AWS", "Terraform", "Docker"],
+    ),
+    (
+        "Recommend an IDE setup for TypeScript development",
+        &["VS Code", "Vim", "TypeScript"],
+    ),
+    (
+        "How should I handle caching in my application?",
+        &["Redis", "PostgreSQL"],
+    ),
+    (
+        "What testing framework should I use?",
+        &["pytest", "fixtures"],
+    ),
+    (
+        "Tell me about my current project",
+        &["Bellkis", "Tauri", "Rust"],
+    ),
+    (
+        "What's the best way to run AI models locally?",
+        &["Ollama", "Q4_K_M"],
+    ),
     ("What package manager do I use for JavaScript?", &["pnpm"]),
-    ("How do I style my frontend components?", &["Tailwind", "shadcn"]),
+    (
+        "How do I style my frontend components?",
+        &["Tailwind", "shadcn"],
+    ),
 ];
 
 // ===========================================================================
@@ -301,10 +340,7 @@ async fn head_to_head_echo_vs_plain_ollama() {
 
         // ---- Mode B: With Echo ----
         // Step 1: Get relevant memories from Echo
-        let echo_results = engine
-            .echo(question, 3)
-            .await
-            .expect("Echo query failed");
+        let echo_results = engine.echo(question, 3).await.expect("Echo query failed");
 
         // Step 2: Build enhanced prompt
         let mut context_lines = String::new();
@@ -425,9 +461,7 @@ async fn head_to_head_echo_vs_plain_ollama() {
         "  Personalization rate:   {personalization_pct:.0}% (Echo references stored preferences)"
     );
     println!("  Avg input tokens (No Echo): {avg_input_a:.0}");
-    println!(
-        "  Avg input tokens (Echo):    {avg_input_b:.0} (+{extra_tokens:.0} for context)"
-    );
+    println!("  Avg input tokens (Echo):    {avg_input_b:.0} (+{extra_tokens:.0} for context)");
     println!();
     println!(
         "CONCLUSION: Echo Memory makes AI {accuracy_improvement:.0}% more accurate \

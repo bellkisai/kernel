@@ -4,14 +4,14 @@
 //!   echo-cli store "I prefer FastAPI for REST APIs"
 //!   echo-cli echo "What framework for APIs?"
 //!   echo-cli stats
-//!   echo-cli forget <uuid>
+//!   echo-cli forget `<uuid>`
 //!   echo-cli dump
-//!   echo-cli bench <count>
+//!   echo-cli bench `<count>`
 
+use rand::Rng;
+use rand::seq::SliceRandom;
 use shrimpk_core::{EchoConfig, QuantizationMode};
 use shrimpk_memory::{EchoEngine, PiiFilter};
-use rand::seq::SliceRandom;
-use rand::Rng;
 use std::time::Instant;
 
 const VERSION: &str = "0.1.0";
@@ -108,7 +108,7 @@ fn format_number(n: usize) -> String {
     let s = n.to_string();
     let mut result = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             result.push(',');
         }
         result.push(c);
@@ -121,7 +121,8 @@ fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        let end = s.char_indices()
+        let end = s
+            .char_indices()
             .take_while(|&(i, _)| i < max_len.saturating_sub(3))
             .last()
             .map(|(i, c)| i + c.len_utf8())
@@ -175,7 +176,10 @@ async fn cmd_store(engine: &EchoEngine, text: &str) -> anyhow::Result<()> {
     if pii_matches.is_empty() {
         println!("[echo-cli] PII scan: no sensitive data detected");
     } else {
-        let types: Vec<String> = pii_matches.iter().map(|m| m.pattern_type.to_string()).collect();
+        let types: Vec<String> = pii_matches
+            .iter()
+            .map(|m| m.pattern_type.to_string())
+            .collect();
         println!(
             "[echo-cli] PII scan: {} match(es) detected [{}]",
             pii_matches.len(),
@@ -227,11 +231,23 @@ async fn cmd_stats(engine: &EchoEngine, config: &EchoConfig) -> anyhow::Result<(
     let ram_gb = detect_ram_gb();
 
     println!("[echo-cli] Stats:");
-    println!("  Memories:          {}", format_number(stats.total_memories));
+    println!(
+        "  Memories:          {}",
+        format_number(stats.total_memories)
+    );
     println!("  Max capacity:      {}", format_number(stats.max_capacity));
-    println!("  Index size:        {}", format_bytes(stats.index_size_bytes));
-    println!("  RAM usage:         {}", format_bytes(stats.ram_usage_bytes));
-    println!("  Config tier:       {} ({ram_gb}GB detected)", tier_name(config));
+    println!(
+        "  Index size:        {}",
+        format_bytes(stats.index_size_bytes)
+    );
+    println!(
+        "  RAM usage:         {}",
+        format_bytes(stats.ram_usage_bytes)
+    );
+    println!(
+        "  Config tier:       {} ({ram_gb}GB detected)",
+        tier_name(config)
+    );
     println!("  Quantization:      {:?}", config.quantization);
     println!("  Embedding dim:     {}", config.embedding_dim);
     println!("  Threshold:         {}", config.similarity_threshold);
@@ -251,7 +267,10 @@ async fn cmd_forget(engine: &EchoEngine, id_str: &str) -> anyhow::Result<()> {
     engine.forget(id).await?;
     engine.persist().await?;
 
-    println!("[echo-cli] Forgotten memory {}", &id_str[..id_str.len().min(8)]);
+    println!(
+        "[echo-cli] Forgotten memory {}",
+        &id_str[..id_str.len().min(8)]
+    );
 
     Ok(())
 }
@@ -267,7 +286,10 @@ async fn cmd_dump(engine: &EchoEngine, config: &EchoConfig) -> anyhow::Result<()
     // Persist first to ensure the JSON file matches in-memory state
     engine.persist().await?;
 
-    println!("[echo-cli] Stored memories ({}):", format_number(stats.total_memories));
+    println!(
+        "[echo-cli] Stored memories ({}):",
+        format_number(stats.total_memories)
+    );
 
     // EchoEngine doesn't expose direct iteration, so we read the persisted JSON.
     let store_path = config.data_dir.join("echo_store.json");
@@ -277,7 +299,8 @@ async fn cmd_dump(engine: &EchoEngine, config: &EchoConfig) -> anyhow::Result<()
         let entries: Vec<serde_json::Value> = serde_json::from_str(&json)?;
 
         for entry in &entries {
-            let id = entry["id"].as_str()
+            let id = entry["id"]
+                .as_str()
                 .or_else(|| entry["id"].get("0").and_then(|v| v.as_str()))
                 .unwrap_or("????????");
             let content = entry["content"].as_str().unwrap_or("");
@@ -423,33 +446,33 @@ async fn main() -> anyhow::Result<()> {
 
     match command {
         "store" => {
-            let text = args.get(2).ok_or_else(|| {
-                anyhow::anyhow!("Usage: echo-cli store \"text to remember\"")
-            })?;
+            let text = args
+                .get(2)
+                .ok_or_else(|| anyhow::anyhow!("Usage: echo-cli store \"text to remember\""))?;
             cmd_store(&engine, text).await?;
         }
         "echo" => {
-            let query = args.get(2).ok_or_else(|| {
-                anyhow::anyhow!("Usage: echo-cli echo \"query text\"")
-            })?;
+            let query = args
+                .get(2)
+                .ok_or_else(|| anyhow::anyhow!("Usage: echo-cli echo \"query text\""))?;
             cmd_echo(&engine, query).await?;
         }
         "stats" => {
             cmd_stats(&engine, &config).await?;
         }
         "forget" => {
-            let id_str = args.get(2).ok_or_else(|| {
-                anyhow::anyhow!("Usage: echo-cli forget <uuid>")
-            })?;
+            let id_str = args
+                .get(2)
+                .ok_or_else(|| anyhow::anyhow!("Usage: echo-cli forget <uuid>"))?;
             cmd_forget(&engine, id_str).await?;
         }
         "dump" => {
             cmd_dump(&engine, &config).await?;
         }
         "bench" => {
-            let count_str = args.get(2).ok_or_else(|| {
-                anyhow::anyhow!("Usage: echo-cli bench <count>")
-            })?;
+            let count_str = args
+                .get(2)
+                .ok_or_else(|| anyhow::anyhow!("Usage: echo-cli bench <count>"))?;
             let count: usize = count_str.parse().map_err(|_| {
                 anyhow::anyhow!("Invalid count \"{count_str}\": must be a positive integer")
             })?;

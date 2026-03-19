@@ -628,7 +628,10 @@ async fn threshold_range_sweep() {
         "{:>9} | {:>9} | {:>6} | {:>6} | {:>5} | {:>6} | {:>6}",
         "Threshold", "Precision", "Recall", "  F1  ", "True+", "False+", "False-"
     );
-    println!("{:-<9}-+-{:-<9}-+-{:-<6}-+-{:-<6}-+-{:-<5}-+-{:-<6}-+-{:-<6}", "", "", "", "", "", "", "");
+    println!(
+        "{:-<9}-+-{:-<9}-+-{:-<6}-+-{:-<6}-+-{:-<5}-+-{:-<6}-+-{:-<6}",
+        "", "", "", "", "", "", ""
+    );
 
     let mut best_f1: f32 = 0.0;
     let mut best_threshold: f32 = 0.0;
@@ -801,7 +804,10 @@ async fn query_formulation_analysis() {
         "  {:>25} | {:>6} | {:>6} | {:>6} | {:>5}",
         "Style", "Avg", "Min", "Max", "Count"
     );
-    println!("  {:-<25}-+-{:-<6}-+-{:-<6}-+-{:-<6}-+-{:-<5}", "", "", "", "", "");
+    println!(
+        "  {:-<25}-+-{:-<6}-+-{:-<6}-+-{:-<6}-+-{:-<5}",
+        "", "", "", "", ""
+    );
 
     let mut style_summary: Vec<(&str, f32, f32, f32, usize)> = style_scores
         .iter()
@@ -937,7 +943,10 @@ fn run_formulation_test(
     }
 
     println!();
-    println!("    >>> Best formulation: {} (avg {:.4})", best_label, best_avg);
+    println!(
+        "    >>> Best formulation: {} (avg {:.4})",
+        best_label, best_avg
+    );
     println!();
 
     // Show per-query which formulation wins
@@ -993,21 +1002,66 @@ async fn context_window_simulation() {
 
     // Representative queries -- one per memory cluster
     let test_queries: Vec<(&str, &str)> = vec![
-        ("What web framework for APIs?", "I prefer FastAPI for building REST APIs because of async support and auto-generated docs"),
-        ("What's my preferred Python web framework?", "I prefer FastAPI for building REST APIs because of async support and auto-generated docs"),
-        ("What language do I use?", "Python is my main programming language"),  // Note: not in the corpus as-is but "Python" appears in PROGRAMMING[0]
-        ("How do I run AI?", "I run Ollama locally for most AI tasks to avoid API costs"),
-        ("local AI setup", "I run Ollama locally for most AI tasks to avoid API costs"),
-        ("What am I building?", "Currently building Bellkis, an AI hub desktop application"),
-        ("What is my current project?", "Currently building Bellkis, an AI hub desktop application"),
-        ("What do I cook on Fridays?", "I make shakshuka every Friday morning for breakfast"),
-        ("exercise routine", "I run 5K three times a week, usually in the evening"),
-        ("how often do I run?", "I run 5K three times a week, usually in the evening"),
-        ("where do I like to travel?", "Favorite travel destination is Japan, especially Kyoto"),
-        ("Japan trip", "Favorite travel destination is Japan, especially Kyoto"),
-        ("What database do I use?", "For database work I always choose PostgreSQL over MySQL"),
-        ("What's my morning routine?", "I work best in the morning, usually starting at 7am"),
-        ("breakfast recipe", "I make shakshuka every Friday morning for breakfast"),
+        (
+            "What web framework for APIs?",
+            "I prefer FastAPI for building REST APIs because of async support and auto-generated docs",
+        ),
+        (
+            "What's my preferred Python web framework?",
+            "I prefer FastAPI for building REST APIs because of async support and auto-generated docs",
+        ),
+        (
+            "What language do I use?",
+            "Python is my main programming language",
+        ), // Note: not in the corpus as-is but "Python" appears in PROGRAMMING[0]
+        (
+            "How do I run AI?",
+            "I run Ollama locally for most AI tasks to avoid API costs",
+        ),
+        (
+            "local AI setup",
+            "I run Ollama locally for most AI tasks to avoid API costs",
+        ),
+        (
+            "What am I building?",
+            "Currently building Bellkis, an AI hub desktop application",
+        ),
+        (
+            "What is my current project?",
+            "Currently building Bellkis, an AI hub desktop application",
+        ),
+        (
+            "What do I cook on Fridays?",
+            "I make shakshuka every Friday morning for breakfast",
+        ),
+        (
+            "exercise routine",
+            "I run 5K three times a week, usually in the evening",
+        ),
+        (
+            "how often do I run?",
+            "I run 5K three times a week, usually in the evening",
+        ),
+        (
+            "where do I like to travel?",
+            "Favorite travel destination is Japan, especially Kyoto",
+        ),
+        (
+            "Japan trip",
+            "Favorite travel destination is Japan, especially Kyoto",
+        ),
+        (
+            "What database do I use?",
+            "For database work I always choose PostgreSQL over MySQL",
+        ),
+        (
+            "What's my morning routine?",
+            "I work best in the morning, usually starting at 7am",
+        ),
+        (
+            "breakfast recipe",
+            "I make shakshuka every Friday morning for breakfast",
+        ),
     ];
 
     let mut rank_found: Vec<usize> = Vec::new();
@@ -1301,10 +1355,7 @@ async fn recommended_configuration() {
         .zip(positive_scores.iter())
         .filter(|((mem, query, _), _)| {
             // Check if any significant word from the query appears verbatim in the memory
-            let query_words: Vec<&str> = query
-                .split_whitespace()
-                .filter(|w| w.len() > 3)
-                .collect();
+            let query_words: Vec<&str> = query.split_whitespace().filter(|w| w.len() > 3).collect();
             query_words
                 .iter()
                 .any(|w| mem.to_lowercase().contains(&w.to_lowercase()))
@@ -1316,10 +1367,7 @@ async fn recommended_configuration() {
         .iter()
         .zip(positive_scores.iter())
         .filter(|((mem, query, _), _)| {
-            let query_words: Vec<&str> = query
-                .split_whitespace()
-                .filter(|w| w.len() > 3)
-                .collect();
+            let query_words: Vec<&str> = query.split_whitespace().filter(|w| w.len() > 3).collect();
             !query_words
                 .iter()
                 .any(|w| mem.to_lowercase().contains(&w.to_lowercase()))
@@ -1366,7 +1414,9 @@ async fn recommended_configuration() {
         separation_gap
     );
     if separation_gap > 0.0 {
-        println!("    Clean separation -- a threshold exists that perfectly separates the classes.");
+        println!(
+            "    Clean separation -- a threshold exists that perfectly separates the classes."
+        );
     } else {
         println!(
             "    OVERLAP of {:.4} -- some positive/negative scores overlap.",
@@ -1381,10 +1431,16 @@ async fn recommended_configuration() {
     println!("  === OPTIMAL THRESHOLD (F1 maximized) ===");
     println!();
     println!("  similarity_threshold: {:.2}", best_threshold);
-    println!("    Precision: {:.4} ({:.0}% of returned results are relevant)",
-        best_precision, best_precision * 100.0);
-    println!("    Recall:    {:.4} ({:.0}% of relevant memories are returned)",
-        best_recall, best_recall * 100.0);
+    println!(
+        "    Precision: {:.4} ({:.0}% of returned results are relevant)",
+        best_precision,
+        best_precision * 100.0
+    );
+    println!(
+        "    Recall:    {:.4} ({:.0}% of relevant memories are returned)",
+        best_recall,
+        best_recall * 100.0
+    );
     println!("    F1:        {:.4}", best_f1);
     println!();
 
@@ -1397,10 +1453,7 @@ async fn recommended_configuration() {
     for (i, query) in sample_queries.iter().enumerate() {
         println!("    {:?} -> {} results", query, result_counts[i]);
     }
-    println!(
-        "  Average: {:.1} | Max: {}",
-        avg_results, max_results
-    );
+    println!("  Average: {:.1} | Max: {}", avg_results, max_results);
     println!("  max_echo_results: {}", recommended_max_results);
     println!();
 
@@ -1517,7 +1570,10 @@ async fn hardest_pairs_deep_dive() {
                 ("exact_entity", "FastAPI"),
                 ("entity_context", "FastAPI REST APIs"),
                 ("direct_domain", "web framework for APIs"),
-                ("preference_question", "what framework do I prefer for APIs?"),
+                (
+                    "preference_question",
+                    "what framework do I prefer for APIs?",
+                ),
                 ("python_specific", "Python API framework preference"),
                 ("keyword_rich", "prefer FastAPI building REST APIs"),
                 ("how_question", "how do I build REST APIs?"),
@@ -1531,7 +1587,10 @@ async fn hardest_pairs_deep_dive() {
                 ("entity_context", "Bellkis AI hub desktop"),
                 ("direct_question", "what project am I working on?"),
                 ("building_question", "what am I developing right now?"),
-                ("keyword_rich", "currently building AI hub desktop application"),
+                (
+                    "keyword_rich",
+                    "currently building AI hub desktop application",
+                ),
                 ("short_informal", "current project"),
                 ("how_question", "what application am I building?"),
                 ("status_question", "project status"),

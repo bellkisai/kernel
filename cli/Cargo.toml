@@ -1,0 +1,23 @@
+[package]
+name = "shrimpk-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The ShrimPK AI memory CLI — store, echo, configure, monitor"
+publish = false
+
+[[bin]]
+name = "shrimpk"
+path = "src/main.rs"
+
+[dependencies]
+shrimpk-memory.workspace = true
+shrimpk-core = { workspace = true, features = ["sysinfo"] }
+tokio.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+rand.workspace = true
+serde_json.workspace = true
+sysinfo.workspace = true
+toml.workspace = true
+clap = { version = "4", features = ["derive"] }

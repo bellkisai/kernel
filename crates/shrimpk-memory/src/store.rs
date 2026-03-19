@@ -3,7 +3,7 @@
 //! Primary format: binary (`.shrm`) via `crate::persistence` — structured header,
 //! flat embedding array, CRC32 checksum. Falls back to JSON for migration.
 
-use shrimpk_core::{ShrimPKError, MemoryEntry, MemoryId, Result};
+use shrimpk_core::{MemoryEntry, MemoryId, Result, ShrimPKError};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::instrument;
@@ -138,10 +138,11 @@ impl EchoStore {
         // Try binary first
         if path.exists() {
             // Check if it's a valid binary file by looking at magic bytes
-            if let Ok(data) = std::fs::read(path) {
-                if data.len() >= 4 && &data[0..4] == b"SHRM" {
-                    return persistence::load_binary(path);
-                }
+            if let Ok(data) = std::fs::read(path)
+                && data.len() >= 4
+                && &data[0..4] == b"SHRM"
+            {
+                return persistence::load_binary(path);
             }
             // Not binary — try JSON fallback
             tracing::info!(

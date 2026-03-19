@@ -97,7 +97,6 @@ Docker deployment. Test with cargo test.",
             followup_rounds_no_echo: 2, // AI asks: "What backend framework?" + "What DB?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 2. Debug Help
         // -----------------------------------------------------------------
@@ -133,7 +132,6 @@ window handle access.",
             followup_rounds_no_echo: 1, // AI asks: "Can you show the code where you get the window handle?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 3. Code Review
         // -----------------------------------------------------------------
@@ -166,7 +164,6 @@ should be typed, not string-based.",
             followup_rounds_no_echo: 1, // AI asks: "What error handling crate do you prefer?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 4. Architecture Decision
         // -----------------------------------------------------------------
@@ -201,7 +198,6 @@ vs curated directory. Consider review overhead, trust/security, and competitive 
             followup_rounds_no_echo: 2, // AI asks: "What's your current architecture?" + "Who are your competitors?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 5. Deploy Question
         // -----------------------------------------------------------------
@@ -233,7 +229,6 @@ for staging. Consider spot instances.",
             followup_rounds_no_echo: 2, // AI asks: "What cloud provider?" + "What's your CI/CD?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 6. Learning Path
         // -----------------------------------------------------------------
@@ -266,7 +261,6 @@ vLLM internals, distributed training, K8s operators.",
             followup_rounds_no_echo: 2, // AI asks: "What's your current experience level?" + "What's your goal?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 7. Project Update
         // -----------------------------------------------------------------
@@ -299,7 +293,6 @@ features first.",
             followup_rounds_no_echo: 2, // AI asks: "What project?" + "What was done recently?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 8. Writing Assist
         // -----------------------------------------------------------------
@@ -330,7 +323,6 @@ traction metrics, meeting request.",
             followup_rounds_no_echo: 1, // AI asks: "What's your writing style preference?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 9. Data Analysis
         // -----------------------------------------------------------------
@@ -362,7 +354,6 @@ gradient boosting). Output: Jupyter notebook with visualizations.",
             followup_rounds_no_echo: 1, // AI asks: "What tools do you prefer?"
             followup_rounds_with_echo: 0,
         },
-
         // -----------------------------------------------------------------
         // 10. Meeting Prep
         // -----------------------------------------------------------------
@@ -431,7 +422,10 @@ async fn token_count_comparison() {
 
     for scenario in &scenarios {
         // Mode A: system + full user message (re-explained context + question)
-        let prompt_no_echo = format!("{}\n{}", scenario.system_prompt, scenario.user_message_no_echo);
+        let prompt_no_echo = format!(
+            "{}\n{}",
+            scenario.system_prompt, scenario.user_message_no_echo
+        );
         let tokens_no_echo = estimate_tokens(&prompt_no_echo);
 
         // Mode B: system + echo memories + short user message
@@ -503,7 +497,10 @@ async fn token_count_comparison() {
 
     // Assertions: Echo Memory should save tokens in every scenario
     for scenario in &scenarios {
-        let prompt_no_echo = format!("{}\n{}", scenario.system_prompt, scenario.user_message_no_echo);
+        let prompt_no_echo = format!(
+            "{}\n{}",
+            scenario.system_prompt, scenario.user_message_no_echo
+        );
         let echo_block: String = scenario
             .echo_memories
             .iter()
@@ -667,7 +664,10 @@ I prefer thiserror for errors, tracing for logging, and Vitest for frontend test
 
     println!("\n--- Multi-Turn Results ---");
     println!("  Total tokens (No Echo):     {:>8}", total_tokens_no_echo);
-    println!("  Total tokens (With Echo):   {:>8}", total_tokens_with_echo);
+    println!(
+        "  Total tokens (With Echo):   {:>8}",
+        total_tokens_with_echo
+    );
     println!(
         "  Tokens saved:               {:>8} ({:.1}%)",
         saved_tokens, saved_pct
@@ -726,7 +726,10 @@ async fn vllm_throughput_projection() {
     let mut total_with_echo = 0usize;
 
     for scenario in &scenarios {
-        let prompt_no_echo = format!("{}\n{}", scenario.system_prompt, scenario.user_message_no_echo);
+        let prompt_no_echo = format!(
+            "{}\n{}",
+            scenario.system_prompt, scenario.user_message_no_echo
+        );
         let echo_block: String = scenario
             .echo_memories
             .iter()
@@ -745,8 +748,7 @@ async fn vllm_throughput_projection() {
 
     let avg_input_no_echo = total_no_echo as f64 / scenarios.len() as f64;
     let avg_input_with_echo = total_with_echo as f64 / scenarios.len() as f64;
-    let token_reduction_pct =
-        (1.0 - avg_input_with_echo / avg_input_no_echo) * 100.0;
+    let token_reduction_pct = (1.0 - avg_input_with_echo / avg_input_no_echo) * 100.0;
 
     // vLLM assumptions
     let vllm_tokens_per_sec: f64 = 2000.0; // A100 throughput
@@ -797,17 +799,32 @@ async fn vllm_throughput_projection() {
     println!("{}", "=".repeat(90));
 
     println!("\n  Assumptions:");
-    println!("    vLLM throughput:    {:>8} tokens/sec (A100 GPU)", vllm_tokens_per_sec as u64);
-    println!("    Output tokens/req:  {:>8} (constant, same response quality)", avg_output_tokens as u64);
-    println!("    GPU cost:           ${:.2}/GPU-hour (cloud pricing)", gpu_cost_per_hour);
-    println!("    Workload:           {:>8} requests/day (base scenario)", requests_per_day as u64);
+    println!(
+        "    vLLM throughput:    {:>8} tokens/sec (A100 GPU)",
+        vllm_tokens_per_sec as u64
+    );
+    println!(
+        "    Output tokens/req:  {:>8} (constant, same response quality)",
+        avg_output_tokens as u64
+    );
+    println!(
+        "    GPU cost:           ${:.2}/GPU-hour (cloud pricing)",
+        gpu_cost_per_hour
+    );
+    println!(
+        "    Workload:           {:>8} requests/day (base scenario)",
+        requests_per_day as u64
+    );
 
     println!(
         "\n  Input token savings:  {:.1}% reduction ({:.0} -> {:.0} tokens/request)",
         token_reduction_pct, avg_input_no_echo, avg_input_with_echo
     );
 
-    println!("\n  {:<25} {:>15} {:>15} {:>15}", "Metric", "Without Echo", "With Echo", "Savings");
+    println!(
+        "\n  {:<25} {:>15} {:>15} {:>15}",
+        "Metric", "Without Echo", "With Echo", "Savings"
+    );
     println!("  {}", "-".repeat(72));
 
     println!(
@@ -827,7 +844,10 @@ async fn vllm_throughput_projection() {
     );
     println!(
         "  {:<25} {:>15.1} {:>15.1} {:>14.1}",
-        "GPU-hrs/day (100K req)", gpu_hours_per_day_no_echo, gpu_hours_per_day_with_echo, gpu_hours_saved
+        "GPU-hrs/day (100K req)",
+        gpu_hours_per_day_no_echo,
+        gpu_hours_per_day_with_echo,
+        gpu_hours_saved
     );
 
     println!("  {}", "-".repeat(72));
@@ -965,7 +985,11 @@ async fn context_quality_comparison() {
         "AVERAGE",
         avg_manual,
         avg_echo,
-        if avg_echo >= avg_manual { "Echo" } else { "Manual" }
+        if avg_echo >= avg_manual {
+            "Echo"
+        } else {
+            "Manual"
+        }
     );
 
     println!("\n--- Quality Analysis ---");
@@ -986,7 +1010,9 @@ async fn context_quality_comparison() {
     }
 
     println!("\n  Why Echo wins on quality:");
-    println!("    - Manual re-explanations include IRRELEVANT details (user doesn't know what matters)");
+    println!(
+        "    - Manual re-explanations include IRRELEVANT details (user doesn't know what matters)"
+    );
     println!("    - Echo memories are SEMANTICALLY SELECTED for the specific query");
     println!("    - Echo memories are concise and structured (stored as clean facts)");
     println!("    - Manual context is verbose prose with filler words");
@@ -1094,7 +1120,8 @@ async fn follow_up_reduction() {
 
     // At scale: if a user has 20 conversations/day
     let convos_per_day = 20.0;
-    let daily_followups_eliminated = total_eliminated as f64 / scenarios.len() as f64 * convos_per_day;
+    let daily_followups_eliminated =
+        total_eliminated as f64 / scenarios.len() as f64 * convos_per_day;
     let daily_tokens_saved = daily_followups_eliminated * tokens_per_followup_round as f64;
     let daily_time_saved_min = daily_followups_eliminated * seconds_per_followup / 60.0;
 
@@ -1112,10 +1139,7 @@ async fn follow_up_reduction() {
     let platform_monthly_tokens = platform_daily_tokens_saved * 30.0;
 
     println!("\n  --- Platform Impact (10K users) ---");
-    println!(
-        "  Daily tokens saved:   {:.0}",
-        platform_daily_tokens_saved
-    );
+    println!("  Daily tokens saved:   {:.0}", platform_daily_tokens_saved);
     println!(
         "  Monthly tokens saved: {:.0}M",
         platform_monthly_tokens / 1_000_000.0
@@ -1126,10 +1150,7 @@ async fn follow_up_reduction() {
     let gpu_hours_saved_monthly = gpu_secs_saved_monthly / 3600.0;
     let monthly_cost_savings = gpu_hours_saved_monthly * 2.0;
 
-    println!(
-        "  GPU-hours saved/month: {:.0}",
-        gpu_hours_saved_monthly
-    );
+    println!("  GPU-hours saved/month: {:.0}", gpu_hours_saved_monthly);
     println!("  Monthly cost savings: ${:.0}", monthly_cost_savings);
 
     // Assertions
@@ -1165,7 +1186,10 @@ async fn executive_summary() {
     let mut total_with_echo = 0usize;
 
     for scenario in &scenarios {
-        let prompt_a = format!("{}\n{}", scenario.system_prompt, scenario.user_message_no_echo);
+        let prompt_a = format!(
+            "{}\n{}",
+            scenario.system_prompt, scenario.user_message_no_echo
+        );
         let echo_block: String = scenario
             .echo_memories
             .iter()
@@ -1241,7 +1265,10 @@ async fn executive_summary() {
         "    User types {:.0} tokens of context per request (manual re-explanation)",
         avg_no_echo
     );
-    println!("    AI asks {:.1} clarifying questions per conversation", total_fu_no_echo as f64 / n);
+    println!(
+        "    AI asks {:.1} clarifying questions per conversation",
+        total_fu_no_echo as f64 / n
+    );
     println!("    Each re-explanation takes ~30 seconds of user time");
     println!();
     println!("  With Echo Memory:");
@@ -1249,19 +1276,16 @@ async fn executive_summary() {
         "    Echo injects {:.0} tokens of precise context (auto-selected memories)",
         avg_with_echo
     );
-    println!("    AI asks {:.1} clarifying questions per conversation", total_fu_with_echo as f64 / n);
+    println!(
+        "    AI asks {:.1} clarifying questions per conversation",
+        total_fu_with_echo as f64 / n
+    );
     println!("    User types ONLY the question — zero re-explanation needed");
 
     println!("\n  PER-REQUEST BREAKDOWN");
     println!("  {}", "-".repeat(50));
-    println!(
-        "  Avg input tokens (No Echo):    {:>6.0}",
-        avg_no_echo
-    );
-    println!(
-        "  Avg input tokens (With Echo):  {:>6.0}",
-        avg_with_echo
-    );
+    println!("  Avg input tokens (No Echo):    {:>6.0}", avg_no_echo);
+    println!("  Avg input tokens (With Echo):  {:>6.0}", avg_with_echo);
     println!(
         "  Token savings per request:     {:>6.0} ({:.1}%)",
         avg_no_echo - avg_with_echo,
@@ -1271,8 +1295,14 @@ async fn executive_summary() {
     println!("\n  SCALE IMPACT");
     println!("  {}", "-".repeat(50));
     println!("  {:<30} {:>12} {:>12}", "", "Without Echo", "With Echo");
-    println!("  {:<30} {:>12.2} {:>12.2}", "Requests/sec/GPU", rps_no_echo, rps_with_echo);
-    println!("  {:<30} {:>12.0} {:>12.0}", "GPU-hours/day (1M req)", gpu_hours_day_a, gpu_hours_day_b);
+    println!(
+        "  {:<30} {:>12.2} {:>12.2}",
+        "Requests/sec/GPU", rps_no_echo, rps_with_echo
+    );
+    println!(
+        "  {:<30} {:>12.0} {:>12.0}",
+        "GPU-hours/day (1M req)", gpu_hours_day_a, gpu_hours_day_b
+    );
     println!(
         "  {:<30} {:>11} {:>11}",
         "Annual cost (1M req/day)",
@@ -1308,13 +1338,7 @@ async fn executive_summary() {
     println!("\n{}", "=".repeat(90));
 
     // Final assertions
-    assert!(
-        token_savings_pct > 20.0,
-        "Token savings should exceed 20%"
-    );
-    assert!(
-        throughput_gain > 5.0,
-        "Throughput gain should exceed 5%"
-    );
+    assert!(token_savings_pct > 20.0, "Token savings should exceed 20%");
+    assert!(throughput_gain > 5.0, "Throughput gain should exceed 5%");
     assert!(annual_savings > 0.0, "Annual savings should be positive");
 }

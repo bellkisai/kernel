@@ -28,11 +28,11 @@
 //! assert!(result.total_tokens < 8_000);
 //! ```
 
+pub mod assembler;
 pub mod budget;
 pub mod segment;
-pub mod assembler;
 pub mod sensitivity;
 
-pub use assembler::{ContextAssembler, ContextConfig, AssembledContext};
+pub use assembler::{AssembledContext, ContextAssembler, ContextConfig};
 pub use budget::TokenBudget;
 pub use segment::ContextSegment;

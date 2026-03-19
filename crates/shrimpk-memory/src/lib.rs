@@ -15,15 +15,15 @@
 
 pub mod bloom;
 pub mod consolidation;
+pub mod echo;
 pub mod embedder;
 pub mod hebbian;
 pub mod lsh;
 pub mod persistence;
-pub mod similarity;
 pub mod pii;
 pub mod reformulator;
+pub mod similarity;
 pub mod store;
-pub mod echo;
 
 // Re-export the main types
 pub use consolidation::ConsolidationResult;
@@ -31,5 +31,7 @@ pub use echo::EchoEngine;
 pub use hebbian::HebbianGraph;
 pub use pii::PiiFilter;
 pub use reformulator::MemoryReformulator;
+pub use shrimpk_core::{
+    EchoConfig, EchoResult, MemoryCategory, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel,
+};
 pub use store::EchoStore;
-pub use shrimpk_core::{EchoConfig, EchoResult, MemoryCategory, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel};

@@ -43,10 +43,7 @@ impl CascadeRouter {
     }
 
     /// Route a request to the best available provider + model.
-    pub fn route(
-        &self,
-        request: &RouteRequest,
-    ) -> Result<RouteDecision, ShrimPKError> {
+    pub fn route(&self, request: &RouteRequest) -> Result<RouteDecision, ShrimPKError> {
         let mut candidates: Vec<Candidate> = Vec::new();
 
         for provider in &self.providers {
@@ -69,10 +66,10 @@ impl CascadeRouter {
                 let estimated_cost = model.estimate_cost(&request.query);
 
                 // Check per-request budget limit.
-                if let Some(budget) = request.budget_limit {
-                    if estimated_cost > budget {
-                        continue;
-                    }
+                if let Some(budget) = request.budget_limit
+                    && estimated_cost > budget
+                {
+                    continue;
                 }
 
                 // Score: lower is better. Divide cost by quality so higher quality
@@ -107,10 +104,11 @@ impl CascadeRouter {
                 .filter(|c| c.provider.id == *preferred)
                 .collect();
 
-            if let Some(best) = preferred_candidates
-                .iter()
-                .min_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
-            {
+            if let Some(best) = preferred_candidates.iter().min_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }) {
                 return Ok(RouteDecision {
                     provider_id: best.provider.id.clone(),
                     model_id: best.model.id.clone(),
@@ -270,10 +268,7 @@ mod tests {
 
     #[test]
     fn route_to_cheapest_provider() {
-        let router = CascadeRouter::new(vec![
-            cheap_cloud_provider(),
-            expensive_cloud_provider(),
-        ]);
+        let router = CascadeRouter::new(vec![cheap_cloud_provider(), expensive_cloud_provider()]);
         let request = RouteRequest {
             query: "Hello world".into(),
             required_capabilities: vec![],
@@ -359,8 +354,8 @@ mod tests {
     #[test]
     fn capability_filtering_vision() {
         let router = CascadeRouter::new(vec![
-            local_provider(),          // no vision
-            cheap_cloud_provider(),    // has vision
+            local_provider(),       // no vision
+            cheap_cloud_provider(), // has vision
         ]);
         let request = RouteRequest {
             query: "Describe this image".into(),
@@ -377,8 +372,8 @@ mod tests {
     #[test]
     fn capability_filtering_function_calling() {
         let router = CascadeRouter::new(vec![
-            local_provider(),          // no function calling
-            cheap_cloud_provider(),    // has function calling
+            local_provider(),       // no function calling
+            cheap_cloud_provider(), // has function calling
         ]);
         let request = RouteRequest {
             query: "Call the weather API".into(),
@@ -393,10 +388,7 @@ mod tests {
 
     #[test]
     fn sensitive_with_no_local_provider_fails() {
-        let router = CascadeRouter::new(vec![
-            cheap_cloud_provider(),
-            expensive_cloud_provider(),
-        ]);
+        let router = CascadeRouter::new(vec![cheap_cloud_provider(), expensive_cloud_provider()]);
         let request = RouteRequest {
             query: "Private data".into(),
             required_capabilities: vec![],
@@ -418,17 +410,14 @@ mod tests {
 
         router.remove_provider(&ProviderId::new("ollama"));
         assert_eq!(router.provider_count(), 1);
-        assert_eq!(
-            router.fallback_chain()[0],
-            ProviderId::new("openai")
-        );
+        assert_eq!(router.fallback_chain()[0], ProviderId::new("openai"));
     }
 
     #[test]
     fn free_local_model_wins_over_paid_cloud() {
         let router = CascadeRouter::new(vec![
-            local_provider(),          // cost 0, quality 0.6
-            cheap_cloud_provider(),    // cost > 0, quality 0.85
+            local_provider(),       // cost 0, quality 0.6
+            cheap_cloud_provider(), // cost > 0, quality 0.85
         ]);
         let request = RouteRequest {
             query: "Simple question".into(),
@@ -445,10 +434,7 @@ mod tests {
     #[test]
     fn preferred_provider_fallback_when_unavailable() {
         // Preferred provider is disabled, should fall back to best available.
-        let router = CascadeRouter::new(vec![
-            cheap_cloud_provider(),
-            disabled_provider(),
-        ]);
+        let router = CascadeRouter::new(vec![cheap_cloud_provider(), disabled_provider()]);
         let request = RouteRequest {
             query: "Hello".into(),
             required_capabilities: vec![],

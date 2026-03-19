@@ -40,6 +40,9 @@ pub enum ShrimPKError {
     #[error("Security error: {0}")]
     Security(String),
 
+    /// Disk limit exceeded errors
+    #[error("Disk limit: {0}")]
+    DiskLimit(String),
     /// Generic I/O errors
     #[error("IO error: {0}")]
     Io(String),

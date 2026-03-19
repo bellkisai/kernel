@@ -21,9 +21,9 @@
 //! 64+N*D*4  M     Metadata: JSON-serialized Vec<MemoryMeta>
 //! ```
 
-use shrimpk_core::{ShrimPKError, MemoryCategory, MemoryEntry, MemoryId, Result, SensitivityLevel};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use shrimpk_core::{MemoryCategory, MemoryEntry, MemoryId, Result, SensitivityLevel, ShrimPKError};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use tracing::instrument;
@@ -118,10 +118,7 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     let count = entries.len() as u64;
 
     // Determine embedding dimension from first entry, or use default 384
-    let dim: u32 = embeddings
-        .first()
-        .map(|e| e.len() as u32)
-        .unwrap_or(384);
+    let dim: u32 = embeddings.first().map(|e| e.len() as u32).unwrap_or(384);
 
     let mut file = std::fs::File::create(path)?;
 
@@ -142,7 +139,8 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     }
 
     let crc = hasher.finalize();
-    let metadata_offset = file.stream_position()
+    let metadata_offset = file
+        .stream_position()
         .map_err(|e| ShrimPKError::Persistence(format!("Failed to get stream position: {e}")))?;
 
     // --- Write metadata as JSON ---
@@ -231,7 +229,7 @@ pub fn load_binary(path: &Path) -> Result<EchoStore> {
     }
 
     // --- Read and verify embedding array ---
-    let embedding_bytes = (count as u64) * (dim as u64) * 4;
+    let embedding_bytes = count * (dim as u64) * 4;
     let embedding_end = HEADER_SIZE + embedding_bytes;
 
     if (data.len() as u64) < embedding_end {
@@ -318,8 +316,9 @@ pub fn validate_binary(path: &Path) -> Result<bool> {
         return Ok(false);
     }
 
-    let data = std::fs::read(path)
-        .map_err(|e| ShrimPKError::Persistence(format!("Failed to read file for validation: {e}")))?;
+    let data = std::fs::read(path).map_err(|e| {
+        ShrimPKError::Persistence(format!("Failed to read file for validation: {e}"))
+    })?;
 
     if data.len() < HEADER_SIZE as usize {
         return Ok(false);
@@ -341,7 +340,7 @@ pub fn validate_binary(path: &Path) -> Result<bool> {
     }
 
     // Check CRC32
-    let embedding_bytes = (count as u64) * (dim as u64) * 4;
+    let embedding_bytes = count * (dim as u64) * 4;
     let embedding_end = HEADER_SIZE + embedding_bytes;
 
     if (data.len() as u64) < embedding_end {
@@ -499,14 +498,20 @@ mod tests {
         save_binary(&store, &path).expect("save");
 
         // File should validate clean
-        assert!(validate_binary(&path).expect("validate"), "Clean file should be valid");
+        assert!(
+            validate_binary(&path).expect("validate"),
+            "Clean file should be valid"
+        );
 
         // Corrupt an embedding byte
         let mut data = std::fs::read(&path).expect("read");
         data[HEADER_SIZE as usize + 4] ^= 0xFF;
         std::fs::write(&path, &data).expect("write corrupted");
 
-        assert!(!validate_binary(&path).expect("validate"), "Corrupted file should be invalid");
+        assert!(
+            !validate_binary(&path).expect("validate"),
+            "Corrupted file should be invalid"
+        );
     }
 
     #[test]
@@ -564,7 +569,12 @@ mod tests {
 
         let result = load_binary(&path);
         assert!(result.is_err(), "Should reject wrong version");
-        assert!(result.unwrap_err().to_string().contains("Unsupported format version"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported format version")
+        );
     }
 
     #[test]

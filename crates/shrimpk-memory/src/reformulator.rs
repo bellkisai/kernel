@@ -7,8 +7,8 @@
 //! Phase 1: regex-based pattern matching (no LLM dependency).
 //! Phase 2: optional LLM-based reformulation for complex sentences.
 
-use shrimpk_core::MemoryCategory;
 use regex::Regex;
+use shrimpk_core::MemoryCategory;
 
 /// A compiled reformulation rule: regex pattern + replacement template.
 struct ReformulationRule {
@@ -39,11 +39,20 @@ impl MemoryReformulator {
         // Case-insensitive matching on the leading verb/phrase.
         let rule_defs: Vec<(&str, &'static str)> = vec![
             // "I always choose X over Y" -> "Preference: X over Y"
-            (r"(?i)^I\s+always\s+choose\s+(.+?)\s+over\s+(.+)$", "Preference: $1 over $2"),
+            (
+                r"(?i)^I\s+always\s+choose\s+(.+?)\s+over\s+(.+)$",
+                "Preference: $1 over $2",
+            ),
             // "My favorite X is Y" -> "Favorite X: Y"
-            (r"(?i)^My\s+fav(?:orite|ourite)\s+(.+?)\s+is\s+(.+)$", "Favorite $1: $2"),
+            (
+                r"(?i)^My\s+fav(?:orite|ourite)\s+(.+?)\s+is\s+(.+)$",
+                "Favorite $1: $2",
+            ),
             // "I prefer X for Y" -> "Preference: X for Y"
-            (r"(?i)^I\s+prefer\s+(.+?)\s+for\s+(.+)$", "Preference: $1 for $2"),
+            (
+                r"(?i)^I\s+prefer\s+(.+?)\s+for\s+(.+)$",
+                "Preference: $1 for $2",
+            ),
             // "I prefer X" (without "for") -> "Preference: X"
             (r"(?i)^I\s+prefer\s+(.+)$", "Preference: $1"),
             // "I'm building X" / "I am building X" -> "Active project: X"
@@ -259,10 +268,7 @@ mod tests {
     #[test]
     fn reformulate_no_match_returns_none() {
         let r = MemoryReformulator::new();
-        assert_eq!(
-            r.reformulate("Random text with no pattern"),
-            None
-        );
+        assert_eq!(r.reformulate("Random text with no pattern"), None);
     }
 
     #[test]
@@ -304,25 +310,67 @@ mod tests {
     #[test]
     fn categorize_preference() {
         let r = MemoryReformulator::new();
-        assert_eq!(r.categorize("I prefer Python for backend work"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("My favorite tool is Neovim"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("I always use dark mode"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("I always choose Rust over Go"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("My go-to framework is React"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("I recommend FastAPI"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("My preferred editor is VSCode"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("I like to use TypeScript"), MemoryCategory::Preference);
+        assert_eq!(
+            r.categorize("I prefer Python for backend work"),
+            MemoryCategory::Preference
+        );
+        assert_eq!(
+            r.categorize("My favorite tool is Neovim"),
+            MemoryCategory::Preference
+        );
+        assert_eq!(
+            r.categorize("I always use dark mode"),
+            MemoryCategory::Preference
+        );
+        assert_eq!(
+            r.categorize("I always choose Rust over Go"),
+            MemoryCategory::Preference
+        );
+        assert_eq!(
+            r.categorize("My go-to framework is React"),
+            MemoryCategory::Preference
+        );
+        assert_eq!(
+            r.categorize("I recommend FastAPI"),
+            MemoryCategory::Preference
+        );
+        assert_eq!(
+            r.categorize("My preferred editor is VSCode"),
+            MemoryCategory::Preference
+        );
+        assert_eq!(
+            r.categorize("I like to use TypeScript"),
+            MemoryCategory::Preference
+        );
     }
 
     #[test]
     fn categorize_active_project() {
         let r = MemoryReformulator::new();
-        assert_eq!(r.categorize("Currently building Bellkis"), MemoryCategory::ActiveProject);
-        assert_eq!(r.categorize("I'm working on a new feature"), MemoryCategory::ActiveProject);
-        assert_eq!(r.categorize("My project is a Tauri app"), MemoryCategory::ActiveProject);
-        assert_eq!(r.categorize("I'm building an AI assistant"), MemoryCategory::ActiveProject);
-        assert_eq!(r.categorize("The project uses Rust and React"), MemoryCategory::ActiveProject);
-        assert_eq!(r.categorize("Our app supports multiple languages"), MemoryCategory::ActiveProject);
+        assert_eq!(
+            r.categorize("Currently building Bellkis"),
+            MemoryCategory::ActiveProject
+        );
+        assert_eq!(
+            r.categorize("I'm working on a new feature"),
+            MemoryCategory::ActiveProject
+        );
+        assert_eq!(
+            r.categorize("My project is a Tauri app"),
+            MemoryCategory::ActiveProject
+        );
+        assert_eq!(
+            r.categorize("I'm building an AI assistant"),
+            MemoryCategory::ActiveProject
+        );
+        assert_eq!(
+            r.categorize("The project uses Rust and React"),
+            MemoryCategory::ActiveProject
+        );
+        assert_eq!(
+            r.categorize("Our app supports multiple languages"),
+            MemoryCategory::ActiveProject
+        );
     }
 
     #[test]
@@ -331,29 +379,65 @@ mod tests {
         assert_eq!(r.categorize("My name is Lior"), MemoryCategory::Identity);
         assert_eq!(r.categorize("I live in Tel Aviv"), MemoryCategory::Identity);
         assert_eq!(r.categorize("I am from Israel"), MemoryCategory::Identity);
-        assert_eq!(r.categorize("I speak Hebrew and English"), MemoryCategory::Identity);
-        assert_eq!(r.categorize("My email is user@example.com"), MemoryCategory::Identity);
+        assert_eq!(
+            r.categorize("I speak Hebrew and English"),
+            MemoryCategory::Identity
+        );
+        assert_eq!(
+            r.categorize("My email is user@example.com"),
+            MemoryCategory::Identity
+        );
         assert_eq!(r.categorize("I was born in 1990"), MemoryCategory::Identity);
     }
 
     #[test]
     fn categorize_fact() {
         let r = MemoryReformulator::new();
-        assert_eq!(r.categorize("The speed of light is 299,792,458 m/s"), MemoryCategory::Fact);
-        assert_eq!(r.categorize("The population of Tokyo is about 14 million"), MemoryCategory::Fact);
-        assert_eq!(r.categorize("The telephone was invented by Alexander Graham Bell"), MemoryCategory::Fact);
-        assert_eq!(r.categorize("Rust is known for memory safety"), MemoryCategory::Fact);
-        assert_eq!(r.categorize("Google was founded in 1998"), MemoryCategory::Fact);
-        assert_eq!(r.categorize("According to the docs, this API requires auth"), MemoryCategory::Fact);
+        assert_eq!(
+            r.categorize("The speed of light is 299,792,458 m/s"),
+            MemoryCategory::Fact
+        );
+        assert_eq!(
+            r.categorize("The population of Tokyo is about 14 million"),
+            MemoryCategory::Fact
+        );
+        assert_eq!(
+            r.categorize("The telephone was invented by Alexander Graham Bell"),
+            MemoryCategory::Fact
+        );
+        assert_eq!(
+            r.categorize("Rust is known for memory safety"),
+            MemoryCategory::Fact
+        );
+        assert_eq!(
+            r.categorize("Google was founded in 1998"),
+            MemoryCategory::Fact
+        );
+        assert_eq!(
+            r.categorize("According to the docs, this API requires auth"),
+            MemoryCategory::Fact
+        );
     }
 
     #[test]
     fn categorize_conversation_default() {
         let r = MemoryReformulator::new();
-        assert_eq!(r.categorize("We discussed the bug yesterday"), MemoryCategory::Conversation);
-        assert_eq!(r.categorize("Can you help me fix this error?"), MemoryCategory::Conversation);
-        assert_eq!(r.categorize("Thanks, that worked!"), MemoryCategory::Conversation);
-        assert_eq!(r.categorize("Random unmatched text"), MemoryCategory::Conversation);
+        assert_eq!(
+            r.categorize("We discussed the bug yesterday"),
+            MemoryCategory::Conversation
+        );
+        assert_eq!(
+            r.categorize("Can you help me fix this error?"),
+            MemoryCategory::Conversation
+        );
+        assert_eq!(
+            r.categorize("Thanks, that worked!"),
+            MemoryCategory::Conversation
+        );
+        assert_eq!(
+            r.categorize("Random unmatched text"),
+            MemoryCategory::Conversation
+        );
     }
 
     #[test]
@@ -361,6 +445,9 @@ mod tests {
         let r = MemoryReformulator::new();
         assert_eq!(r.categorize("MY NAME IS LIOR"), MemoryCategory::Identity);
         assert_eq!(r.categorize("i prefer python"), MemoryCategory::Preference);
-        assert_eq!(r.categorize("CURRENTLY BUILDING something"), MemoryCategory::ActiveProject);
+        assert_eq!(
+            r.categorize("CURRENTLY BUILDING something"),
+            MemoryCategory::ActiveProject
+        );
     }
 }

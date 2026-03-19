@@ -38,7 +38,7 @@ impl fmt::Display for MemoryId {
 /// Project context stays relevant for weeks; preferences last months;
 /// one-off conversations fade in days.  This is Echo Memory's
 /// differentiator over MuninnDB's uniform ACT-R decay (d=0.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MemoryCategory {
     /// Current work, active context — half-life: 14 days.
     ActiveProject,
@@ -51,6 +51,7 @@ pub enum MemoryCategory {
     /// Learned information, technical knowledge — half-life: 30 days.
     Fact,
     /// Uncategorized memories — half-life: 7 days.
+    #[default]
     Default,
 }
 
@@ -58,28 +59,23 @@ impl MemoryCategory {
     /// Half-life in seconds for this category's decay rate.
     pub fn half_life_secs(&self) -> f64 {
         match self {
-            Self::ActiveProject => 14.0 * 86400.0,   // 14 days
-            Self::Preference => 60.0 * 86400.0,      // 60 days
-            Self::Conversation => 3.0 * 86400.0,     // 3 days
-            Self::Identity => 365.0 * 86400.0,       // 1 year
-            Self::Fact => 30.0 * 86400.0,            // 30 days
-            Self::Default => 7.0 * 86400.0,          // 7 days
+            Self::ActiveProject => 14.0 * 86400.0, // 14 days
+            Self::Preference => 60.0 * 86400.0,    // 60 days
+            Self::Conversation => 3.0 * 86400.0,   // 3 days
+            Self::Identity => 365.0 * 86400.0,     // 1 year
+            Self::Fact => 30.0 * 86400.0,          // 30 days
+            Self::Default => 7.0 * 86400.0,        // 7 days
         }
-    }
-}
-
-impl Default for MemoryCategory {
-    fn default() -> Self {
-        Self::Default
     }
 }
 
 /// Sensitivity classification for stored memories.
 ///
 /// Controls where a memory can be pushed during echo activation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SensitivityLevel {
     /// Safe to push to any model (local or cloud).
+    #[default]
     Public,
     /// Push only to local models, never to cloud providers.
     Private,
@@ -87,12 +83,6 @@ pub enum SensitivityLevel {
     Restricted,
     /// Not stored at all — filtered pre-storage (secrets, credentials).
     Blocked,
-}
-
-impl Default for SensitivityLevel {
-    fn default() -> Self {
-        Self::Public
-    }
 }
 
 /// A stored memory entry in the Echo Memory system.
@@ -194,6 +184,12 @@ pub struct MemoryStats {
     pub avg_echo_latency_ms: f64,
     /// Total echo queries processed.
     pub total_echo_queries: u64,
+    /// Current disk usage in bytes (data directory total).
+    #[serde(default)]
+    pub disk_usage_bytes: u64,
+    /// Maximum disk usage allowed in bytes.
+    #[serde(default)]
+    pub max_disk_bytes: u64,
 }
 
 #[cfg(test)]
@@ -261,7 +257,10 @@ mod tests {
 
     #[test]
     fn category_half_life_active_project() {
-        assert_eq!(MemoryCategory::ActiveProject.half_life_secs(), 14.0 * 86400.0);
+        assert_eq!(
+            MemoryCategory::ActiveProject.half_life_secs(),
+            14.0 * 86400.0
+        );
     }
 
     #[test]

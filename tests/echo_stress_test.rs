@@ -528,10 +528,7 @@ async fn stress_full_corpus() {
                         }
                     }
                     Err(e) => {
-                        failures.push(format!(
-                            "[{}] DirectRecall errored: {e}",
-                            tq.label
-                        ));
+                        failures.push(format!("[{}] DirectRecall errored: {e}", tq.label));
                     }
                 }
             }
@@ -546,11 +543,8 @@ async fn stress_full_corpus() {
                             ));
                         } else {
                             // Collect unique source categories from the top 10 results
-                            let unique_sources: std::collections::HashSet<&str> = results
-                                .iter()
-                                .take(10)
-                                .map(|r| r.source.as_str())
-                                .collect();
+                            let unique_sources: std::collections::HashSet<&str> =
+                                results.iter().take(10).map(|r| r.source.as_str()).collect();
                             if unique_sources.len() < 2 {
                                 // Soft warning -- cross-category is aspirational with
                                 // a small embedding model. Log but don't hard-fail.
@@ -574,10 +568,7 @@ async fn stress_full_corpus() {
                         }
                     }
                     Err(e) => {
-                        failures.push(format!(
-                            "[{}] CrossCategory errored: {e}",
-                            tq.label
-                        ));
+                        failures.push(format!("[{}] CrossCategory errored: {e}", tq.label));
                     }
                 }
             }
@@ -603,10 +594,7 @@ async fn stress_full_corpus() {
                         }
                     }
                     Err(e) => {
-                        failures.push(format!(
-                            "[{}] Vague errored: {e}",
-                            tq.label
-                        ));
+                        failures.push(format!("[{}] Vague errored: {e}", tq.label));
                     }
                 }
             }
@@ -621,17 +609,16 @@ async fn stress_full_corpus() {
                             if top.similarity > 0.35 {
                                 eprintln!(
                                     "  WARN [{}]: NoMatch top similarity {:.3} > 0.35 for: {:?}  (content: {:?})",
-                                    tq.label, top.similarity, tq.query,
+                                    tq.label,
+                                    top.similarity,
+                                    tq.query,
                                     &top.content[..top.content.len().min(80)],
                                 );
                             }
                         }
                     }
                     Err(e) => {
-                        failures.push(format!(
-                            "[{}] NoMatch errored: {e}",
-                            tq.label
-                        ));
+                        failures.push(format!("[{}] NoMatch errored: {e}", tq.label));
                     }
                 }
             }
@@ -679,10 +666,7 @@ async fn stress_full_corpus() {
     // ── Hard failure summary ─────────────────────────────────────────
     if !failures.is_empty() {
         let msg = failures.join("\n  ");
-        panic!(
-            "\n{} query assertion(s) failed:\n  {msg}\n",
-            failures.len()
-        );
+        panic!("\n{} query assertion(s) failed:\n  {msg}\n", failures.len());
     }
 }
 
@@ -702,7 +686,11 @@ async fn stress_direct_recall_precision() {
 
     // (query, expected source category, minimum similarity)
     let cases: &[(&str, &str, f32)] = &[
-        ("What's my preferred Python web framework?", "programming", 0.3),
+        (
+            "What's my preferred Python web framework?",
+            "programming",
+            0.3,
+        ),
         ("What database do I use?", "programming", 0.3),
         ("What am I currently building?", "projects", 0.3),
         ("What's my favorite travel destination?", "travel", 0.3),
@@ -746,13 +734,13 @@ async fn stress_direct_recall_precision() {
         pass += 1;
     }
 
-    eprintln!("\n=== DIRECT RECALL PRECISION ===\n  pass: {pass}/{}\n", cases.len());
+    eprintln!(
+        "\n=== DIRECT RECALL PRECISION ===\n  pass: {pass}/{}\n",
+        cases.len()
+    );
 
     if !fail_msgs.is_empty() {
-        panic!(
-            "\nDirect recall failures:\n{}\n",
-            fail_msgs.join("\n")
-        );
+        panic!("\nDirect recall failures:\n{}\n", fail_msgs.join("\n"));
     }
 }
 
@@ -1008,7 +996,9 @@ async fn stress_query_latency_distribution() {
         p50.as_secs_f64() * 1000.0,
         p95.as_secs_f64() * 1000.0,
         p99.as_secs_f64() * 1000.0,
-        all_latencies.last().map_or(0.0, |d| d.as_secs_f64() * 1000.0),
+        all_latencies
+            .last()
+            .map_or(0.0, |d| d.as_secs_f64() * 1000.0),
     );
 }
 
@@ -1077,7 +1067,8 @@ async fn stress_persistence_roundtrip() {
         }
     }
 
-    eprintln!("\n=== PERSISTENCE ROUNDTRIP ===\n  110 memories persisted + loaded successfully\n  {probe} probe queries returned identical results\n",
+    eprintln!(
+        "\n=== PERSISTENCE ROUNDTRIP ===\n  110 memories persisted + loaded successfully\n  {probe} probe queries returned identical results\n",
         probe = probe_queries.len(),
     );
 }
@@ -1133,7 +1124,10 @@ async fn stress_forget_at_scale() {
 
     // Forget all 20
     for id in &forget_ids {
-        engine.forget(id.clone()).await.expect("forget should succeed");
+        engine
+            .forget(id.clone())
+            .await
+            .expect("forget should succeed");
     }
 
     let stats_after = engine.stats().await;
@@ -1155,7 +1149,8 @@ async fn stress_forget_at_scale() {
         );
     }
 
-    eprintln!("\n=== FORGET AT SCALE ===\n  Forgot 20/130 memories\n  Remaining: {}\n  None of the forgotten memories appear in echo results\n",
+    eprintln!(
+        "\n=== FORGET AT SCALE ===\n  Forgot 20/130 memories\n  Remaining: {}\n  None of the forgotten memories appear in echo results\n",
         stats_after.total_memories,
     );
 }
@@ -1273,7 +1268,10 @@ async fn stress_category_isolation() {
         }
     }
 
-    eprintln!("\n=== CATEGORY ISOLATION ===\n  pass: {pass}/{}\n", probes.len());
+    eprintln!(
+        "\n=== CATEGORY ISOLATION ===\n  pass: {pass}/{}\n",
+        probes.len()
+    );
 
     // At least 7/10 should hit the correct category with these specific probes
     assert!(
@@ -1354,9 +1352,7 @@ async fn stress_concurrent_echo() {
         }
     }
 
-    eprintln!(
-        "\n=== CONCURRENT ECHO ===\n  OK:   {ok_count}\n  ERR:  {err_count}\n"
-    );
+    eprintln!("\n=== CONCURRENT ECHO ===\n  OK:   {ok_count}\n  ERR:  {err_count}\n");
 
     // All should succeed (the embedder Mutex serializes but should not deadlock)
     assert_eq!(
@@ -1387,10 +1383,7 @@ async fn stress_echo_count_tracking() {
     }
 
     let stats = engine.stats().await;
-    assert_eq!(
-        stats.total_echo_queries, 10,
-        "Should track 10 echo queries"
-    );
+    assert_eq!(stats.total_echo_queries, 10, "Should track 10 echo queries");
 
     eprintln!(
         "\n=== ECHO COUNT TRACKING ===\n  queries:     {}\n  avg latency: {:.2}ms\n",

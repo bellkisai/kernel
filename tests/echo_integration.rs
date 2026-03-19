@@ -44,23 +44,38 @@ async fn test_full_echo_cycle() {
 
     // Store 5 diverse memories
     engine
-        .store("Rust is a systems programming language focused on safety and concurrency", "test")
+        .store(
+            "Rust is a systems programming language focused on safety and concurrency",
+            "test",
+        )
         .await
         .unwrap();
     engine
-        .store("The capital of France is Paris, known for the Eiffel Tower", "test")
+        .store(
+            "The capital of France is Paris, known for the Eiffel Tower",
+            "test",
+        )
         .await
         .unwrap();
     engine
-        .store("Machine learning models require large datasets for training", "test")
+        .store(
+            "Machine learning models require large datasets for training",
+            "test",
+        )
         .await
         .unwrap();
     engine
-        .store("Photosynthesis converts sunlight into chemical energy in plants", "test")
+        .store(
+            "Photosynthesis converts sunlight into chemical energy in plants",
+            "test",
+        )
         .await
         .unwrap();
     engine
-        .store("The TCP/IP protocol stack powers internet communication", "test")
+        .store(
+            "The TCP/IP protocol stack powers internet communication",
+            "test",
+        )
         .await
         .unwrap();
 
@@ -346,14 +361,20 @@ async fn test_stats_accuracy() {
 
     // Verify empty stats
     let stats = engine.stats().await;
-    assert_eq!(stats.total_memories, 0, "Empty engine should have 0 memories");
+    assert_eq!(
+        stats.total_memories, 0,
+        "Empty engine should have 0 memories"
+    );
     assert_eq!(stats.total_echo_queries, 0, "No queries yet");
 
     // Store N memories
     let n: usize = 7;
     for i in 0..n {
         engine
-            .store(&format!("Test memory number {i} with unique content"), "test")
+            .store(
+                &format!("Test memory number {i} with unique content"),
+                "test",
+            )
             .await
             .unwrap();
     }
@@ -427,10 +448,7 @@ async fn test_sensitivity_classification() {
         .unwrap();
 
     // Verify Public: echo result should contain original text (no masking)
-    let results = engine
-        .echo("Tokyo weather summer", 5)
-        .await
-        .unwrap();
+    let results = engine.echo("Tokyo weather summer", 5).await.unwrap();
     if let Some(r) = results.iter().find(|r| r.memory_id == id_public) {
         assert!(
             !r.content.contains("[MASKED:"),
@@ -445,10 +463,7 @@ async fn test_sensitivity_classification() {
     }
 
     // Verify Private: echo result should mask the email
-    let results = engine
-        .echo("contact support account", 5)
-        .await
-        .unwrap();
+    let results = engine.echo("contact support account", 5).await.unwrap();
     if let Some(r) = results.iter().find(|r| r.memory_id == id_private) {
         assert!(
             r.content.contains("[MASKED:email]"),
@@ -463,10 +478,7 @@ async fn test_sensitivity_classification() {
     }
 
     // Verify Restricted: echo result should mask the API key
-    let results = engine
-        .echo("secret key credentials", 5)
-        .await
-        .unwrap();
+    let results = engine.echo("secret key credentials", 5).await.unwrap();
     if let Some(r) = results.iter().find(|r| r.memory_id == id_restricted) {
         assert!(
             r.content.contains("[MASKED:api_key]"),

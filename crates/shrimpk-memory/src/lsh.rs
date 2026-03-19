@@ -60,7 +60,10 @@ impl CosineHash {
     ///
     /// Default recommendation: 16 tables, 10 bits per table.
     pub fn new(dim: usize, num_tables: usize, bits_per_table: usize) -> Self {
-        assert!(bits_per_table <= 64, "bits_per_table must be <= 64 (packed into u64)");
+        assert!(
+            bits_per_table <= 64,
+            "bits_per_table must be <= 64 (packed into u64)"
+        );
         assert!(dim > 0, "dimension must be > 0");
 
         let mut rng = rand::thread_rng();

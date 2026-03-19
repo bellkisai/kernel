@@ -1,12 +1,19 @@
 //! Configuration types for the Echo Memory engine.
+//!
+//! Config resolution follows a priority chain:
+//! **env vars > config file (TOML) > auto-detect defaults**
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Default maximum disk usage: 2 GB.
+const DEFAULT_MAX_DISK_BYTES: u64 = 2_147_483_648;
+
 /// Quantization mode for embedding vectors in the echo index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum QuantizationMode {
     /// Full 32-bit float (1,536 bytes per 384-dim vector). Best quality.
+    #[default]
     F32,
     /// Half precision (768 bytes per vector). ~0.1% quality loss.
     F16,
@@ -16,12 +23,6 @@ pub enum QuantizationMode {
     Binary,
 }
 
-impl Default for QuantizationMode {
-    fn default() -> Self {
-        Self::F32
-    }
-}
-
 impl QuantizationMode {
     /// Bytes per embedding vector at this quantization level.
     pub fn bytes_per_vector(&self, dim: usize) -> usize {
@@ -29,7 +30,33 @@ impl QuantizationMode {
             Self::F32 => dim * 4,
             Self::F16 => dim * 2,
             Self::Int8 => dim,
-            Self::Binary => (dim + 7) / 8, // ceil(dim/8) bytes
+            Self::Binary => dim.div_ceil(8),
+        }
+    }
+}
+
+impl std::fmt::Display for QuantizationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::F32 => write!(f, "f32"),
+            Self::F16 => write!(f, "f16"),
+            Self::Int8 => write!(f, "int8"),
+            Self::Binary => write!(f, "binary"),
+        }
+    }
+}
+
+impl std::str::FromStr for QuantizationMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "f32" => Ok(Self::F32),
+            "f16" => Ok(Self::F16),
+            "int8" => Ok(Self::Int8),
+            "binary" => Ok(Self::Binary),
+            _ => Err(format!(
+                "invalid quantization mode '{s}': expected f32, f16, int8, or binary"
+            )),
         }
     }
 }
@@ -53,37 +80,37 @@ pub struct EchoConfig {
     /// Embedding dimension (384 for all-MiniLM-L6-v2).
     pub embedding_dim: usize,
     /// Whether to use LSH for sub-linear candidate retrieval.
-    /// When true, echo queries use locality-sensitive hashing to narrow
-    /// candidates before exact cosine similarity. Disable for testing/debugging.
     pub use_lsh: bool,
     /// Whether to use Bloom filter pre-screening before LSH.
-    /// When true, queries that definitely have no matching memories are
-    /// rejected in O(1) before any embedding similarity work.
     pub use_bloom: bool,
+    /// Maximum disk usage in bytes for the data directory.
+    #[serde(default = "default_max_disk_bytes")]
+    pub max_disk_bytes: u64,
+}
+
+fn default_max_disk_bytes() -> u64 {
+    DEFAULT_MAX_DISK_BYTES
 }
 
 impl Default for EchoConfig {
     fn default() -> Self {
         Self {
             max_memories: 1_000_000,
-            similarity_threshold: 0.14, // KS1 precision tuning: perfect F1 at 0.14
-            max_echo_results: 20,     // KS1 tuning: avg 20.6 results at optimal threshold
-            ram_budget_bytes: 1_800_000_000, // ~1.8 GB
-            data_dir: dirs_default(),
+            similarity_threshold: 0.14,
+            max_echo_results: 20,
+            ram_budget_bytes: 1_800_000_000,
+            data_dir: config_dir(),
             quantization: QuantizationMode::F32,
             embedding_dim: 384,
             use_lsh: true,
             use_bloom: true,
+            max_disk_bytes: DEFAULT_MAX_DISK_BYTES,
         }
     }
 }
 
 impl EchoConfig {
     /// Auto-detect optimal configuration based on available system RAM.
-    ///
-    /// Uses binary quantization on low-RAM machines (8GB) for 150MB index,
-    /// full f32 on high-RAM machines (32GB+) for maximum quality.
-    /// User can override any setting.
     pub fn auto_detect() -> Self {
         let total_ram_bytes = get_total_ram();
         let ram_gb = total_ram_bytes / 1_073_741_824;
@@ -97,55 +124,219 @@ impl EchoConfig {
     }
 
     /// Minimal config for 8GB RAM machines.
-    /// Binary quantized: 100K memories in ~5MB index.
     pub fn minimal() -> Self {
         Self {
             max_memories: 100_000,
-            similarity_threshold: 0.16, // slightly higher than default to compensate for binary quant
+            similarity_threshold: 0.16,
             max_echo_results: 10,
-            ram_budget_bytes: 50_000_000, // ~50 MB
+            ram_budget_bytes: 50_000_000,
             quantization: QuantizationMode::Binary,
             ..Default::default()
         }
     }
 
     /// Standard config for 16GB RAM machines.
-    /// f32: 500K memories in ~900MB index.
     pub fn standard() -> Self {
         Self {
             max_memories: 500_000,
-            ram_budget_bytes: 900_000_000, // ~900 MB
+            ram_budget_bytes: 900_000_000,
             ..Default::default()
         }
     }
 
-    /// Full config for 32GB RAM machines.
-    /// f32: 1M memories in ~1.8GB index.
+    /// Full config for 32GB RAM machines (default).
     pub fn full() -> Self {
         Self::default()
     }
 
     /// Maximum config for 64GB+ RAM machines.
-    /// f32: 5M memories in ~9GB index.
     pub fn maximum() -> Self {
         Self {
             max_memories: 5_000_000,
-            ram_budget_bytes: 9_000_000_000, // ~9 GB
+            ram_budget_bytes: 9_000_000_000,
             ..Default::default()
         }
     }
 
     /// Estimated index size in bytes for the current config.
     pub fn estimated_index_bytes(&self) -> u64 {
-        let bytes_per_entry = self.quantization.bytes_per_vector(self.embedding_dim)
-            + 100; // metadata overhead per entry
+        let bytes_per_entry = self.quantization.bytes_per_vector(self.embedding_dim) + 100;
         (self.max_memories as u64) * (bytes_per_entry as u64)
     }
 }
 
+// ---------------------------------------------------------------------------
+// File-based config (TOML)
+// ---------------------------------------------------------------------------
+
+/// User-editable config file (`~/.shrimpk-kernel/config.toml`).
+/// All fields are optional — missing fields fall back to auto-detect defaults.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FileConfig {
+    pub max_memories: Option<usize>,
+    pub similarity_threshold: Option<f32>,
+    pub max_echo_results: Option<usize>,
+    pub ram_budget_bytes: Option<u64>,
+    pub data_dir: Option<PathBuf>,
+    pub quantization: Option<QuantizationMode>,
+    pub embedding_dim: Option<usize>,
+    pub use_lsh: Option<bool>,
+    pub use_bloom: Option<bool>,
+    pub max_disk_bytes: Option<u64>,
+}
+
+/// Default data directory: `~/.shrimpk-kernel/`
+pub fn config_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".shrimpk-kernel")
+}
+
+/// Path to the config file: `~/.shrimpk-kernel/config.toml`
+pub fn config_path() -> PathBuf {
+    config_dir().join("config.toml")
+}
+
+/// Load the TOML config file. Returns `Ok(None)` if the file does not exist.
+pub fn load_config_file() -> crate::Result<Option<FileConfig>> {
+    let path = config_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| crate::ShrimPKError::Config(format!("reading {}: {e}", path.display())))?;
+    let fc: FileConfig = toml::from_str(&content)
+        .map_err(|e| crate::ShrimPKError::Config(format!("parsing {}: {e}", path.display())))?;
+    Ok(Some(fc))
+}
+
+/// Save a `FileConfig` to the TOML config file, creating parent dirs if needed.
+pub fn save_config_file(config: &FileConfig) -> crate::Result<()> {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            crate::ShrimPKError::Config(format!("creating {}: {e}", parent.display()))
+        })?;
+    }
+    let content = toml::to_string_pretty(config)
+        .map_err(|e| crate::ShrimPKError::Config(format!("serializing config: {e}")))?;
+    std::fs::write(&path, content)
+        .map_err(|e| crate::ShrimPKError::Config(format!("writing {}: {e}", path.display())))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Environment variable overrides
+// ---------------------------------------------------------------------------
+
+fn env_usize(name: &str) -> crate::Result<Option<usize>> {
+    match std::env::var(name) {
+        Ok(val) => val
+            .parse()
+            .map(Some)
+            .map_err(|_| crate::ShrimPKError::Config(format!("{name}={val}: invalid integer"))),
+        Err(_) => Ok(None),
+    }
+}
+
+fn env_u64(name: &str) -> crate::Result<Option<u64>> {
+    match std::env::var(name) {
+        Ok(val) => val
+            .parse()
+            .map(Some)
+            .map_err(|_| crate::ShrimPKError::Config(format!("{name}={val}: invalid integer"))),
+        Err(_) => Ok(None),
+    }
+}
+
+fn env_f32(name: &str) -> crate::Result<Option<f32>> {
+    match std::env::var(name) {
+        Ok(val) => val
+            .parse()
+            .map(Some)
+            .map_err(|_| crate::ShrimPKError::Config(format!("{name}={val}: invalid float"))),
+        Err(_) => Ok(None),
+    }
+}
+
+fn env_quantization() -> crate::Result<Option<QuantizationMode>> {
+    match std::env::var("SHRIMPK_QUANTIZATION") {
+        Ok(val) => val
+            .parse()
+            .map(Some)
+            .map_err(|e| crate::ShrimPKError::Config(format!("SHRIMPK_QUANTIZATION: {e}"))),
+        Err(_) => Ok(None),
+    }
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var(name).ok().map(PathBuf::from)
+}
+
+/// Resolve the final config: auto-detect → overlay file → overlay env vars.
+pub fn resolve_config() -> crate::Result<EchoConfig> {
+    let mut config = EchoConfig::auto_detect();
+
+    // Layer 2: file overrides
+    if let Some(fc) = load_config_file()? {
+        if let Some(v) = fc.max_memories {
+            config.max_memories = v;
+        }
+        if let Some(v) = fc.similarity_threshold {
+            config.similarity_threshold = v;
+        }
+        if let Some(v) = fc.max_echo_results {
+            config.max_echo_results = v;
+        }
+        if let Some(v) = fc.ram_budget_bytes {
+            config.ram_budget_bytes = v;
+        }
+        if let Some(v) = fc.data_dir {
+            config.data_dir = v;
+        }
+        if let Some(v) = fc.quantization {
+            config.quantization = v;
+        }
+        if let Some(v) = fc.embedding_dim {
+            config.embedding_dim = v;
+        }
+        if let Some(v) = fc.use_lsh {
+            config.use_lsh = v;
+        }
+        if let Some(v) = fc.use_bloom {
+            config.use_bloom = v;
+        }
+        if let Some(v) = fc.max_disk_bytes {
+            config.max_disk_bytes = v;
+        }
+    }
+
+    // Layer 3: env var overrides (highest priority)
+    if let Some(v) = env_usize("SHRIMPK_MAX_MEMORIES")? {
+        config.max_memories = v;
+    }
+    if let Some(v) = env_f32("SHRIMPK_SIMILARITY_THRESHOLD")? {
+        config.similarity_threshold = v;
+    }
+    if let Some(v) = env_u64("SHRIMPK_MAX_DISK_BYTES")? {
+        config.max_disk_bytes = v;
+    }
+    if let Some(v) = env_quantization()? {
+        config.quantization = v;
+    }
+    if let Some(v) = env_path("SHRIMPK_DATA_DIR") {
+        config.data_dir = v;
+    }
+
+    Ok(config)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 /// Get total system RAM in bytes.
 fn get_total_ram() -> u64 {
-    // sysinfo is an optional dependency — fallback to 16GB assumption
     #[cfg(feature = "sysinfo")]
     {
         use sysinfo::System;
@@ -158,22 +349,25 @@ fn get_total_ram() -> u64 {
     }
 }
 
-/// Default data directory: ~/.shrimpk-kernel/
-fn dirs_default() -> PathBuf {
-    dirs_home().join(".shrimpk-kernel")
+/// Calculate total disk usage of a directory (non-recursive for the data dir).
+pub fn disk_usage(dir: &std::path::Path) -> std::io::Result<u64> {
+    if !dir.exists() {
+        return Ok(0);
+    }
+    let mut total: u64 = 0;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let meta = entry.metadata()?;
+        if meta.is_file() {
+            total += meta.len();
+        }
+    }
+    Ok(total)
 }
 
-/// Home directory (cross-platform).
-fn dirs_home() -> PathBuf {
-    // Simple cross-platform home directory detection
-    if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home)
-    } else if let Ok(profile) = std::env::var("USERPROFILE") {
-        PathBuf::from(profile)
-    } else {
-        PathBuf::from(".")
-    }
-}
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -186,6 +380,7 @@ mod tests {
         assert!(config.similarity_threshold > 0.0);
         assert!(config.similarity_threshold < 1.0);
         assert!(config.max_echo_results > 0);
+        assert_eq!(config.max_disk_bytes, DEFAULT_MAX_DISK_BYTES);
     }
 
     #[test]
@@ -200,14 +395,22 @@ mod tests {
     fn minimal_config_fits_8gb() {
         let config = EchoConfig::minimal();
         let estimated = config.estimated_index_bytes();
-        assert!(estimated < 100_000_000, "Minimal index should be under 100MB, got {}", estimated);
+        assert!(
+            estimated < 100_000_000,
+            "Minimal index should be under 100MB, got {}",
+            estimated
+        );
     }
 
     #[test]
     fn full_config_fits_16gb() {
         let config = EchoConfig::full();
         let estimated = config.estimated_index_bytes();
-        assert!(estimated < 2_000_000_000, "Full index should be under 2GB, got {}", estimated);
+        assert!(
+            estimated < 2_000_000_000,
+            "Full index should be under 2GB, got {}",
+            estimated
+        );
     }
 
     #[test]
@@ -219,5 +422,192 @@ mod tests {
         assert!(minimal.max_memories < standard.max_memories);
         assert!(standard.max_memories < full.max_memories);
         assert!(full.max_memories < maximum.max_memories);
+    }
+
+    #[test]
+    fn quantization_mode_roundtrip() {
+        for mode in [
+            QuantizationMode::F32,
+            QuantizationMode::F16,
+            QuantizationMode::Int8,
+            QuantizationMode::Binary,
+        ] {
+            let s = mode.to_string();
+            let parsed: QuantizationMode = s.parse().unwrap();
+            assert_eq!(mode, parsed);
+        }
+    }
+
+    #[test]
+    fn quantization_mode_parse_case_insensitive() {
+        assert_eq!(
+            "F32".parse::<QuantizationMode>().unwrap(),
+            QuantizationMode::F32
+        );
+        assert_eq!(
+            "BINARY".parse::<QuantizationMode>().unwrap(),
+            QuantizationMode::Binary
+        );
+    }
+
+    #[test]
+    fn quantization_mode_parse_invalid() {
+        assert!("unknown".parse::<QuantizationMode>().is_err());
+    }
+
+    #[test]
+    fn file_config_toml_roundtrip() {
+        let fc = FileConfig {
+            max_memories: Some(50_000),
+            similarity_threshold: Some(0.2),
+            max_disk_bytes: Some(1_000_000_000),
+            quantization: Some(QuantizationMode::Binary),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string_pretty(&fc).unwrap();
+        let parsed: FileConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.max_memories, Some(50_000));
+        assert_eq!(parsed.similarity_threshold, Some(0.2));
+        assert_eq!(parsed.max_disk_bytes, Some(1_000_000_000));
+        assert_eq!(parsed.quantization, Some(QuantizationMode::Binary));
+        assert!(parsed.data_dir.is_none());
+    }
+
+    #[test]
+    fn file_config_empty_toml_produces_all_none() {
+        let parsed: FileConfig = toml::from_str("").unwrap();
+        assert!(parsed.max_memories.is_none());
+        assert!(parsed.similarity_threshold.is_none());
+        assert!(parsed.max_disk_bytes.is_none());
+    }
+
+    #[test]
+    fn resolve_config_returns_auto_detect_when_no_file_or_env() {
+        // This test works because no config file exists in CI/test environments
+        // and we don't set SHRIMPK_ env vars by default.
+        let config = resolve_config().unwrap();
+        assert!(config.max_memories > 0);
+        assert_eq!(config.max_disk_bytes, DEFAULT_MAX_DISK_BYTES);
+    }
+
+    #[test]
+    fn config_dir_is_under_home() {
+        let dir = config_dir();
+        assert!(
+            dir.to_string_lossy().contains(".shrimpk-kernel"),
+            "config dir should contain .shrimpk-kernel, got {}",
+            dir.display()
+        );
+    }
+
+    #[test]
+    fn config_path_is_toml() {
+        let path = config_path();
+        assert_eq!(path.extension().unwrap(), "toml");
+    }
+
+    #[test]
+    fn disk_usage_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let usage = disk_usage(tmp.path()).unwrap();
+        assert_eq!(usage, 0);
+    }
+
+    #[test]
+    fn disk_usage_with_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.bin"), vec![0u8; 1000]).unwrap();
+        std::fs::write(tmp.path().join("b.bin"), vec![0u8; 2000]).unwrap();
+        let usage = disk_usage(tmp.path()).unwrap();
+        assert_eq!(usage, 3000);
+    }
+
+    #[test]
+    fn disk_usage_nonexistent_dir() {
+        let usage = disk_usage(std::path::Path::new("/nonexistent/path/shrimpk")).unwrap();
+        assert_eq!(usage, 0);
+    }
+
+    // --- Env var parsing unit tests (test helpers directly, no global state) ---
+
+    #[test]
+    fn env_usize_parses_valid() {
+        // Use a unique env var name to avoid races
+        unsafe { std::env::set_var("_SHRIMPK_TEST_USIZE", "42") };
+        let val = env_usize("_SHRIMPK_TEST_USIZE").unwrap();
+        unsafe { std::env::remove_var("_SHRIMPK_TEST_USIZE") };
+        assert_eq!(val, Some(42));
+    }
+
+    #[test]
+    fn env_usize_returns_none_when_unset() {
+        let val = env_usize("_SHRIMPK_NONEXISTENT_VAR_12345").unwrap();
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn env_usize_rejects_invalid() {
+        unsafe { std::env::set_var("_SHRIMPK_TEST_BAD_USIZE", "xyz") };
+        let result = env_usize("_SHRIMPK_TEST_BAD_USIZE");
+        unsafe { std::env::remove_var("_SHRIMPK_TEST_BAD_USIZE") };
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn env_f32_parses_valid() {
+        unsafe { std::env::set_var("_SHRIMPK_TEST_F32", "0.25") };
+        let val = env_f32("_SHRIMPK_TEST_F32").unwrap();
+        unsafe { std::env::remove_var("_SHRIMPK_TEST_F32") };
+        assert_eq!(val, Some(0.25));
+    }
+
+    #[test]
+    fn env_quantization_parses_valid() {
+        unsafe { std::env::set_var("SHRIMPK_QUANTIZATION", "binary") };
+        let val = env_quantization().unwrap();
+        unsafe { std::env::remove_var("SHRIMPK_QUANTIZATION") };
+        assert_eq!(val, Some(QuantizationMode::Binary));
+    }
+
+    #[test]
+    fn env_path_returns_some() {
+        unsafe { std::env::set_var("_SHRIMPK_TEST_PATH", "/tmp/test-dir") };
+        let val = env_path("_SHRIMPK_TEST_PATH");
+        unsafe { std::env::remove_var("_SHRIMPK_TEST_PATH") };
+        assert_eq!(val, Some(PathBuf::from("/tmp/test-dir")));
+    }
+
+    #[test]
+    fn env_path_returns_none_when_unset() {
+        let val = env_path("_SHRIMPK_NONEXISTENT_PATH_12345");
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn save_and_load_config_file_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+
+        let fc = FileConfig {
+            max_memories: Some(99_999),
+            similarity_threshold: Some(0.3),
+            ..Default::default()
+        };
+
+        // Write to custom path
+        let content = toml::to_string_pretty(&fc).unwrap();
+        std::fs::write(&path, &content).unwrap();
+
+        // Read back
+        let read_content = std::fs::read_to_string(&path).unwrap();
+        let parsed: FileConfig = toml::from_str(&read_content).unwrap();
+        assert_eq!(parsed.max_memories, Some(99_999));
+        assert_eq!(parsed.similarity_threshold, Some(0.3));
+    }
+
+    #[test]
+    fn default_config_has_disk_limit() {
+        let config = EchoConfig::default();
+        assert_eq!(config.max_disk_bytes, DEFAULT_MAX_DISK_BYTES);
     }
 }

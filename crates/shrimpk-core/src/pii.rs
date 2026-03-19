@@ -48,7 +48,7 @@ pub struct PiiMatch {
     pub start: usize,
     /// Byte offset of the end of the match in the original text.
     pub end: usize,
-    /// The masked replacement string (e.g., "[MASKED:api_key]").
+    /// The masked replacement string (e.g., `[MASKED:api_key]`).
     pub masked_value: String,
 }
 
