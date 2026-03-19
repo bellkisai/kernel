@@ -15,6 +15,7 @@
 
 pub mod bloom;
 pub mod embedder;
+pub mod hebbian;
 pub mod lsh;
 pub mod persistence;
 pub mod similarity;
@@ -25,6 +26,7 @@ pub mod echo;
 
 // Re-export the main types
 pub use echo::EchoEngine;
+pub use hebbian::HebbianGraph;
 pub use pii::PiiFilter;
 pub use reformulator::MemoryReformulator;
 pub use store::EchoStore;

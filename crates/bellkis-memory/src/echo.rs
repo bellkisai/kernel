@@ -18,6 +18,7 @@ use tracing::instrument;
 
 use crate::bloom::TopicFilter;
 use crate::embedder::Embedder;
+use crate::hebbian::HebbianGraph;
 use crate::lsh::CosineHash;
 use crate::pii::PiiFilter;
 use crate::reformulator::MemoryReformulator;
@@ -56,6 +57,8 @@ pub struct EchoEngine {
     reformulator: MemoryReformulator,
     /// Engine configuration.
     config: EchoConfig,
+    /// Hebbian co-activation graph for associative memory boosting.
+    hebbian: RwLock<HebbianGraph>,
     /// Running statistics.
     stats: Mutex<EchoStats>,
 }
@@ -93,6 +96,7 @@ impl EchoEngine {
             bloom_dirty: Mutex::new(false),
             pii_filter,
             reformulator,
+            hebbian: RwLock::new(HebbianGraph::new(604_800.0, 0.01)),
             config,
             stats: Mutex::new(EchoStats::default()),
         })
@@ -298,24 +302,69 @@ impl EchoEngine {
             self.config.similarity_threshold,
         );
 
-        // 6. Take top results
+        // 6. Take top results (first pass — cosine similarity only)
         let top: Vec<(usize, f32)> = ranked.into_iter().take(max_results).collect();
 
-        // 7. Build EchoResult vec
-        let results: Vec<EchoResult> = top
+        // 7. Hebbian two-pass ranking:
+        //    a) Co-activate all pairs of returned memories (strengthens associations)
+        //    b) Boost results that have Hebbian associations with OTHER results
+        let top_indices: Vec<u32> = top.iter().map(|&(idx, _)| idx as u32).collect();
+
+        // 7a. Co-activate all pairs of returned results
+        {
+            let mut hebbian = self.hebbian.write().await;
+            for i in 0..top_indices.len() {
+                for j in (i + 1)..top_indices.len() {
+                    // Strength proportional to geometric mean of both similarities
+                    let sim_i = top[i].1 as f64;
+                    let sim_j = top[j].1 as f64;
+                    let strength = (sim_i * sim_j).sqrt() * 0.1; // modest reinforcement
+                    hebbian.co_activate(top_indices[i], top_indices[j], strength);
+                }
+            }
+        }
+
+        // 7b. Second pass — compute Hebbian boost for each result
+        let hebbian_boosts: Vec<f64> = {
+            let hebbian = self.hebbian.read().await;
+            top.iter()
+                .map(|&(idx, _)| {
+                    let idx = idx as u32;
+                    // Sum Hebbian weights with other results in this set
+                    let boost: f64 = top_indices
+                        .iter()
+                        .filter(|&&other| other != idx)
+                        .map(|&other| hebbian.get_weight(idx, other))
+                        .sum();
+                    // Cap Hebbian boost at 0.3 — similarity should dominate
+                    boost.min(0.3)
+                })
+                .collect()
+        };
+
+        // 7c. Build EchoResult vec with final_score = similarity + hebbian_boost
+        let mut results: Vec<EchoResult> = top
             .iter()
-            .filter_map(|&(idx, score)| {
+            .zip(hebbian_boosts.iter())
+            .filter_map(|(&(idx, score), &boost)| {
                 let entry = store.entry_at(idx)?;
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
                     content: entry.display_content().to_string(),
                     similarity: score,
-                    final_score: score as f64, // Phase 1: no Hebbian boost yet
+                    final_score: score as f64 + boost,
                     source: entry.source.clone(),
                     echoed_at: Utc::now(),
                 })
             })
             .collect();
+
+        // 7d. Re-sort by final_score (similarity + hebbian boost)
+        results.sort_by(|a, b| {
+            b.final_score
+                .partial_cmp(&a.final_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Release read lock before acquiring write lock
         let matched_ids: Vec<(MemoryId, usize)> = top
@@ -365,6 +414,12 @@ impl EchoEngine {
 
         match store.remove(&id) {
             Some(_) => {
+                // Remove from Hebbian graph
+                if let Some(removed_idx) = removed_index {
+                    let mut hebbian = self.hebbian.write().await;
+                    hebbian.remove_node(removed_idx as u32);
+                }
+
                 // Update LSH index to reflect the swap-remove
                 if self.config.use_lsh {
                     if let Ok(mut lsh) = self.lsh.lock() {
@@ -466,7 +521,22 @@ impl EchoEngine {
 
         let store = self.store.read().await;
         let path = self.store_path();
-        store.save(&path)
+        store.save(&path)?;
+
+        // Persist Hebbian graph
+        let hebbian_path = self.config.data_dir.join("hebbian.json");
+        let hebbian = self.hebbian.read().await;
+        hebbian.save(&hebbian_path).map_err(|e| {
+            BellkisError::Persistence(format!("Failed to save Hebbian graph: {e}"))
+        })?;
+
+        tracing::info!(
+            hebbian_edges = hebbian.len(),
+            hebbian_activations = hebbian.total_activations(),
+            "Hebbian graph persisted"
+        );
+
+        Ok(())
     }
 
     /// Load an EchoEngine from disk.
@@ -502,11 +572,21 @@ impl EchoEngine {
             }
         }
 
+        // Load Hebbian graph from disk
+        let hebbian_path = config.data_dir.join("hebbian.json");
+        let hebbian = HebbianGraph::load(&hebbian_path, 604_800.0, 0.01)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to load Hebbian graph, starting fresh");
+                HebbianGraph::new(604_800.0, 0.01)
+            });
+
         tracing::info!(
             entries = loaded_store.len(),
             lsh_entries = lsh.len(),
             bloom_entries = bloom.len(),
             bloom_size_bytes = bloom.size_bytes(),
+            hebbian_edges = hebbian.len(),
+            hebbian_activations = hebbian.total_activations(),
             path = %store_path.display(),
             "EchoEngine loaded from disk"
         );
@@ -519,6 +599,7 @@ impl EchoEngine {
             bloom_dirty: Mutex::new(false),
             pii_filter,
             reformulator,
+            hebbian: RwLock::new(hebbian),
             config,
             stats: Mutex::new(EchoStats::default()),
         })
