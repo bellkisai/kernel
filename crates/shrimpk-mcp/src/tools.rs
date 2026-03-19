@@ -1,0 +1,455 @@
+//! MCP tool definitions and handler functions.
+//!
+//! Each tool mirrors a `shrimpk` CLI command.
+
+use crate::format::{detect_ram_gb, format_bytes, format_number, tier_name, truncate};
+use crate::protocol::ToolDefinition;
+use serde_json::{Value, json};
+use shrimpk_core::{EchoConfig, MemoryId, config};
+use shrimpk_memory::{EchoEngine, PiiFilter};
+use std::sync::Arc;
+use std::time::Instant;
+
+/// Return all 9 tool definitions.
+pub fn all_tools() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "store".into(),
+            description: "Store a memory in Echo Memory. The memory will persist across sessions and automatically surface when relevant context appears.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "Text content to remember" },
+                    "source": { "type": "string", "description": "Source label (default: 'mcp')" }
+                },
+                "required": ["text"]
+            }),
+        },
+        ToolDefinition {
+            name: "echo".into(),
+            description: "Find memories that resonate with a query. Returns memories ranked by similarity and Hebbian association strength.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Text to find resonating memories for" },
+                    "max_results": { "type": "integer", "description": "Maximum results (default: 10)", "default": 10 }
+                },
+                "required": ["query"]
+            }),
+        },
+        ToolDefinition {
+            name: "stats".into(),
+            description: "Show Echo Memory engine statistics including memory count, disk usage, and performance metrics.".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        },
+        ToolDefinition {
+            name: "forget".into(),
+            description: "Remove a memory by its UUID.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Memory UUID to remove" }
+                },
+                "required": ["id"]
+            }),
+        },
+        ToolDefinition {
+            name: "dump".into(),
+            description: "List all stored memories with their IDs, content, and metadata.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "Max entries to return (default: 50)", "default": 50 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "config_show".into(),
+            description: "Show current ShrimPK configuration with source info (auto-detect, config file, or environment variable).".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        },
+        ToolDefinition {
+            name: "config_set".into(),
+            description: "Set a ShrimPK configuration value. Writes to ~/.shrimpk-kernel/config.toml. Requires server restart to take effect.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "description": "Config key (e.g., max_memories, similarity_threshold, max_disk_bytes, quantization)" },
+                    "value": { "type": "string", "description": "Value to set" }
+                },
+                "required": ["key", "value"]
+            }),
+        },
+        ToolDefinition {
+            name: "persist".into(),
+            description: "Force save all memories to disk immediately.".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        },
+        ToolDefinition {
+            name: "status".into(),
+            description: "Show system status: config tier, disk usage with progress bar, RAM budget, and quantization mode.".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        },
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// Tool Handlers
+// ---------------------------------------------------------------------------
+
+pub async fn handle_store(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
+    let text = args["text"]
+        .as_str()
+        .ok_or("Missing required argument: text")?;
+    let source = args["source"].as_str().unwrap_or("mcp");
+
+    let pii_filter = PiiFilter::new();
+    let pii_matches = pii_filter.scan(text);
+    let sensitivity = pii_filter.classify(text);
+
+    let id = engine
+        .store(text, source)
+        .await
+        .map_err(|e| e.to_string())?;
+    engine.persist().await.map_err(|e| e.to_string())?;
+
+    let pii_info = if pii_matches.is_empty() {
+        "no sensitive data detected".into()
+    } else {
+        let types: Vec<String> = pii_matches
+            .iter()
+            .map(|m| m.pattern_type.to_string())
+            .collect();
+        format!("{} match(es) [{}]", pii_matches.len(), types.join(", "))
+    };
+
+    Ok(format!(
+        "Stored memory {}... (sensitivity: {sensitivity:?})\nPII scan: {pii_info}",
+        &id.to_string()[..8]
+    ))
+}
+
+pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
+    let query = args["query"]
+        .as_str()
+        .ok_or("Missing required argument: query")?;
+    let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+
+    let start = Instant::now();
+    let results = engine
+        .echo(query, max_results)
+        .await
+        .map_err(|e| e.to_string())?;
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let results_json: Vec<Value> = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            json!({
+                "rank": i + 1,
+                "memory_id": r.memory_id.to_string(),
+                "content": r.content,
+                "similarity": (r.similarity * 100.0).round() / 100.0,
+                "final_score": (r.final_score * 100.0).round() / 100.0,
+                "source": r.source
+            })
+        })
+        .collect();
+
+    let output = json!({
+        "query": query,
+        "results": results_json,
+        "count": results.len(),
+        "elapsed_ms": (elapsed_ms * 10.0).round() / 10.0
+    });
+
+    Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
+}
+
+pub async fn handle_stats(engine: &Arc<EchoEngine>, config: &EchoConfig) -> Result<String, String> {
+    let stats = engine.stats().await;
+    let ram_gb = detect_ram_gb();
+
+    Ok(format!(
+        "Memories:        {}\n\
+         Max capacity:    {}\n\
+         Index size:      {}\n\
+         RAM usage:       {}\n\
+         Disk usage:      {} / {}\n\
+         Config tier:     {} ({ram_gb}GB detected)\n\
+         Quantization:    {}\n\
+         Embedding dim:   {}\n\
+         Threshold:       {}\n\
+         Echo queries:    {}\n\
+         Avg echo latency: {:.1}ms",
+        format_number(stats.total_memories),
+        format_number(stats.max_capacity),
+        format_bytes(stats.index_size_bytes),
+        format_bytes(stats.ram_usage_bytes),
+        format_bytes(stats.disk_usage_bytes),
+        format_bytes(stats.max_disk_bytes),
+        tier_name(config),
+        config.quantization,
+        config.embedding_dim,
+        config.similarity_threshold,
+        stats.total_echo_queries,
+        stats.avg_echo_latency_ms,
+    ))
+}
+
+pub async fn handle_forget(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
+    let id_str = args["id"].as_str().ok_or("Missing required argument: id")?;
+    let uuid = uuid::Uuid::parse_str(id_str).map_err(|e| format!("Invalid UUID: {e}"))?;
+    let id = MemoryId::from_uuid(uuid);
+
+    engine.forget(id).await.map_err(|e| e.to_string())?;
+    engine.persist().await.map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "Forgotten memory {}",
+        &id_str[..id_str.len().min(8)]
+    ))
+}
+
+pub async fn handle_dump(
+    engine: &Arc<EchoEngine>,
+    config: &EchoConfig,
+    args: &Value,
+) -> Result<String, String> {
+    let limit = args["limit"].as_u64().unwrap_or(50) as usize;
+
+    let stats = engine.stats().await;
+    if stats.total_memories == 0 {
+        return Ok("No memories stored.".into());
+    }
+
+    engine.persist().await.map_err(|e| e.to_string())?;
+
+    let store_path = config.data_dir.join("echo_store.json");
+    if !store_path.exists() {
+        return Ok("No store file found. Memories may be in binary format only.".into());
+    }
+
+    let json_str = std::fs::read_to_string(&store_path).map_err(|e| e.to_string())?;
+    let entries: Vec<Value> = serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Stored memories ({}, showing {}):",
+        format_number(entries.len()),
+        entries.len().min(limit)
+    ));
+
+    for entry in entries.iter().take(limit) {
+        let id = entry["id"]
+            .as_str()
+            .or_else(|| entry["id"].get("0").and_then(|v| v.as_str()))
+            .unwrap_or("????????");
+        let content = entry["content"].as_str().unwrap_or("");
+        let masked = entry["masked_content"].as_str();
+        let display = masked.unwrap_or(content);
+        let source = entry["source"].as_str().unwrap_or("?");
+        let echo_count = entry["echo_count"].as_u64().unwrap_or(0);
+        let id_short = if id.len() >= 8 { &id[..8] } else { id };
+
+        lines.push(format!(
+            "  {} \"{}\" (source: {}, echoed: {}x)",
+            id_short,
+            truncate(display, 50),
+            source,
+            echo_count,
+        ));
+    }
+
+    Ok(lines.join("\n"))
+}
+
+pub fn handle_config_show(config: &EchoConfig) -> Result<String, String> {
+    let file_config = config::load_config_file().ok().flatten();
+    let has_file = file_config.is_some();
+    let fc = file_config.unwrap_or_default();
+
+    let source = |env: &str, file_val: bool| -> &'static str {
+        if std::env::var(env).is_ok() {
+            "env"
+        } else if file_val {
+            "file"
+        } else {
+            "auto"
+        }
+    };
+
+    let lines = vec![
+        format!(
+            "Configuration (priority: env > file > auto-detect):\nConfig file: {} {}",
+            config::config_path().display(),
+            if has_file { "(exists)" } else { "(not found)" }
+        ),
+        String::new(),
+        format!("  {:25} {:>15}  {}", "Key", "Value", "Source"),
+        format!("  {:25} {:>15}  {}", "---", "-----", "------"),
+        format!(
+            "  {:25} {:>15}  {}",
+            "max_memories",
+            format_number(config.max_memories),
+            source("SHRIMPK_MAX_MEMORIES", fc.max_memories.is_some())
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "similarity_threshold",
+            format!("{:.2}", config.similarity_threshold),
+            source(
+                "SHRIMPK_SIMILARITY_THRESHOLD",
+                fc.similarity_threshold.is_some()
+            )
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "quantization",
+            config.quantization.to_string(),
+            source("SHRIMPK_QUANTIZATION", fc.quantization.is_some())
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "max_disk_bytes",
+            format_bytes(config.max_disk_bytes),
+            source("SHRIMPK_MAX_DISK_BYTES", fc.max_disk_bytes.is_some())
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "data_dir",
+            truncate(&config.data_dir.to_string_lossy(), 30),
+            source("SHRIMPK_DATA_DIR", fc.data_dir.is_some())
+        ),
+    ];
+
+    Ok(lines.join("\n"))
+}
+
+pub fn handle_config_set(args: &Value) -> Result<String, String> {
+    let key = args["key"]
+        .as_str()
+        .ok_or("Missing required argument: key")?;
+    let value = args["value"]
+        .as_str()
+        .ok_or("Missing required argument: value")?;
+
+    let mut fc = config::load_config_file()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+
+    match key {
+        "max_memories" => fc.max_memories = Some(value.parse().map_err(|_| "Invalid integer")?),
+        "similarity_threshold" => {
+            fc.similarity_threshold = Some(value.parse().map_err(|_| "Invalid float")?)
+        }
+        "max_echo_results" => {
+            fc.max_echo_results = Some(value.parse().map_err(|_| "Invalid integer")?)
+        }
+        "ram_budget_bytes" => {
+            fc.ram_budget_bytes = Some(value.parse().map_err(|_| "Invalid integer")?)
+        }
+        "max_disk_bytes" => fc.max_disk_bytes = Some(value.parse().map_err(|_| "Invalid integer")?),
+        "quantization" => fc.quantization = Some(value.parse().map_err(|e: String| e)?),
+        "data_dir" => fc.data_dir = Some(std::path::PathBuf::from(value)),
+        "use_lsh" => fc.use_lsh = Some(value.parse().map_err(|_| "Invalid boolean")?),
+        "use_bloom" => fc.use_bloom = Some(value.parse().map_err(|_| "Invalid boolean")?),
+        other => return Err(format!("Unknown config key: \"{other}\"")),
+    }
+
+    config::save_config_file(&fc).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "Set {key} = {value} in {}\nNote: restart shrimpk-mcp for this change to take effect.",
+        config::config_path().display()
+    ))
+}
+
+pub async fn handle_persist(
+    engine: &Arc<EchoEngine>,
+    config: &EchoConfig,
+) -> Result<String, String> {
+    engine.persist().await.map_err(|e| e.to_string())?;
+    let disk_usage = config::disk_usage(&config.data_dir).unwrap_or(0);
+    Ok(format!(
+        "Persisted to disk. Disk usage: {} / {}",
+        format_bytes(disk_usage),
+        format_bytes(config.max_disk_bytes)
+    ))
+}
+
+pub fn handle_status(config: &EchoConfig) -> Result<String, String> {
+    let ram_gb = detect_ram_gb();
+    let disk_usage = config::disk_usage(&config.data_dir).unwrap_or(0);
+    let disk_pct = if config.max_disk_bytes > 0 {
+        (disk_usage as f64 / config.max_disk_bytes as f64 * 100.0) as u64
+    } else {
+        0
+    };
+
+    let bar_width = 30;
+    let filled = (disk_pct as usize * bar_width / 100).min(bar_width);
+    let bar = format!("[{}{}]", "#".repeat(filled), "-".repeat(bar_width - filled));
+
+    let mut out = format!(
+        "System Status:\n\
+         Config tier:   {} ({ram_gb}GB RAM detected)\n\
+         Data dir:      {}\n\
+         Disk usage:    {} / {} ({}%) {}\n\
+         RAM budget:    {}\n\
+         Quantization:  {}\n\
+         Max memories:  {}",
+        tier_name(config),
+        config.data_dir.display(),
+        format_bytes(disk_usage),
+        format_bytes(config.max_disk_bytes),
+        disk_pct,
+        bar,
+        format_bytes(config.ram_budget_bytes),
+        config.quantization,
+        format_number(config.max_memories),
+    );
+
+    if disk_pct >= 80 {
+        out.push_str(
+            "\n\nWARNING: Disk usage above 80%. Consider increasing max_disk_bytes or cleaning data.",
+        );
+    }
+
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_tools_returns_9() {
+        assert_eq!(all_tools().len(), 9);
+    }
+
+    #[test]
+    fn all_tools_have_required_fields() {
+        for tool in all_tools() {
+            assert!(!tool.name.is_empty());
+            assert!(!tool.description.is_empty());
+            assert!(tool.input_schema.is_object());
+        }
+    }
+
+    #[test]
+    fn config_set_rejects_unknown_key() {
+        let args = json!({ "key": "nonexistent", "value": "123" });
+        let result = handle_config_set(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown config key"));
+    }
+
+    #[test]
+    fn status_returns_formatted_text() {
+        let config = EchoConfig::default();
+        let result = handle_status(&config).unwrap();
+        assert!(result.contains("Config tier:"));
+        assert!(result.contains("Disk usage:"));
+    }
+}

@@ -1,49 +1,132 @@
-# ShrimPK Kernel
+# ShrimPK
 
-The AI Operating System kernel — Echo Memory, provider routing, context assembly.
+**Push-based AI memory where memories find you.**
 
-## What is this?
+[![CI](https://github.com/bellkisai/kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/bellkisai/kernel/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-ShrimPK Kernel is a standalone Rust library that provides:
+ShrimPK is an AI memory kernel written in Rust. Unlike traditional RAG systems where you search for memories, Echo Memory **listens** to context and **self-activates** when relevant — like human spontaneous recall.
 
-- **Echo Memory** — push-based AI memory where memories find YOU (not the other way around)
-- **Provider Router** — intelligent model routing with cascade fallback and cost optimization
-- **Context Assembler** — smart prompt compilation with automatic memory integration
+**3.50ms** P50 at 100K memories | **38%** more accurate than plain LLM | **15.7%** token savings
 
-Unlike RAG (where you search for memories), Echo Memory **listens** to your conversation and **self-activates** when relevant context is found — like how human memory works.
+## Features
+
+- **Echo Memory** — push-based activation, memories surface without explicit queries
+- **Three-layer pipeline** — Bloom filter (O(1) rejection) + LSH (sub-linear search) + exact cosine
+- **Hebbian learning** — co-activated memories strengthen connections over time
+- **Category-aware decay** — 6 types from Identity (365d) to Conversation (3d)
+- **Sleep consolidation** — background pruning, dedup merging, index rebuild
+- **PII masking** — 15 patterns, mask-don't-block approach
+- **Provider router** — cascade fallback, cost tracking, circuit breaker
+- **Context assembler** — token-budgeted prompt compilation with priority truncation
+- **Config system** — TOML file + env var overrides + auto-detect from RAM
+
+## Install
+
+### Rust library
+
+```toml
+[dependencies]
+shrimpk-kernel = "0.1"
+```
+
+### Python
+
+```bash
+pip install shrimpk  # via maturin
+```
+
+### CLI
+
+```bash
+cargo install --path cli
+```
 
 ## Quick Start
 
+### Rust
+
 ```rust
-use shrimpk_memory::EchoMemory;
 use shrimpk_core::EchoConfig;
+use shrimpk_memory::EchoEngine;
 
 let config = EchoConfig::auto_detect();
-let memory = EchoMemory::new(config)?;
+let engine = EchoEngine::new(config)?;
 
 // Store memories
-memory.store("I prefer FastAPI for REST APIs", "conversation")?;
-memory.store("Python is my main language", "conversation")?;
+engine.store("I prefer FastAPI for REST APIs", "conversation").await?;
+engine.store("Python is my main language", "conversation").await?;
 
-// Memories find YOU — no explicit search needed
-let echoes = memory.echo("What framework should I use for this API?", 5)?;
-// Returns: FastAPI memory with 0.85 similarity, in 15ms
+// Memories find YOU
+let echoes = engine.echo("What framework for this API?", 5).await?;
+// Returns: FastAPI memory (similarity: 0.85) in ~3.5ms
+```
+
+### CLI
+
+```bash
+shrimpk store "I prefer FastAPI for REST APIs"
+shrimpk echo "What framework for APIs?"
+shrimpk stats
+shrimpk config show
+shrimpk status
+```
+
+### Python
+
+```python
+from shrimpk import EchoMemory, EchoConfig
+
+config = EchoConfig.auto_detect()
+mem = EchoMemory(config)
+mem.store("I prefer FastAPI", source="conversation")
+results = mem.echo("What framework?", max_results=5)
 ```
 
 ## Architecture
 
-- **shrimpk-core** — types, traits, error framework
-- **shrimpk-memory** — Echo Memory engine
-- **shrimpk-router** — provider routing and cascade logic
-- **shrimpk-context** — context assembly and prompt compilation
-- **shrimpk-security** — sandbox, permissions, PII filtering
-- **shrimpk-kernel** — facade crate (re-exports all)
+```
+shrimpk-kernel          (facade — re-exports all)
+  shrimpk-core          (types, config, errors, PII types)
+  shrimpk-memory        (Echo Memory engine)
+  shrimpk-router        (provider routing + cascade)
+  shrimpk-context       (context assembly + token budgeting)
+  shrimpk-security      (sandbox, permissions — stub)
+  shrimpk-python        (PyO3 bindings)
+```
 
 ## Performance
 
-- 1M memories indexed in ~1.8GB RAM (f32) or ~150MB (binary quantized)
-- Echo cycle: <30ms end-to-end (embedding + search + rank)
-- Persistence: save/load 1M entries in <2 seconds
+| Metric | Value |
+|--------|-------|
+| Echo P50 at 100K memories | 3.50ms |
+| Echo P95 at 100K memories | 6.88ms |
+| Head-to-head accuracy | +38% vs plain LLM |
+| Personalization rate | 100% |
+| Token savings | 15.7% per request |
+| Follow-up elimination | 100% |
+| RAM (1M memories, f32) | ~1.8 GB |
+| RAM (1M memories, binary) | ~150 MB |
+| Tests | 222 passing |
+
+## Configuration
+
+ShrimPK auto-detects from system RAM (4 tiers: minimal/standard/full/maximum). Override via:
+
+```bash
+# Config file
+shrimpk config set max_memories 500000
+shrimpk config set quantization binary
+shrimpk config show
+
+# Environment variables (highest priority)
+SHRIMPK_MAX_MEMORIES=500000
+SHRIMPK_DATA_DIR=/custom/path
+SHRIMPK_QUANTIZATION=binary
+SHRIMPK_MAX_DISK_BYTES=4294967296
+```
+
+Priority: env vars > `~/.shrimpk-kernel/config.toml` > auto-detect
 
 ## License
 

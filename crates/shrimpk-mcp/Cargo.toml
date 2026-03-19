@@ -1,0 +1,22 @@
+[package]
+name = "shrimpk-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP server for ShrimPK Echo Memory — expose AI memory as tools for Claude Code"
+publish = false
+
+[[bin]]
+name = "shrimpk-mcp"
+path = "src/main.rs"
+
+[dependencies]
+shrimpk-memory.workspace = true
+shrimpk-core = { workspace = true, features = ["sysinfo"] }
+tokio = { workspace = true }
+anyhow.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sysinfo.workspace = true
+toml.workspace = true
