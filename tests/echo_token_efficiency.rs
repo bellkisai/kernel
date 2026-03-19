@@ -19,8 +19,8 @@
 //!
 //!     cargo test --test echo_token_efficiency -- --ignored --nocapture
 
-use bellkis_memory::embedder::Embedder;
-use bellkis_memory::similarity::cosine_similarity;
+use shrimpk_memory::embedder::Embedder;
+use shrimpk_memory::similarity::cosine_similarity;
 
 // ===========================================================================
 // Token estimation

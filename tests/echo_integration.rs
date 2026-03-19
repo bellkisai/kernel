@@ -8,8 +8,8 @@
 //!
 //! The model is cached after first download, so subsequent runs are fast.
 
-use bellkis_core::EchoConfig;
-use bellkis_memory::EchoEngine;
+use shrimpk_core::EchoConfig;
+use shrimpk_memory::EchoEngine;
 use std::path::PathBuf;
 use tempfile::tempdir;
 

@@ -6,8 +6,8 @@ license.workspace = true
 description = "CLI test harness for Echo Memory"
 
 [dependencies]
-bellkis-memory.workspace = true
-bellkis-core.workspace = true
+shrimpk-memory.workspace = true
+shrimpk-core.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 uuid.workspace = true

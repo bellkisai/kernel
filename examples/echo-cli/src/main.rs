@@ -1,4 +1,4 @@
-//! Echo Memory CLI — interactive test harness for the Bellkis kernel.
+//! Echo Memory CLI — interactive test harness for the ShrimPK kernel.
 //!
 //! Usage:
 //!   echo-cli store "I prefer FastAPI for REST APIs"
@@ -8,8 +8,8 @@
 //!   echo-cli dump
 //!   echo-cli bench <count>
 
-use bellkis_core::{EchoConfig, QuantizationMode};
-use bellkis_memory::{EchoEngine, PiiFilter};
+use shrimpk_core::{EchoConfig, QuantizationMode};
+use shrimpk_memory::{EchoEngine, PiiFilter};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::time::Instant;
@@ -75,7 +75,7 @@ fn print_help() {
     println!("  echo-cli dump                  List all stored memories (first 50 chars)");
     println!("  echo-cli bench <count>         Benchmark: store N memories, run 10 echo queries");
     println!();
-    println!("Data directory: ~/.bellkis-kernel/");
+    println!("Data directory: ~/.shrimpk-kernel/");
     println!("Memories persist automatically after store/forget commands.");
 }
 
@@ -246,7 +246,7 @@ async fn cmd_stats(engine: &EchoEngine, config: &EchoConfig) -> anyhow::Result<(
 async fn cmd_forget(engine: &EchoEngine, id_str: &str) -> anyhow::Result<()> {
     let uuid = uuid::Uuid::parse_str(id_str)
         .map_err(|e| anyhow::anyhow!("Invalid UUID \"{id_str}\": {e}"))?;
-    let id = bellkis_core::MemoryId::from_uuid(uuid);
+    let id = shrimpk_core::MemoryId::from_uuid(uuid);
 
     engine.forget(id).await?;
     engine.persist().await?;

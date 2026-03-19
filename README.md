@@ -1,10 +1,10 @@
-# Bellkis Kernel
+# ShrimPK Kernel
 
 The AI Operating System kernel — Echo Memory, provider routing, context assembly.
 
 ## What is this?
 
-Bellkis Kernel is a standalone Rust library that provides:
+ShrimPK Kernel is a standalone Rust library that provides:
 
 - **Echo Memory** — push-based AI memory where memories find YOU (not the other way around)
 - **Provider Router** — intelligent model routing with cascade fallback and cost optimization
@@ -15,8 +15,8 @@ Unlike RAG (where you search for memories), Echo Memory **listens** to your conv
 ## Quick Start
 
 ```rust
-use bellkis_memory::EchoMemory;
-use bellkis_core::EchoConfig;
+use shrimpk_memory::EchoMemory;
+use shrimpk_core::EchoConfig;
 
 let config = EchoConfig::auto_detect();
 let memory = EchoMemory::new(config)?;
@@ -32,12 +32,12 @@ let echoes = memory.echo("What framework should I use for this API?", 5)?;
 
 ## Architecture
 
-- **bellkis-core** — types, traits, error framework
-- **bellkis-memory** — Echo Memory engine
-- **bellkis-router** — provider routing and cascade logic
-- **bellkis-context** — context assembly and prompt compilation
-- **bellkis-security** — sandbox, permissions, PII filtering
-- **bellkis-kernel** — facade crate (re-exports all)
+- **shrimpk-core** — types, traits, error framework
+- **shrimpk-memory** — Echo Memory engine
+- **shrimpk-router** — provider routing and cascade logic
+- **shrimpk-context** — context assembly and prompt compilation
+- **shrimpk-security** — sandbox, permissions, PII filtering
+- **shrimpk-kernel** — facade crate (re-exports all)
 
 ## Performance
 

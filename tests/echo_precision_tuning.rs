@@ -20,10 +20,10 @@
 //!
 //!     cargo test --test echo_precision_tuning threshold_range_sweep -- --ignored --nocapture
 
-use bellkis_core::EchoConfig;
-use bellkis_memory::EchoEngine;
-use bellkis_memory::embedder::Embedder;
-use bellkis_memory::similarity::cosine_similarity;
+use shrimpk_core::EchoConfig;
+use shrimpk_memory::EchoEngine;
+use shrimpk_memory::embedder::Embedder;
+use shrimpk_memory::similarity::cosine_similarity;
 use std::path::PathBuf;
 use tempfile::tempdir;
 

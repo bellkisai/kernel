@@ -1,0 +1,13 @@
+[package]
+name = "shrimpk-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ShrimPK AI-OS kernel — facade crate re-exporting all subsystems"
+
+[dependencies]
+shrimpk-core.workspace = true
+shrimpk-memory.workspace = true
+shrimpk-router.workspace = true
+shrimpk-context.workspace = true
+shrimpk-security.workspace = true

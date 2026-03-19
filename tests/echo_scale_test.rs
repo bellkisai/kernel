@@ -15,8 +15,8 @@
 //!
 //!     cargo test --test echo_scale_test scale_echo_1k -- --ignored --nocapture
 
-use bellkis_core::EchoConfig;
-use bellkis_memory::EchoEngine;
+use shrimpk_core::EchoConfig;
+use shrimpk_memory::EchoEngine;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;

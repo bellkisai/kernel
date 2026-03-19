@@ -22,8 +22,8 @@
 //!
 //!     cargo test --test echo_head_to_head -- --ignored --nocapture
 
-use bellkis_core::EchoConfig;
-use bellkis_memory::EchoEngine;
+use shrimpk_core::EchoConfig;
+use shrimpk_memory::EchoEngine;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tempfile::tempdir;

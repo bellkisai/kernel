@@ -1,0 +1,10 @@
+[package]
+name = "shrimpk-security"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Security primitives — sandbox, permissions, audit trail"
+
+[dependencies]
+shrimpk-core.workspace = true
+serde.workspace = true

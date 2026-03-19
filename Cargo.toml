@@ -4,11 +4,11 @@ resolver = "2"
 
 # Root package: enables workspace-level integration tests (tests/*.rs)
 [package]
-name = "bellkis-kernel-tests"
+name = "shrimpk-kernel-tests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Integration tests for the Bellkis AI-OS kernel"
+description = "Integration tests for the ShrimPK AI-OS kernel"
 publish = false
 
 # No library — this package exists only to host integration tests
@@ -48,17 +48,17 @@ rand_distr = "0.4"
 regex = "1"
 sysinfo = "0.32"
 # Internal crates
-bellkis-core = { path = "crates/bellkis-core" }
-bellkis-memory = { path = "crates/bellkis-memory" }
-bellkis-router = { path = "crates/bellkis-router" }
-bellkis-context = { path = "crates/bellkis-context" }
-bellkis-security = { path = "crates/bellkis-security" }
-bellkis-kernel = { path = "crates/bellkis-kernel" }
+shrimpk-core = { path = "crates/shrimpk-core" }
+shrimpk-memory = { path = "crates/shrimpk-memory" }
+shrimpk-router = { path = "crates/shrimpk-router" }
+shrimpk-context = { path = "crates/shrimpk-context" }
+shrimpk-security = { path = "crates/shrimpk-security" }
+shrimpk-kernel = { path = "crates/shrimpk-kernel" }
 
 # Workspace-root integration tests (tests/*.rs)
 [dev-dependencies]
-bellkis-core = { path = "crates/bellkis-core" }
-bellkis-memory = { path = "crates/bellkis-memory" }
+shrimpk-core = { path = "crates/shrimpk-core" }
+shrimpk-memory = { path = "crates/shrimpk-memory" }
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 reqwest = { version = "0.12", features = ["blocking", "json"] }

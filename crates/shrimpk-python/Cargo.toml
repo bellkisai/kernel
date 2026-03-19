@@ -1,0 +1,17 @@
+[package]
+name = "shrimpk-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Python bindings for the ShrimPK AI memory engine"
+
+[lib]
+name = "shrimpk"
+crate-type = ["cdylib"]
+
+[dependencies]
+shrimpk-core = { path = "../shrimpk-core" }
+shrimpk-memory = { path = "../shrimpk-memory" }
+pyo3 = { version = "0.25", features = ["extension-module"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uuid.workspace = true

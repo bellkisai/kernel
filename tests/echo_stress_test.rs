@@ -13,8 +13,8 @@
 //!
 //!     cargo test --test echo_stress_test stress_full_corpus -- --ignored
 
-use bellkis_core::EchoConfig;
-use bellkis_memory::EchoEngine;
+use shrimpk_core::EchoConfig;
+use shrimpk_memory::EchoEngine;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
