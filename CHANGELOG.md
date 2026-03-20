@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **MCP Server** (`shrimpk-mcp`): 9 tools over JSON-RPC 2.0 stdio for Claude Code integration
+  - store, echo, stats, forget, dump, config_show, config_set, persist, status
+  - Lazy engine init (fastembed loads on first tool call, not on handshake)
+  - Auto-persist after store/forget operations
+  - Registered globally via `claude mcp add --scope user`
+- CLI `--json` flag for `shrimpk echo` (clean machine-readable output for hooks)
+- Echo Memory rules in CLAUDE.md (auto-store instructions for Claude Code)
+- Release workflow builds both `shrimpk` and `shrimpk-mcp` binaries
+
 ## [0.1.0] - 2026-03-19
 
 ### Added

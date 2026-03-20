@@ -214,25 +214,15 @@ pub async fn handle_forget(engine: &Arc<EchoEngine>, args: &Value) -> Result<Str
 
 pub async fn handle_dump(
     engine: &Arc<EchoEngine>,
-    config: &EchoConfig,
+    _config: &EchoConfig,
     args: &Value,
 ) -> Result<String, String> {
     let limit = args["limit"].as_u64().unwrap_or(50) as usize;
 
-    let stats = engine.stats().await;
-    if stats.total_memories == 0 {
+    let entries = engine.all_entry_summaries().await;
+    if entries.is_empty() {
         return Ok("No memories stored.".into());
     }
-
-    engine.persist().await.map_err(|e| e.to_string())?;
-
-    let store_path = config.data_dir.join("echo_store.json");
-    if !store_path.exists() {
-        return Ok("No store file found. Memories may be in binary format only.".into());
-    }
-
-    let json_str = std::fs::read_to_string(&store_path).map_err(|e| e.to_string())?;
-    let entries: Vec<Value> = serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
 
     let mut lines = Vec::new();
     lines.push(format!(
@@ -242,23 +232,15 @@ pub async fn handle_dump(
     ));
 
     for entry in entries.iter().take(limit) {
-        let id = entry["id"]
-            .as_str()
-            .or_else(|| entry["id"].get("0").and_then(|v| v.as_str()))
-            .unwrap_or("????????");
-        let content = entry["content"].as_str().unwrap_or("");
-        let masked = entry["masked_content"].as_str();
-        let display = masked.unwrap_or(content);
-        let source = entry["source"].as_str().unwrap_or("?");
-        let echo_count = entry["echo_count"].as_u64().unwrap_or(0);
-        let id_short = if id.len() >= 8 { &id[..8] } else { id };
-
+        let id_str = entry.id.to_string();
+        let id_short = &id_str[..id_str.len().min(8)];
         lines.push(format!(
-            "  {} \"{}\" (source: {}, echoed: {}x)",
+            "  {} \"{}\" (source: {}, echoed: {}x, category: {:?})",
             id_short,
-            truncate(display, 50),
-            source,
-            echo_count,
+            truncate(&entry.content, 50),
+            entry.source,
+            entry.echo_count,
+            entry.category,
         ));
     }
 

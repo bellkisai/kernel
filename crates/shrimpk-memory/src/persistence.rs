@@ -22,6 +22,7 @@
 //! ```
 
 use chrono::{DateTime, Utc};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use shrimpk_core::{MemoryCategory, MemoryEntry, MemoryId, Result, SensitivityLevel, ShrimPKError};
 use std::io::{Seek, SeekFrom, Write};
@@ -113,6 +114,14 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
+    // Acquire exclusive file lock to prevent concurrent write corruption (F-05 fix)
+    let lock_path = path.with_extension("shrm.lock");
+    let lock_file = std::fs::File::create(&lock_path)?;
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| ShrimPKError::Persistence(format!("Failed to acquire write lock: {e}")))?;
+    // Lock released on drop
+
     let entries = store.all_entries();
     let embeddings = store.all_embeddings();
     let count = entries.len() as u64;
@@ -197,6 +206,12 @@ pub fn load_binary(path: &Path) -> Result<EchoStore> {
         tracing::info!(path = %path.display(), "No binary store file found, starting empty");
         return Ok(EchoStore::new());
     }
+
+    // Acquire shared lock for concurrent read safety (F-05 fix)
+    let lock_path = path.with_extension("shrm.lock");
+    let _lock_guard = std::fs::File::open(&lock_path)
+        .ok()
+        .and_then(|f| f.lock_shared().ok().map(|()| f));
 
     let start = std::time::Instant::now();
     let data = std::fs::read(path)

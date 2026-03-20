@@ -8,8 +8,8 @@
 
 use chrono::Utc;
 use shrimpk_core::{
-    EchoConfig, EchoResult, MemoryEntry, MemoryId, MemoryStats, Result, SensitivityLevel,
-    ShrimPKError,
+    EchoConfig, EchoResult, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats, Result,
+    SensitivityLevel, ShrimPKError,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -382,19 +382,26 @@ impl EchoEngine {
                 .collect()
         };
 
-        // 7c. Build EchoResult vec with final_score = similarity + hebbian_boost
+        // 7c. Build EchoResult vec with final_score = similarity + hebbian_boost + category decay
+        let now = Utc::now();
         let mut results: Vec<EchoResult> = top
             .iter()
             .zip(hebbian_boosts.iter())
             .filter_map(|(&(idx, score), &boost)| {
                 let entry = store.entry_at(idx)?;
+
+                // Apply category-aware decay: older memories score lower (F-02 fix)
+                let age_secs = (now - entry.created_at).num_seconds().max(0) as f64;
+                let half_life = entry.category.half_life_secs();
+                let decay = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
+
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
                     content: entry.display_content().to_string(),
                     similarity: score,
-                    final_score: score as f64 + boost,
+                    final_score: (score as f64 + boost) * decay,
                     source: entry.source.clone(),
-                    echoed_at: Utc::now(),
+                    echoed_at: now,
                 })
             })
             .collect();
@@ -521,6 +528,27 @@ impl EchoEngine {
             disk_usage_bytes: disk_usage,
             max_disk_bytes: self.config.max_disk_bytes,
         }
+    }
+
+    /// Return summaries of all stored memories (for dump/listing).
+    pub async fn all_entry_summaries(&self) -> Vec<MemoryEntrySummary> {
+        let store = self.store.read().await;
+        store
+            .all_entries()
+            .iter()
+            .map(|e| MemoryEntrySummary {
+                id: e.id.clone(),
+                content: e
+                    .masked_content
+                    .as_deref()
+                    .unwrap_or(&e.content)
+                    .to_string(),
+                source: e.source.clone(),
+                echo_count: e.echo_count,
+                sensitivity: e.sensitivity,
+                category: e.category,
+            })
+            .collect()
     }
 
     /// Persist the store to disk.

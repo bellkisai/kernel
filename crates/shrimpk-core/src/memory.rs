@@ -192,6 +192,17 @@ pub struct MemoryStats {
     pub max_disk_bytes: u64,
 }
 
+/// Summary of a memory entry for dump/listing (no embedding data).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntrySummary {
+    pub id: MemoryId,
+    pub content: String,
+    pub source: String,
+    pub echo_count: u32,
+    pub sensitivity: SensitivityLevel,
+    pub category: MemoryCategory,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -83,6 +83,20 @@ mem.store("I prefer FastAPI", source="conversation")
 results = mem.echo("What framework?", max_results=5)
 ```
 
+## MCP Server (Claude Code / AI Tool Integration)
+
+ShrimPK ships an MCP server that exposes Echo Memory to any MCP-compatible AI tool.
+
+```bash
+# Register globally (works from any directory)
+claude mcp add --transport stdio --scope user shrimpk -- shrimpk-mcp
+
+# Claude Code now has 9 new tools:
+# mcp__shrimpk__store, mcp__shrimpk__echo, mcp__shrimpk__stats, etc.
+```
+
+The MCP server uses the same data directory (`~/.shrimpk-kernel/`) as the CLI. Memories stored via MCP are visible in CLI and vice versa.
+
 ## Architecture
 
 ```
@@ -93,6 +107,7 @@ shrimpk-kernel          (facade — re-exports all)
   shrimpk-context       (context assembly + token budgeting)
   shrimpk-security      (sandbox, permissions — stub)
   shrimpk-python        (PyO3 bindings)
+  shrimpk-mcp           (MCP server — 9 tools over JSON-RPC stdio)
 ```
 
 ## Performance

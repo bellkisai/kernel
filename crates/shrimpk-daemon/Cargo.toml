@@ -1,0 +1,24 @@
+[package]
+name = "shrimpk-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ShrimPK daemon — localhost HTTP server for Echo Memory (the Ollama model)"
+publish = false
+
+[[bin]]
+name = "shrimpk-daemon"
+path = "src/main.rs"
+
+[dependencies]
+shrimpk-memory.workspace = true
+shrimpk-core = { workspace = true, features = ["sysinfo"] }
+axum.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sysinfo.workspace = true
+chrono.workspace = true

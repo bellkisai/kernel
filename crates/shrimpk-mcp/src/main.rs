@@ -36,7 +36,10 @@ impl ServerState {
             let engine = EchoEngine::load(self.config.clone()).map_err(|e| e.to_string())?;
             let total = engine.stats().await.total_memories;
             eprintln!("[shrimpk-mcp] Loaded {total} memories.");
-            self.engine = Some(Arc::new(engine));
+            let engine = Arc::new(engine);
+            // Start background consolidation (every 5 minutes)
+            engine.start_consolidation(300);
+            self.engine = Some(engine);
         }
         Ok(self.engine.as_ref().unwrap())
     }
@@ -96,11 +99,20 @@ async fn main() -> anyhow::Result<()> {
                         let tool_name = req.params["name"].as_str().unwrap_or("");
                         let args = req.params["arguments"].clone();
 
-                        // Clone engine Arc and config ref to avoid borrow conflict
+                        // Clone engine Arc to avoid borrow conflict with state.config
                         let engine = match state.engine().await {
                             Ok(e) => e.clone(),
                             Err(e) => {
-                                error_response(req.id, -32603, &format!("Engine init failed: {e}"));
+                                // Must write error response before continue (F-08 fix)
+                                let resp = error_response(
+                                    req.id,
+                                    -32603,
+                                    &format!("Engine init failed: {e}"),
+                                );
+                                let json = serde_json::to_string(&resp).unwrap();
+                                let _ = stdout.write_all(json.as_bytes()).await;
+                                let _ = stdout.write_all(b"\n").await;
+                                let _ = stdout.flush().await;
                                 continue;
                             }
                         };

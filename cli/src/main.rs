@@ -31,6 +31,9 @@ enum Commands {
         /// Source label
         #[arg(short, long, default_value = "cli")]
         source: String,
+        /// Quiet mode — suppress output (for hook/script integration)
+        #[arg(long)]
+        quiet: bool,
     },
     /// Find memories that resonate with a query
     Echo {
@@ -39,6 +42,9 @@ enum Commands {
         /// Maximum results to return
         #[arg(short, long, default_value_t = 10)]
         max_results: usize,
+        /// Output as JSON (for hook/script integration)
+        #[arg(long)]
+        json: bool,
     },
     /// Show engine statistics
     Stats,
@@ -258,6 +264,24 @@ async fn cmd_echo(engine: &EchoEngine, query: &str, max_results: usize) -> anyho
         );
     }
 
+    Ok(())
+}
+
+async fn cmd_echo_json(engine: &EchoEngine, query: &str, max_results: usize) -> anyhow::Result<()> {
+    let results = engine.echo(query, max_results).await?;
+
+    let json_results: Vec<serde_json::Value> = results
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "content": r.content,
+                "similarity": (r.similarity * 100.0).round() / 100.0,
+                "source": r.source
+            })
+        })
+        .collect();
+
+    println!("{}", serde_json::to_string(&json_results)?);
     Ok(())
 }
 
@@ -653,15 +677,21 @@ async fn main() -> anyhow::Result<()> {
     let config = config::resolve_config().map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
     std::fs::create_dir_all(&config.data_dir)?;
 
-    println!(
-        "[shrimpk] Initializing Echo Memory engine ({} tier)...",
-        tier_name(&config)
-    );
+    // Suppress init messages in quiet/JSON mode (for hook/script integration)
+    let quiet = matches!(&cli.command, Commands::Echo { json: true, .. })
+        || matches!(&cli.command, Commands::Store { quiet: true, .. });
+
+    if !quiet {
+        println!(
+            "[shrimpk] Initializing Echo Memory engine ({} tier)...",
+            tier_name(&config)
+        );
+    }
 
     let engine = EchoEngine::load(config.clone())?;
 
     let initial_count = engine.stats().await.total_memories;
-    if initial_count > 0 {
+    if initial_count > 0 && !quiet {
         println!(
             "[shrimpk] Loaded {} existing memories from disk.",
             format_number(initial_count)
@@ -669,8 +699,30 @@ async fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Commands::Store { text, source } => cmd_store(&engine, &text, &source).await?,
-        Commands::Echo { query, max_results } => cmd_echo(&engine, &query, max_results).await?,
+        Commands::Store {
+            text,
+            source,
+            quiet: q,
+        } => {
+            if q {
+                // Quiet mode: just store, no output (for hooks)
+                engine.store(&text, &source).await?;
+                engine.persist().await?;
+            } else {
+                cmd_store(&engine, &text, &source).await?;
+            }
+        }
+        Commands::Echo {
+            query,
+            max_results,
+            json,
+        } => {
+            if json {
+                cmd_echo_json(&engine, &query, max_results).await?
+            } else {
+                cmd_echo(&engine, &query, max_results).await?
+            }
+        }
         Commands::Stats => cmd_stats(&engine, &config).await?,
         Commands::Forget { id } => cmd_forget(&engine, &id).await?,
         Commands::Dump => cmd_dump(&engine, &config).await?,

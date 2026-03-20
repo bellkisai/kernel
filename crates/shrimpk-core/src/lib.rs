@@ -17,7 +17,8 @@ pub use config::{
 };
 pub use error::{Result, ShrimPKError};
 pub use memory::{
-    EchoResult, MemoryCategory, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel,
+    EchoResult, MemoryCategory, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats,
+    SensitivityLevel,
 };
 pub use pii::{PiiMatch, PiiType};
 pub use traits::{ModelBackend, Provider};
