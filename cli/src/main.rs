@@ -837,9 +837,21 @@ fn daemon_base_url() -> Option<String> {
         .map(|_| format!("http://{addr}"))
 }
 
+fn daemon_client() -> reqwest::Client {
+    let mut builder = reqwest::Client::builder();
+    // Forward auth token if set (F-02 fix)
+    if let Ok(token) = std::env::var("SHRIMPK_AUTH_TOKEN") {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+            headers.insert(reqwest::header::AUTHORIZATION, val);
+        }
+        builder = builder.default_headers(headers);
+    }
+    builder.build().unwrap_or_default()
+}
+
 async fn daemon_post(base: &str, path: &str, body: &serde_json::Value) -> anyhow::Result<String> {
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = daemon_client()
         .post(format!("{base}{path}"))
         .json(body)
         .send()
@@ -848,13 +860,17 @@ async fn daemon_post(base: &str, path: &str, body: &serde_json::Value) -> anyhow
 }
 
 async fn daemon_get(base: &str, path: &str) -> anyhow::Result<String> {
-    let client = reqwest::Client::new();
-    let resp = client.get(format!("{base}{path}")).send().await?;
+    let resp = daemon_client()
+        .get(format!("{base}{path}"))
+        .send()
+        .await?;
     Ok(resp.text().await?)
 }
 
 async fn daemon_delete(base: &str, path: &str) -> anyhow::Result<String> {
-    let client = reqwest::Client::new();
-    let resp = client.delete(format!("{base}{path}")).send().await?;
+    let resp = daemon_client()
+        .delete(format!("{base}{path}"))
+        .send()
+        .await?;
     Ok(resp.text().await?)
 }

@@ -1,7 +1,7 @@
 //! Shared application state for the daemon.
 
 use shrimpk_core::EchoConfig;
-use shrimpk_memory::EchoEngine;
+use shrimpk_memory::{EchoEngine, PiiFilter};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -12,4 +12,5 @@ pub struct AppState {
     pub config: EchoConfig,
     pub started_at: Instant,
     pub auth_token: Option<String>,
+    pub pii_filter: Arc<PiiFilter>,
 }

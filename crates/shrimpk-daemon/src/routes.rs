@@ -6,7 +6,6 @@ use axum::response::Json;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use shrimpk_core::{MemoryId, config};
-use shrimpk_memory::PiiFilter;
 use std::time::Instant;
 
 use crate::state::AppState;
@@ -74,9 +73,8 @@ pub async fn store(
     State(state): State<AppState>,
     Json(req): Json<StoreRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let pii_filter = PiiFilter::new();
-    let pii_matches = pii_filter.scan(&req.text);
-    let sensitivity = pii_filter.classify(&req.text);
+    let pii_matches = state.pii_filter.scan(&req.text);
+    let sensitivity = state.pii_filter.classify(&req.text);
 
     let id = state
         .engine

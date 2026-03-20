@@ -12,19 +12,25 @@ if [ -z "$PROMPT" ]; then
     exit 0
 fi
 
+# Auth header (if SHRIMPK_AUTH_TOKEN is set)
+AUTH_HEADER=""
+if [ -n "$SHRIMPK_AUTH_TOKEN" ]; then
+    AUTH_HEADER="-H \"Authorization: Bearer $SHRIMPK_AUTH_TOKEN\""
+fi
+
 # Check if daemon is running (fast TCP probe)
-if ! curl -s --max-time 0.2 "$DAEMON/health" > /dev/null 2>&1; then
+if ! curl -s --max-time 0.2 $AUTH_HEADER "$DAEMON/health" > /dev/null 2>&1; then
     exit 0
 fi
 
 # Auto-store: fire-and-forget via daemon HTTP (instant, ~1ms)
-curl -s -X POST "$DAEMON/api/store" \
+curl -s -X POST $AUTH_HEADER "$DAEMON/api/store" \
     -H "Content-Type: application/json" \
     -d "{\"text\":$(echo "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),\"source\":\"auto\"}" \
     > /dev/null 2>&1 &
 
 # Auto-echo: surface relevant memories via daemon HTTP (instant, ~5ms)
-RESULTS=$(curl -s -X POST "$DAEMON/api/echo" \
+RESULTS=$(curl -s -X POST $AUTH_HEADER "$DAEMON/api/echo" \
     -H "Content-Type: application/json" \
     -d "{\"query\":$(echo "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),\"max_results\":5}" \
     2>/dev/null)

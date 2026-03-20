@@ -45,6 +45,36 @@ async fn auth_middleware(
 }
 
 /// Write PID file for daemon discovery.
+/// Check if a stale PID file exists and clean it up (F-03 fix).
+fn validate_pid_file() {
+    let pid_path = config::config_dir().join("daemon.pid");
+    if !pid_path.exists() {
+        return;
+    }
+    if let Ok(content) = std::fs::read_to_string(&pid_path) {
+        // Parse PID from file
+        let pid: Option<u32> = content
+            .lines()
+            .find(|l| l.starts_with("pid="))
+            .and_then(|l| l.strip_prefix("pid="))
+            .and_then(|s| s.parse().ok());
+
+        if let Some(pid) = pid {
+            // Check if process is still alive
+            let alive = sysinfo::System::new_all()
+                .process(sysinfo::Pid::from_u32(pid))
+                .is_some();
+            if !alive {
+                eprintln!("[shrimpk] Removing stale PID file (pid {pid} not running).");
+                let _ = std::fs::remove_file(&pid_path);
+            } else {
+                eprintln!("[shrimpk] WARNING: Daemon already running (pid {pid}). Exiting.");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
 fn write_pid_file(port: u16) -> std::io::Result<()> {
     let pid_path = config::config_dir().join("daemon.pid");
     std::fs::create_dir_all(config::config_dir())?;
@@ -87,6 +117,9 @@ async fn main() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
+    // Check for stale PID file or already-running daemon (F-03)
+    validate_pid_file();
+
     // Resolve config
     let echo_config = config::resolve_config().map_err(|e| {
         eprintln!("[shrimpk] Config error: {e}");
@@ -116,7 +149,11 @@ async fn main() -> anyhow::Result<()> {
         config: echo_config,
         started_at: Instant::now(),
         auth_token,
+        pii_filter: Arc::new(shrimpk_memory::PiiFilter::new()),
     };
+
+    // Keep engine ref for shutdown persist (must clone before state moves into router)
+    let engine_for_shutdown = state.engine.clone();
 
     // Build router
     let app = Router::new()
@@ -155,8 +192,11 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    // Cleanup on shutdown
-    eprintln!("\n[shrimpk] Shutting down...");
+    // Cleanup on shutdown — persist memories before exit (F-01 fix)
+    eprintln!("\n[shrimpk] Shutting down — persisting memories...");
+    if let Err(e) = engine_for_shutdown.persist().await {
+        eprintln!("[shrimpk] WARNING: Failed to persist on shutdown: {e}");
+    }
     remove_pid_file();
     eprintln!("[shrimpk] Goodbye.");
 

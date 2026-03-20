@@ -156,10 +156,16 @@ async fn proxy_to_daemon(
         .and_then(|s| s.parse().ok())
         .unwrap_or(11435);
     let base = format!("http://127.0.0.1:{port}");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .ok()?;
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
+    // Forward auth token if set (F-02 fix)
+    if let Ok(token) = std::env::var("SHRIMPK_AUTH_TOKEN") {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+            headers.insert(reqwest::header::AUTHORIZATION, val);
+        }
+        builder = builder.default_headers(headers);
+    }
+    let client = builder.build().ok()?;
 
     // Check health first (fast fail if daemon not running)
     client

@@ -129,7 +129,9 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     // Determine embedding dimension from first entry, or use default 384
     let dim: u32 = embeddings.first().map(|e| e.len() as u32).unwrap_or(384);
 
-    let mut file = std::fs::File::create(path)?;
+    // Atomic write: write to .tmp file, then rename (F-06 fix)
+    let tmp_path = path.with_extension("shrm.tmp");
+    let mut file = std::fs::File::create(&tmp_path)?;
 
     // --- Write header (64 bytes) ---
     // We'll write a placeholder header first, then come back to fill CRC and metadata offset.
@@ -180,6 +182,12 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     // Flush and sync to disk
     file.flush()?;
     file.sync_all()?;
+
+    // Flush and close the tmp file, then atomically rename (F-06 fix)
+    drop(file);
+    std::fs::rename(&tmp_path, path).map_err(|e| {
+        ShrimPKError::Persistence(format!("Atomic rename failed: {e}"))
+    })?;
 
     let elapsed = start.elapsed();
     tracing::info!(
