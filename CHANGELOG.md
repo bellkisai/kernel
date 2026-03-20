@@ -6,15 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Added
-- **MCP Server** (`shrimpk-mcp`): 9 tools over JSON-RPC 2.0 stdio for Claude Code integration
+### Added — KS7: MCP Server
+- **MCP Server** (`shrimpk-mcp`): 9 tools over JSON-RPC 2.0 stdio
   - store, echo, stats, forget, dump, config_show, config_set, persist, status
   - Lazy engine init (fastembed loads on first tool call, not on handshake)
-  - Auto-persist after store/forget operations
+  - Auto-persist after store/forget, stdout sacred (logs to stderr)
   - Registered globally via `claude mcp add --scope user`
-- CLI `--json` flag for `shrimpk echo` (clean machine-readable output for hooks)
-- Echo Memory rules in CLAUDE.md (auto-store instructions for Claude Code)
-- Release workflow builds both `shrimpk` and `shrimpk-mcp` binaries
+- CLI `--json` flag for `shrimpk echo` + `--quiet` for `shrimpk store` (hook integration)
+- Echo Memory 3-layer rules in CLAUDE.md (MCP tools + auto-store + auto-echo)
+
+### Added — KS8: HTTP Daemon (The Ollama Model)
+- **HTTP Daemon** (`shrimpk-daemon`): Axum server on localhost:11435
+  - 10 REST routes: health, store, echo, stats, memories, forget, config, persist, consolidate
+  - Model loads ONCE, serves forever — no cold starts
+  - Optional auth token (`SHRIMPK_AUTH_TOKEN` → Bearer header)
+  - PID file for daemon discovery (`~/.shrimpk-kernel/daemon.pid`)
+  - Background consolidation every 5 min
+  - CORS headers for future web UI
+  - Graceful shutdown: persists memories on Ctrl+C
+- CLI auto-detects daemon via TCP probe → proxies via HTTP (~1ms)
+- MCP auto-detects daemon via health check → proxies via HTTP
+- Cross-platform auto-start: `--install` / `--uninstall` (Windows VBS, macOS launchd, Linux systemd)
+- Hook script uses `curl` to daemon instead of spawning CLI processes
+
+### Added — KS9: Product Polish
+- **System tray icon** (`shrimpk-tray`): 🦐 shrimp in taskbar
+  - Right-click: status, stats, copy port, open data dir, stop daemon, quit
+- README rewrite: landing page style matching shrimpk.html
+- Uninstaller stops running daemon before removing autostart
+
+### Fixed — KS7.5: Audit Fixes
+- File locking via `fs2` (exclusive write, shared read) — prevents CLI+MCP data corruption
+- Background consolidation started in MCP server (every 5 min)
+- Dump tool reads from in-memory store (was broken: looked for .json, engine writes .shrm)
+- Category-aware decay applied in echo scoring (old memories rank lower)
+- Engine init error returns proper JSON-RPC response (was silently dropped)
+
+### Fixed — KS8/KS9: Audit Fixes
+- Persist memories on graceful shutdown (was losing up to 5 min of data)
+- CLI/MCP/Hook forward auth token to daemon (was silently falling back to in-process)
+- PID file validated on startup (stale cleared, prevents duplicate daemons)
+- PiiFilter shared in AppState (was recompiling regexes per request)
+- Atomic binary write (write .tmp, rename — prevents corruption on crash)
 
 ## [0.1.0] - 2026-03-19
 

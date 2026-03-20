@@ -860,10 +860,7 @@ async fn daemon_post(base: &str, path: &str, body: &serde_json::Value) -> anyhow
 }
 
 async fn daemon_get(base: &str, path: &str) -> anyhow::Result<String> {
-    let resp = daemon_client()
-        .get(format!("{base}{path}"))
-        .send()
-        .await?;
+    let resp = daemon_client().get(format!("{base}{path}")).send().await?;
     Ok(resp.text().await?)
 }
 

@@ -1,0 +1,20 @@
+[package]
+name = "shrimpk-tray"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ShrimPK system tray icon — manage the daemon from your taskbar"
+publish = false
+
+[[bin]]
+name = "shrimpk-tray"
+path = "src/main.rs"
+
+[dependencies]
+shrimpk-core = { workspace = true, features = ["sysinfo"] }
+tray-icon = "0.19"
+image = { version = "0.25", default-features = false, features = ["png"] }
+tokio.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde_json.workspace = true
+anyhow.workspace = true

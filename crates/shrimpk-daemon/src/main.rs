@@ -312,6 +312,33 @@ fn install_autostart() -> anyhow::Result<()> {
 
 /// Remove auto-start configuration.
 fn uninstall_autostart() -> anyhow::Result<()> {
+    // Stop running daemon if detected
+    let pid_path = config::config_dir().join("daemon.pid");
+    if pid_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pid_path) {
+            let pid: Option<u32> = content
+                .lines()
+                .find(|l| l.starts_with("pid="))
+                .and_then(|l| l.strip_prefix("pid="))
+                .and_then(|s| s.parse().ok());
+            if let Some(pid) = pid {
+                println!("[shrimpk] Stopping running daemon (pid {pid})...");
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/PID", &pid.to_string()])
+                        .output();
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = std::process::Command::new("kill")
+                        .arg(pid.to_string())
+                        .output();
+                }
+            }
+        }
+        let _ = std::fs::remove_file(&pid_path);
+    }
     #[cfg(target_os = "windows")]
     {
         let vbs_path = dirs::home_dir()

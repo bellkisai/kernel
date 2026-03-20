@@ -185,9 +185,8 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
 
     // Flush and close the tmp file, then atomically rename (F-06 fix)
     drop(file);
-    std::fs::rename(&tmp_path, path).map_err(|e| {
-        ShrimPKError::Persistence(format!("Atomic rename failed: {e}"))
-    })?;
+    std::fs::rename(&tmp_path, path)
+        .map_err(|e| ShrimPKError::Persistence(format!("Atomic rename failed: {e}")))?;
 
     let elapsed = start.elapsed();
     tracing::info!(

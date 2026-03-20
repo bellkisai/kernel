@@ -1,65 +1,119 @@
-# ShrimPK
+<p align="center">
+  <h1 align="center">🦐 ShrimPK</h1>
+  <p align="center"><strong>Push-based AI memory where memories find YOU.</strong></p>
+  <p align="center">
+    <a href="https://github.com/bellkisai/kernel/actions/workflows/ci.yml"><img src="https://github.com/bellkisai/kernel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
+    <img src="https://img.shields.io/badge/rust-2024-orange.svg" alt="Rust">
+    <img src="https://img.shields.io/badge/port-11435-10b981.svg" alt="Port">
+  </p>
+</p>
 
-**Push-based AI memory where memories find you.**
+---
 
-[![CI](https://github.com/bellkisai/kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/bellkisai/kernel/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+<p align="center">
+  <code>3.50ms</code> echo at 100K memories&nbsp;&nbsp;•&nbsp;&nbsp;<code>+38%</code> more accurate than plain LLM&nbsp;&nbsp;•&nbsp;&nbsp;<code>15.7%</code> token savings
+</p>
 
-ShrimPK is an AI memory kernel written in Rust. Unlike traditional RAG systems where you search for memories, Echo Memory **listens** to context and **self-activates** when relevant — like human spontaneous recall.
+---
 
-**3.50ms** P50 at 100K memories | **38%** more accurate than plain LLM | **15.7%** token savings
+## The Problem
 
-## Features
+AI tools forget everything between sessions. You re-explain your stack, preferences, and project context **every single time**. Standard RAG requires you to search. You shouldn't have to.
 
-- **Echo Memory** — push-based activation, memories surface without explicit queries
-- **Three-layer pipeline** — Bloom filter (O(1) rejection) + LSH (sub-linear search) + exact cosine
-- **Hebbian learning** — co-activated memories strengthen connections over time
-- **Category-aware decay** — 6 types from Identity (365d) to Conversation (3d)
-- **Sleep consolidation** — background pruning, dedup merging, index rebuild
-- **PII masking** — 15 patterns, mask-don't-block approach
-- **Provider router** — cascade fallback, cost tracking, circuit breaker
-- **Context assembler** — token-budgeted prompt compilation with priority truncation
-- **Config system** — TOML file + env var overrides + auto-detect from RAM
+> *"What framework did I use for the API?"*
+>
+> Without ShrimPK: *"I don't have access to your previous conversations."*
+>
+> With ShrimPK: *"You chose FastAPI for your REST API, with SQLAlchemy for type-safe ORM queries."*
 
-## Install
+## How It Works
 
-### Rust library
+ShrimPK inverts the memory paradigm. Instead of searching for memories, **memories find you**.
 
-```toml
-[dependencies]
-shrimpk-kernel = "0.1"
+```
+┌─────────────────────────────────────────────────────────┐
+│  1. You Converse                                        │
+│     Just talk normally. ShrimPK stores context           │
+│     automatically. No "remember this" needed.           │
+├─────────────────────────────────────────────────────────┤
+│  2. Memories Self-Activate                              │
+│     When you mention something related, stored           │
+│     memories activate through Hebbian associations      │
+│     and surface relevant context — automatically.       │
+├─────────────────────────────────────────────────────────┤
+│  3. AI Knows You                                        │
+│     Your name persists for a year. Preferences for      │
+│     months. Casual chats fade in days. Just like        │
+│     human memory.                                       │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### Python
+## The Reef Ecosystem
 
-```bash
-pip install shrimpk  # via maturin
+In nature, cleaner shrimp maintain entire reef ecosystems — removing parasites, cleaning wounds, keeping everything healthy. ShrimPK does the same for your AI memory.
+
+| | Role | What It Does |
+|---|---|---|
+| 🦐 **ShrimPK** | The Shrimp | Maintains your AI memory reef — stores, classifies, decays, consolidates |
+| 🪸 **Echo Memory** | The Reef | The associative memory structure — LSH, Bloom filters, Hebbian learning |
+| 🦞 **You** | The Lobster | You just talk. Memories come to you. No searching, no managing. |
+| 🌊 **Push Activation** | The Current | The autonomous flow that delivers memories without being asked |
+
+## Performance
+
+| Metric | Value |
+|--------|-------|
+| Echo P50 at 100K memories | **3.50ms** |
+| Echo P95 at 100K memories | 6.88ms |
+| Head-to-head accuracy | **+38%** vs plain LLM |
+| Personalization rate | **100%** |
+| Token savings | **15.7%** per request |
+| Follow-up elimination | **100%** |
+| RAM (1M memories, f32) | ~1.8 GB |
+| RAM (1M memories, binary) | ~150 MB |
+
+## The Ollama Model
+
+ShrimPK runs as a background daemon — just like Ollama. Install once, it serves every AI tool on your machine.
+
+```
+shrimpk-daemon                    ← runs on localhost:11435
+  Model loads ONCE (~3s)          ← then serves forever
+  Auto-consolidation              ← every 5 min
+  Any client connects via HTTP    ← CLI, MCP, hooks, your app
+
+No cold starts. No process spawning. Sub-5ms responses.
 ```
 
-### CLI
-
 ```bash
-cargo install --path cli
+# Start the daemon
+shrimpk-daemon
+
+# Store a memory (via HTTP — instant)
+curl -X POST localhost:11435/api/store \
+  -H "Content-Type: application/json" \
+  -d '{"text":"I prefer Rust for backend services","source":"cli"}'
+
+# Echo memories (via HTTP — 3.5ms)
+curl -X POST localhost:11435/api/echo \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What language for the backend?"}'
 ```
 
 ## Quick Start
 
-### Rust
+### Install
 
-```rust
-use shrimpk_core::EchoConfig;
-use shrimpk_memory::EchoEngine;
+```bash
+# Build from source
+cargo build --release -p shrimpk-cli -p shrimpk-daemon
 
-let config = EchoConfig::auto_detect();
-let engine = EchoEngine::new(config)?;
+# Start daemon (runs in background)
+./target/release/shrimpk-daemon
 
-// Store memories
-engine.store("I prefer FastAPI for REST APIs", "conversation").await?;
-engine.store("Python is my main language", "conversation").await?;
-
-// Memories find YOU
-let echoes = engine.echo("What framework for this API?", 5).await?;
-// Returns: FastAPI memory (similarity: 0.85) in ~3.5ms
+# Auto-start on login
+./target/release/shrimpk-daemon --install
 ```
 
 ### CLI
@@ -70,6 +124,23 @@ shrimpk echo "What framework for APIs?"
 shrimpk stats
 shrimpk config show
 shrimpk status
+```
+
+When the daemon is running, CLI commands are instant (~1ms) — they proxy to the daemon via HTTP. Without the daemon, CLI loads the engine in-process (slower but works anywhere).
+
+### Rust Library
+
+```rust
+use shrimpk_core::EchoConfig;
+use shrimpk_memory::EchoEngine;
+
+let config = EchoConfig::auto_detect();
+let engine = EchoEngine::load(config)?;
+
+engine.store("I prefer FastAPI for REST APIs", "conversation").await?;
+
+let echoes = engine.echo("What framework for this API?", 5).await?;
+// Returns: FastAPI memory (similarity: 0.85) in ~3.5ms
 ```
 
 ### Python
@@ -83,21 +154,35 @@ mem.store("I prefer FastAPI", source="conversation")
 results = mem.echo("What framework?", max_results=5)
 ```
 
-## MCP Server (Claude Code / AI Tool Integration)
-
-ShrimPK ships an MCP server that exposes Echo Memory to any MCP-compatible AI tool.
+### MCP Server (Claude Code)
 
 ```bash
-# Register globally (works from any directory)
+# Register globally — works from any directory
 claude mcp add --transport stdio --scope user shrimpk -- shrimpk-mcp
-
-# Claude Code now has 9 new tools:
-# mcp__shrimpk__store, mcp__shrimpk__echo, mcp__shrimpk__stats, etc.
 ```
 
-The MCP server uses the same data directory (`~/.shrimpk-kernel/`) as the CLI. Memories stored via MCP are visible in CLI and vice versa.
+The MCP server auto-detects the daemon and proxies via HTTP. Falls back to in-process if daemon isn't running.
 
-## Architecture
+## HTTP API
+
+The daemon exposes 10 REST endpoints on `localhost:11435`:
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET` | `/health` | Health check + memory count + uptime |
+| `POST` | `/api/store` | Store a memory |
+| `POST` | `/api/echo` | Find resonating memories |
+| `GET` | `/api/stats` | Engine statistics |
+| `GET` | `/api/memories` | List all memories |
+| `DELETE` | `/api/memories/:id` | Forget a memory |
+| `GET` | `/api/config` | Show configuration |
+| `PUT` | `/api/config` | Set config value |
+| `POST` | `/api/persist` | Force save to disk |
+| `POST` | `/api/consolidate` | Trigger consolidation |
+
+Optional auth: set `SHRIMPK_AUTH_TOKEN` env var → required as `Authorization: Bearer` header.
+
+## Under the Hood
 
 ```
 shrimpk-kernel          (facade — re-exports all)
@@ -107,29 +192,23 @@ shrimpk-kernel          (facade — re-exports all)
   shrimpk-context       (context assembly + token budgeting)
   shrimpk-security      (sandbox, permissions — stub)
   shrimpk-python        (PyO3 bindings)
-  shrimpk-mcp           (MCP server — 9 tools over JSON-RPC stdio)
+  shrimpk-mcp           (MCP server — JSON-RPC stdio)
+  shrimpk-daemon        (HTTP daemon — localhost:11435)
 ```
 
-## Performance
-
-| Metric | Value |
-|--------|-------|
-| Echo P50 at 100K memories | 3.50ms |
-| Echo P95 at 100K memories | 6.88ms |
-| Head-to-head accuracy | +38% vs plain LLM |
-| Personalization rate | 100% |
-| Token savings | 15.7% per request |
-| Follow-up elimination | 100% |
-| RAM (1M memories, f32) | ~1.8 GB |
-| RAM (1M memories, binary) | ~150 MB |
-| Tests | 222 passing |
+**Echo Memory pipeline:**
+1. **Bloom filter** — O(1) topic rejection (is this query even relevant?)
+2. **LSH** — sub-linear candidate retrieval (SimHash, 16 tables, 10 bits)
+3. **Cosine similarity** — SIMD-accelerated exact scoring
+4. **Hebbian boost** — co-activated memories get promoted
+5. **Category decay** — Identity (365d) → Conversation (3d)
 
 ## Configuration
 
-ShrimPK auto-detects from system RAM (4 tiers: minimal/standard/full/maximum). Override via:
+ShrimPK auto-detects from system RAM. Override via config file or env vars:
 
 ```bash
-# Config file
+# Config file (~/.shrimpk-kernel/config.toml)
 shrimpk config set max_memories 500000
 shrimpk config set quantization binary
 shrimpk config show
@@ -138,10 +217,22 @@ shrimpk config show
 SHRIMPK_MAX_MEMORIES=500000
 SHRIMPK_DATA_DIR=/custom/path
 SHRIMPK_QUANTIZATION=binary
-SHRIMPK_MAX_DISK_BYTES=4294967296
+SHRIMPK_PORT=11435
+SHRIMPK_AUTH_TOKEN=your-secret-token
 ```
 
-Priority: env vars > `~/.shrimpk-kernel/config.toml` > auto-detect
+Priority: env vars > config.toml > auto-detect
+
+## Two Products
+
+| | ShrimPK Kernel | Bellkis HUB |
+|---|---|---|
+| **What** | AI memory engine | AI desktop app |
+| **For** | Developers embedding memory | Users wanting a local AI hub |
+| **License** | Apache 2.0 | BSL 1.1 |
+| **Install** | `cargo add shrimpk-kernel` | Desktop installer |
+
+Two brands, one household. The kernel powers the hub.
 
 ## License
 
