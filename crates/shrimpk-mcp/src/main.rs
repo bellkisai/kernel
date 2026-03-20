@@ -94,33 +94,38 @@ async fn main() -> anyhow::Result<()> {
                         success_response(req.id, serde_json::json!({ "tools": tools_json }))
                     }
 
-                    // Tool call — needs engine (lazy init)
+                    // Tool call — try daemon HTTP first, fallback to in-process
                     "tools/call" => {
                         let tool_name = req.params["name"].as_str().unwrap_or("");
                         let args = req.params["arguments"].clone();
 
-                        // Clone engine Arc to avoid borrow conflict with state.config
-                        let engine = match state.engine().await {
-                            Ok(e) => e.clone(),
-                            Err(e) => {
-                                // Must write error response before continue (F-08 fix)
-                                let resp = error_response(
-                                    req.id,
-                                    -32603,
-                                    &format!("Engine init failed: {e}"),
-                                );
-                                let json = serde_json::to_string(&resp).unwrap();
-                                let _ = stdout.write_all(json.as_bytes()).await;
-                                let _ = stdout.write_all(b"\n").await;
-                                let _ = stdout.flush().await;
-                                continue;
-                            }
-                        };
-                        let config = &state.config;
+                        // Try daemon proxy (instant, no model load)
+                        if let Some(result) = proxy_to_daemon(tool_name, &args).await {
+                            let result_json = serde_json::to_value(&result).unwrap();
+                            success_response(req.id, result_json)
+                        } else {
+                            // Fallback: in-process engine (lazy init)
+                            let engine = match state.engine().await {
+                                Ok(e) => e.clone(),
+                                Err(e) => {
+                                    let resp = error_response(
+                                        req.id,
+                                        -32603,
+                                        &format!("Engine init failed: {e}"),
+                                    );
+                                    let json = serde_json::to_string(&resp).unwrap();
+                                    let _ = stdout.write_all(json.as_bytes()).await;
+                                    let _ = stdout.write_all(b"\n").await;
+                                    let _ = stdout.flush().await;
+                                    continue;
+                                }
+                            };
+                            let config = &state.config;
 
-                        let result = handler::dispatch(&engine, config, tool_name, &args).await;
-                        let result_json = serde_json::to_value(&result).unwrap();
-                        success_response(req.id, result_json)
+                            let result = handler::dispatch(&engine, config, tool_name, &args).await;
+                            let result_json = serde_json::to_value(&result).unwrap();
+                            success_response(req.id, result_json)
+                        }
                     }
 
                     // Unknown method
@@ -138,4 +143,93 @@ async fn main() -> anyhow::Result<()> {
 
     eprintln!("[shrimpk-mcp] Stdin closed, shutting down.");
     Ok(())
+}
+
+/// Map MCP tool names to daemon HTTP routes and proxy the call.
+/// Returns None if daemon is not running.
+async fn proxy_to_daemon(
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Option<protocol::ToolCallResult> {
+    let port: u16 = std::env::var("SHRIMPK_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(11435);
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .ok()?;
+
+    // Check health first (fast fail if daemon not running)
+    client
+        .get(format!("{base}/health"))
+        .timeout(std::time::Duration::from_millis(200))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
+
+    eprintln!("[shrimpk-mcp] Proxying {tool_name} to daemon at {base}");
+
+    let resp = match tool_name {
+        "store" => {
+            client
+                .post(format!("{base}/api/store"))
+                .json(args)
+                .send()
+                .await
+        }
+        "echo" => {
+            client
+                .post(format!("{base}/api/echo"))
+                .json(args)
+                .send()
+                .await
+        }
+        "stats" => client.get(format!("{base}/api/stats")).send().await,
+        "forget" => {
+            let id = args["id"].as_str().unwrap_or("");
+            client
+                .delete(format!("{base}/api/memories/{id}"))
+                .send()
+                .await
+        }
+        "dump" => {
+            client
+                .get(format!("{base}/api/memories?limit=50"))
+                .send()
+                .await
+        }
+        "config_show" => client.get(format!("{base}/api/config")).send().await,
+        "config_set" => {
+            client
+                .put(format!("{base}/api/config"))
+                .json(args)
+                .send()
+                .await
+        }
+        "persist" => client.post(format!("{base}/api/persist")).send().await,
+        "status" => client.get(format!("{base}/health")).send().await,
+        _ => {
+            return Some(protocol::ToolCallResult::error(format!(
+                "Unknown tool: {tool_name}"
+            )));
+        }
+    };
+
+    match resp {
+        Ok(r) => {
+            let text = r
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
+            Some(protocol::ToolCallResult::success(text))
+        }
+        Err(e) => {
+            eprintln!("[shrimpk-mcp] Daemon proxy error: {e}");
+            None // Fall back to in-process
+        }
+    }
 }

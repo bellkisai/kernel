@@ -65,8 +65,16 @@ fn remove_pid_file() {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Parse port from args
     let args: Vec<String> = std::env::args().collect();
+
+    // Handle --install / --uninstall before starting the server
+    if args.iter().any(|a| a == "--install") {
+        return install_autostart();
+    }
+    if args.iter().any(|a| a == "--uninstall") {
+        return uninstall_autostart();
+    }
+
     let port = args
         .iter()
         .position(|a| a == "--port")
@@ -159,4 +167,151 @@ async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
         .expect("failed to listen for ctrl+c");
+}
+
+// ---------------------------------------------------------------------------
+// Auto-start installation (Windows: Startup folder, others: launchd/systemd)
+// ---------------------------------------------------------------------------
+
+/// Get the path to the current executable.
+fn daemon_exe_path() -> anyhow::Result<std::path::PathBuf> {
+    std::env::current_exe().map_err(|e| anyhow::anyhow!("Cannot find daemon executable: {e}"))
+}
+
+/// Install auto-start: creates a shortcut/script in the platform's startup directory.
+fn install_autostart() -> anyhow::Result<()> {
+    let exe = daemon_exe_path()?;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: create a .vbs script in the Startup folder (runs hidden, no console window)
+        let startup_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+            .join("AppData")
+            .join("Roaming")
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu")
+            .join("Programs")
+            .join("Startup");
+
+        std::fs::create_dir_all(&startup_dir)?;
+
+        let vbs_path = startup_dir.join("shrimpk-daemon.vbs");
+        let vbs_content = format!(
+            "Set WshShell = CreateObject(\"WScript.Shell\")\r\n\
+             WshShell.Run \"\"\"{}\"\"\", 0, False\r\n",
+            exe.display()
+        );
+        std::fs::write(&vbs_path, vbs_content)?;
+        println!("[shrimpk] Installed auto-start: {}", vbs_path.display());
+        println!("[shrimpk] Daemon will start automatically on login (hidden, no console).");
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let plist_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+            .join("Library")
+            .join("LaunchAgents");
+        std::fs::create_dir_all(&plist_dir)?;
+
+        let plist_path = plist_dir.join("ai.bellkis.shrimpk-daemon.plist");
+        let plist_content = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.bellkis.shrimpk-daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>"#,
+            exe.display()
+        );
+        std::fs::write(&plist_path, plist_content)?;
+        println!("[shrimpk] Installed: {}", plist_path.display());
+        println!("[shrimpk] Run: launchctl load {}", plist_path.display());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let systemd_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+            .join(".config")
+            .join("systemd")
+            .join("user");
+        std::fs::create_dir_all(&systemd_dir)?;
+
+        let service_path = systemd_dir.join("shrimpk-daemon.service");
+        let service_content = format!(
+            "[Unit]\n\
+             Description=ShrimPK Echo Memory Daemon\n\
+             After=network.target\n\n\
+             [Service]\n\
+             ExecStart={}\n\
+             Restart=on-failure\n\n\
+             [Install]\n\
+             WantedBy=default.target\n",
+            exe.display()
+        );
+        std::fs::write(&service_path, service_content)?;
+        println!("[shrimpk] Installed: {}", service_path.display());
+        println!("[shrimpk] Run: systemctl --user enable --now shrimpk-daemon");
+    }
+
+    Ok(())
+}
+
+/// Remove auto-start configuration.
+fn uninstall_autostart() -> anyhow::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let vbs_path = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+            .join(
+                "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/shrimpk-daemon.vbs",
+            );
+        if vbs_path.exists() {
+            std::fs::remove_file(&vbs_path)?;
+            println!("[shrimpk] Removed auto-start: {}", vbs_path.display());
+        } else {
+            println!("[shrimpk] No auto-start found.");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let plist_path = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+            .join("Library/LaunchAgents/ai.bellkis.shrimpk-daemon.plist");
+        if plist_path.exists() {
+            std::fs::remove_file(&plist_path)?;
+            println!("[shrimpk] Removed: {}", plist_path.display());
+        } else {
+            println!("[shrimpk] No auto-start found.");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let service_path = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+            .join(".config/systemd/user/shrimpk-daemon.service");
+        if service_path.exists() {
+            std::fs::remove_file(&service_path)?;
+            println!("[shrimpk] Removed: {}", service_path.display());
+        } else {
+            println!("[shrimpk] No auto-start found.");
+        }
+    }
+
+    Ok(())
 }

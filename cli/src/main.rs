@@ -673,17 +673,96 @@ async fn main() -> anyhow::Result<()> {
         _ => {}
     }
 
-    // Resolve config and init engine for memory-related commands
-    let config = config::resolve_config().map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
-    std::fs::create_dir_all(&config.data_dir)?;
-
-    // Suppress init messages in quiet/JSON mode (for hook/script integration)
+    // Try daemon first (instant response, no model loading)
+    // Fall back to in-process engine if daemon not running
+    let daemon_url = daemon_base_url();
     let quiet = matches!(&cli.command, Commands::Echo { json: true, .. })
         || matches!(&cli.command, Commands::Store { quiet: true, .. });
 
+    if let Some(base) = &daemon_url {
+        if !quiet {
+            eprintln!("[shrimpk] Using daemon at {base}");
+        }
+        match &cli.command {
+            Commands::Store {
+                text,
+                source,
+                quiet: q,
+            } => {
+                let resp = daemon_post(
+                    base,
+                    "/api/store",
+                    &serde_json::json!({"text": text, "source": source}),
+                )
+                .await?;
+                if !q {
+                    println!("{resp}");
+                }
+            }
+            Commands::Echo {
+                query,
+                max_results,
+                json,
+            } => {
+                let resp = daemon_post(
+                    base,
+                    "/api/echo",
+                    &serde_json::json!({"query": query, "max_results": max_results}),
+                )
+                .await?;
+                if *json {
+                    // Extract just the results array for clean JSON output
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&resp) {
+                        let results = &parsed["results"];
+                        let slim: Vec<serde_json::Value> = results
+                            .as_array()
+                            .map(|arr| {
+                                arr.iter()
+                                    .map(|r| {
+                                        serde_json::json!({
+                                            "content": r["content"],
+                                            "similarity": r["similarity"],
+                                            "source": r["source"]
+                                        })
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        println!("{}", serde_json::to_string(&slim)?);
+                    } else {
+                        println!("{resp}");
+                    }
+                } else {
+                    println!("{resp}");
+                }
+            }
+            Commands::Stats => {
+                let resp = daemon_get(base, "/api/stats").await?;
+                println!("{resp}");
+            }
+            Commands::Forget { id } => {
+                let resp = daemon_delete(base, &format!("/api/memories/{id}")).await?;
+                println!("{resp}");
+            }
+            Commands::Dump => {
+                let resp = daemon_get(base, "/api/memories?limit=50").await?;
+                println!("{resp}");
+            }
+            Commands::Bench { .. } => {
+                anyhow::bail!("Bench requires in-process engine. Stop daemon and retry.");
+            }
+            Commands::Config { .. } | Commands::Status => unreachable!(),
+        }
+        return Ok(());
+    }
+
+    // Fallback: no daemon running — load engine in-process
+    let config = config::resolve_config().map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+    std::fs::create_dir_all(&config.data_dir)?;
+
     if !quiet {
         println!(
-            "[shrimpk] Initializing Echo Memory engine ({} tier)...",
+            "[shrimpk] No daemon detected. Loading engine in-process ({} tier)...",
             tier_name(&config)
         );
     }
@@ -705,7 +784,6 @@ async fn main() -> anyhow::Result<()> {
             quiet: q,
         } => {
             if q {
-                // Quiet mode: just store, no output (for hooks)
                 engine.store(&text, &source).await?;
                 engine.persist().await?;
             } else {
@@ -736,4 +814,47 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Daemon client helpers
+// ---------------------------------------------------------------------------
+
+const DEFAULT_DAEMON_PORT: u16 = 11435;
+
+/// Check if daemon is running and return its base URL.
+/// Uses a fast TCP connect probe (no HTTP overhead, no runtime conflict).
+fn daemon_base_url() -> Option<String> {
+    let port = std::env::var("SHRIMPK_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_DAEMON_PORT);
+
+    // Fast TCP probe — just check if something is listening on the port
+    let addr = format!("127.0.0.1:{port}");
+    std::net::TcpStream::connect_timeout(&addr.parse().ok()?, std::time::Duration::from_millis(100))
+        .ok()
+        .map(|_| format!("http://{addr}"))
+}
+
+async fn daemon_post(base: &str, path: &str, body: &serde_json::Value) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{base}{path}"))
+        .json(body)
+        .send()
+        .await?;
+    Ok(resp.text().await?)
+}
+
+async fn daemon_get(base: &str, path: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+    let resp = client.get(format!("{base}{path}")).send().await?;
+    Ok(resp.text().await?)
+}
+
+async fn daemon_delete(base: &str, path: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+    let resp = client.delete(format!("{base}{path}")).send().await?;
+    Ok(resp.text().await?)
 }
