@@ -1,0 +1,396 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  ShrimPK MSI Installer — WiX v3
+  Installs: shrimpk.exe, shrimpk-mcp.exe, shrimpk-daemon.exe, shrimpk-app.exe
+  Features: PATH, auto-start (Registry Run), Start Menu, MCP registration
+  Installs per-user — no admin elevation required.
+-->
+
+<!-- Per-user install into %LOCALAPPDATA%\ShrimPK (no elevation needed) -->
+
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+
+    <Product
+        Id='*'
+        Name='ShrimPK'
+        UpgradeCode='923D819F-B122-4860-BFA7-ADF85170B53E'
+        Manufacturer='Bellkis AI'
+        Language='1033'
+        Codepage='1252'
+        Version='$(var.Version)'>
+
+        <Package Id='*'
+            Keywords='Installer'
+            Description='ShrimPK — AI Echo Memory kernel. CLI, MCP server, HTTP daemon, and system tray.'
+            Manufacturer='Bellkis AI'
+            InstallerVersion='450'
+            Languages='1033'
+            Compressed='yes'
+            InstallScope='perUser'
+            SummaryCodepage='1252'
+            />
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+
+        <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
+        <Property Id='DiskPrompt' Value='ShrimPK Installation'/>
+
+        <!-- ============================================================ -->
+        <!-- Icon for Add/Remove Programs                                 -->
+        <!-- ============================================================ -->
+        <Icon Id='ProductICO' SourceFile='wix\icon.ico'/>
+        <Property Id='ARPPRODUCTICON' Value='ProductICO'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/bellkisai/kernel'/>
+        <Property Id='ARPURLINFOABOUT' Value='https://bellkis.com'/>
+
+        <!-- ============================================================ -->
+        <!-- Directory structure                                          -->
+        <!-- ============================================================ -->
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='LocalAppDataFolder'>
+                <Directory Id='APPLICATIONFOLDER' Name='ShrimPK'>
+
+                    <!-- License file in install root -->
+                    <Component Id='License' Guid='C1A2B3C4-D5E6-7890-ABCD-EF1234567001'>
+                        <File Id='LicenseFile'
+                            DiskId='1'
+                            Source='wix\License.rtf'/>
+                        <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                            Name='License' Type='integer' Value='1' KeyPath='yes'/>
+                    </Component>
+
+                    <!-- Clean up install directories on uninstall -->
+                    <Component Id='CleanupDirs' Guid='F1A2B3C4-D5E6-7890-ABCD-EF1234567891'>
+                        <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                            Name='Cleanup' Type='integer' Value='1' KeyPath='yes'/>
+                        <RemoveFolder Id='CleanupBin' Directory='Bin' On='uninstall'/>
+                        <RemoveFolder Id='CleanupScripts' Directory='Scripts' On='uninstall'/>
+                        <RemoveFolder Id='CleanupAppFolder' Directory='APPLICATIONFOLDER' On='uninstall'/>
+                    </Component>
+
+                    <!-- bin\ directory — all 4 binaries -->
+                    <Directory Id='Bin' Name='bin'>
+
+                        <!-- PATH environment variable (user-level, no admin needed) -->
+                        <Component Id='Path' Guid='2E97F137-6938-4612-B3B3-68624378E355'>
+                            <Environment
+                                Id='PATH'
+                                Name='PATH'
+                                Value='[Bin]'
+                                Permanent='no'
+                                Part='last'
+                                Action='set'
+                                System='no'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='Path' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+
+                        <!-- 1. shrimpk.exe — CLI -->
+                        <Component Id='BinaryCli' Guid='C1A2B3C4-D5E6-7890-ABCD-EF1234567002'>
+                            <File
+                                Id='shrimpk_exe'
+                                Name='shrimpk.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\shrimpk.exe'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='BinaryCli' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+
+                        <!-- 2. shrimpk-mcp.exe — MCP server -->
+                        <Component Id='BinaryMcp' Guid='C1A2B3C4-D5E6-7890-ABCD-EF1234567003'>
+                            <File
+                                Id='shrimpk_mcp_exe'
+                                Name='shrimpk-mcp.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\shrimpk-mcp.exe'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='BinaryMcp' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+
+                        <!-- 3. shrimpk-daemon.exe — HTTP daemon (file only) -->
+                        <Component Id='BinaryDaemon' Guid='A1B2C3D4-E5F6-7890-ABCD-EF1234567890'>
+                            <File
+                                Id='shrimpk_daemon_exe'
+                                Name='shrimpk-daemon.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\shrimpk-daemon.exe'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='BinaryDaemon' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+
+                        <!-- 4. shrimpk-app.exe — Desktop app (file only) -->
+                        <Component Id='BinaryTray' Guid='C1A2B3C4-D5E6-7890-ABCD-EF1234567004'>
+                            <File
+                                Id='shrimpk_app_exe'
+                                Name='shrimpk-app.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\shrimpk-app.exe'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='BinaryTray' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+
+                        <!-- Auto-start daemon on user login via Registry Run key -->
+                        <Component Id='AutoStartDaemon' Guid='D4E5F6A7-B8C9-0123-4567-89ABCDEF0123'>
+                            <RegistryValue
+                                Root='HKCU'
+                                Key='Software\Microsoft\Windows\CurrentVersion\Run'
+                                Name='ShrimPKDaemon'
+                                Type='string'
+                                Value='&quot;[Bin]shrimpk-daemon.exe&quot;'
+                                KeyPath='yes'/>
+                        </Component>
+
+                        <!-- Auto-start app on user login via Registry Run key -->
+                        <Component Id='AutoStartTray' Guid='E5F6A7B8-C9D0-1234-5678-9ABCDEF01234'>
+                            <RegistryValue
+                                Root='HKCU'
+                                Key='Software\Microsoft\Windows\CurrentVersion\Run'
+                                Name='ShrimPKApp'
+                                Type='string'
+                                Value='&quot;[Bin]shrimpk-app.exe&quot;'
+                                KeyPath='yes'/>
+                        </Component>
+
+                    </Directory> <!-- /bin -->
+
+                    <!-- scripts\ directory — hook + registration scripts -->
+                    <Directory Id='Scripts' Name='scripts'>
+                        <Component Id='HookScript' Guid='A2B3C4D5-E6F7-8901-BCDE-F12345670010'>
+                            <File
+                                Id='shrimpk_hook_sh'
+                                Name='shrimpk-hook.sh'
+                                DiskId='1'
+                                Source='scripts\shrimpk-hook.sh'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='HookScript' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+                        <Component Id='RegisterHookScript' Guid='B3C4D5E6-F7A8-9012-CDEF-234567890011'>
+                            <File
+                                Id='register_hook_ps1'
+                                Name='register-hook.ps1'
+                                DiskId='1'
+                                Source='scripts\register-hook.ps1'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='RegisterHookScript' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+                        <Component Id='UnregisterHookScript' Guid='C4D5E6F7-A8B9-0123-DEF0-345678901012'>
+                            <File
+                                Id='unregister_hook_ps1'
+                                Name='unregister-hook.ps1'
+                                DiskId='1'
+                                Source='scripts\unregister-hook.ps1'/>
+                            <RegistryValue Root='HKCU' Key='Software\BellkisAI\ShrimPK\Components'
+                                Name='UnregisterHookScript' Type='integer' Value='1' KeyPath='yes'/>
+                        </Component>
+                    </Directory> <!-- /scripts -->
+
+                </Directory> <!-- /ShrimPK -->
+            </Directory> <!-- /LocalAppData -->
+
+            <!-- ============================================================ -->
+            <!-- Start Menu shortcuts                                         -->
+            <!-- ============================================================ -->
+            <Directory Id='ProgramMenuFolder' Name='Programs'>
+                <Directory Id='ApplicationProgramsFolder' Name='ShrimPK'>
+                    <Component Id='StartMenuShortcuts' Guid='B7E84F12-3C56-4D89-A1E2-F34567890ABC'>
+                        <Shortcut
+                            Id='ShortcutApp'
+                            Name='ShrimPK'
+                            Description='Launch ShrimPK'
+                            Target='[Bin]shrimpk-app.exe'
+                            WorkingDirectory='Bin'
+                            Icon='ProductICO'/>
+                        <Shortcut
+                            Id='TerminalShortcut'
+                            Name='ShrimPK Terminal'
+                            Description='Open a terminal with ShrimPK ready'
+                            Target='[SystemFolder]cmd.exe'
+                            Arguments='/K echo ShrimPK ready &amp;&amp; shrimpk status'
+                            WorkingDirectory='Bin'/>
+                        <Shortcut
+                            Id='ShortcutUninstall'
+                            Name='Uninstall ShrimPK'
+                            Description='Uninstall ShrimPK from this computer'
+                            Target='[SystemFolder]msiexec.exe'
+                            Arguments='/x [ProductCode]'/>
+                        <RemoveFolder
+                            Id='CleanUpProgramsFolder'
+                            On='uninstall'/>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\BellkisAI\ShrimPK'
+                            Name='StartMenuInstalled'
+                            Type='integer'
+                            Value='1'
+                            KeyPath='yes'/>
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <!-- ============================================================ -->
+        <!-- Custom Actions: MCP registration                             -->
+        <!-- Uses PowerShell to check for claude, register/unregister.    -->
+        <!-- Return='ignore' ensures installer succeeds even if claude    -->
+        <!-- is not present or the command fails.                         -->
+        <!-- ============================================================ -->
+
+        <!--
+            All Custom Actions use cmd.exe /c start /min to suppress the
+            visible CMD window that PowerShell (or any console child)
+            would otherwise flash.  The Property-based pattern (Type 50)
+            resolves [APPLICATIONFOLDER] at runtime and does not require
+            the executable to exist inside a specific Directory.
+
+            StopProcesses uses taskkill directly (no PowerShell) because
+            deferred actions run in a restricted context. taskkill /F is
+            silent on "not found" when combined with >nul 2>&1.
+        -->
+
+        <!--
+            All Custom Actions use powershell.exe directly with -WindowStyle Hidden
+            to avoid CMD window flash. Property-based (Type 50) custom actions.
+            LaunchDaemon/LaunchApp use Start-Process to launch without a visible window.
+            StopProcesses uses Stop-Process instead of taskkill.
+        -->
+
+        <Property Id='POWERSHELLEXE' Value='powershell.exe'/>
+
+        <!-- Install: register shrimpk MCP server with Claude Code (hidden) -->
+        <CustomAction
+            Id='RegisterMCP'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { &amp; claude mcp add --scope user shrimpk -- &apos;[APPLICATIONFOLDER]bin\shrimpk-mcp.exe&apos; } } catch { exit 0 }; exit 0"'
+            Execute='immediate'
+            Return='ignore'/>
+
+        <!-- Uninstall: remove shrimpk MCP server from Claude Code (hidden) -->
+        <CustomAction
+            Id='UnregisterMCP'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { &amp; claude mcp remove shrimpk } } catch { exit 0 }; exit 0"'
+            Execute='immediate'
+            Return='ignore'/>
+
+        <!-- Post-install: launch daemon hidden (immediate + asyncNoWait) -->
+        <CustomAction
+            Id='LaunchDaemon'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Start-Process -FilePath &apos;[APPLICATIONFOLDER]bin\shrimpk-daemon.exe&apos; -WindowStyle Hidden"'
+            Execute='immediate'
+            Return='asyncNoWait'/>
+
+        <!-- Post-install: launch app (tray has #![windows_subsystem = "windows"]) -->
+        <CustomAction
+            Id='LaunchApp'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Start-Process -FilePath &apos;[APPLICATIONFOLDER]bin\shrimpk-app.exe&apos;"'
+            Execute='immediate'
+            Return='asyncNoWait'/>
+
+        <!-- Pre-uninstall: stop processes before removing files (deferred, hidden) -->
+        <CustomAction
+            Id='StopProcesses'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Stop-Process -Name shrimpk-daemon,shrimpk-app -Force -ErrorAction SilentlyContinue"'
+            Execute='deferred'
+            Return='ignore'/>
+
+        <!-- Install: register shrimpk hook in Claude Code settings.json (hidden) -->
+        <CustomAction
+            Id='RegisterHook'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "[APPLICATIONFOLDER]scripts\register-hook.ps1" -InstallDir "[APPLICATIONFOLDER]"'
+            Execute='immediate'
+            Return='ignore'/>
+
+        <!-- Uninstall: remove shrimpk hook from Claude Code settings.json (hidden) -->
+        <CustomAction
+            Id='UnregisterHook'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "[APPLICATIONFOLDER]scripts\unregister-hook.ps1"'
+            Execute='immediate'
+            Return='ignore'/>
+
+        <!-- ============================================================ -->
+        <!-- Install sequence                                             -->
+        <!-- ============================================================ -->
+        <InstallExecuteSequence>
+            <Custom Action='RegisterMCP' After='InstallFiles'>
+                NOT Installed AND NOT REMOVE
+            </Custom>
+            <Custom Action='RegisterHook' After='RegisterMCP'>
+                NOT Installed AND NOT REMOVE
+            </Custom>
+            <Custom Action='LaunchDaemon' After='InstallFinalize'>
+                NOT REMOVE
+            </Custom>
+            <Custom Action='LaunchApp' After='LaunchDaemon'>
+                NOT REMOVE
+            </Custom>
+            <Custom Action='StopProcesses' Before='RemoveFiles'>
+                REMOVE="ALL"
+            </Custom>
+            <Custom Action='UnregisterHook' Before='StopProcesses'>
+                REMOVE="ALL"
+            </Custom>
+            <Custom Action='UnregisterMCP' Before='UnregisterHook'>
+                REMOVE="ALL"
+            </Custom>
+        </InstallExecuteSequence>
+
+        <!-- ============================================================ -->
+        <!-- Features                                                     -->
+        <!-- ============================================================ -->
+        <Feature
+            Id='MainFeature'
+            Title='ShrimPK'
+            Description='Installs all ShrimPK binaries, auto-start on login, and registers the MCP server.'
+            Level='1'
+            ConfigurableDirectory='APPLICATIONFOLDER'
+            AllowAdvertise='no'
+            Display='expand'
+            Absent='disallow'>
+
+            <ComponentRef Id='License'/>
+            <ComponentRef Id='CleanupDirs'/>
+            <ComponentRef Id='BinaryCli'/>
+            <ComponentRef Id='BinaryMcp'/>
+            <ComponentRef Id='BinaryDaemon'/>
+            <ComponentRef Id='BinaryTray'/>
+            <ComponentRef Id='AutoStartDaemon'/>
+            <ComponentRef Id='AutoStartTray'/>
+            <ComponentRef Id='StartMenuShortcuts'/>
+            <ComponentRef Id='HookScript'/>
+            <ComponentRef Id='RegisterHookScript'/>
+            <ComponentRef Id='UnregisterHookScript'/>
+
+            <Feature
+                Id='Environment'
+                Title='PATH Environment Variable'
+                Description='Add [APPLICATIONFOLDER]bin to the user PATH so shrimpk commands work from any terminal.'
+                Level='1'
+                Absent='allow'>
+                <ComponentRef Id='Path'/>
+            </Feature>
+        </Feature>
+
+        <!-- ============================================================ -->
+        <!-- Add/Remove Programs metadata                                 -->
+        <!-- ============================================================ -->
+        <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+
+        <!-- ============================================================ -->
+        <!-- UI: license dialog                                           -->
+        <!-- ============================================================ -->
+        <UI>
+            <UIRef Id='WixUI_FeatureTree'/>
+        </UI>
+
+        <WixVariable Id='WixUILicenseRtf' Value='wix\License.rtf'/>
+
+    </Product>
+
+</Wix>

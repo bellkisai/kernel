@@ -2,10 +2,13 @@
 # ShrimPK auto-memory hook for Claude Code
 # Uses the daemon HTTP API — no process spawning, no model loading.
 #
-# Usage: shrimpk-hook.sh "$PROMPT"
+# Usage: Claude Code hook (reads JSON from stdin, extracts user_prompt)
 
 DAEMON="http://127.0.0.1:11435"
-PROMPT="$1"
+
+# Read hook input from stdin (Claude Code passes JSON via stdin)
+INPUT=$(cat)
+PROMPT=$(echo "$INPUT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('user_prompt',''))" 2>/dev/null)
 
 # Skip empty prompts
 if [ -z "$PROMPT" ]; then

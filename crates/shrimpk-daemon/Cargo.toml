@@ -3,6 +3,7 @@ name = "shrimpk-daemon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
 description = "ShrimPK daemon — localhost HTTP server for Echo Memory (the Ollama model)"
 publish = false
 

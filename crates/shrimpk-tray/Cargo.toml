@@ -7,14 +7,16 @@ description = "ShrimPK system tray icon — manage the daemon from your taskbar"
 publish = false
 
 [[bin]]
-name = "shrimpk-tray"
+name = "shrimpk-app"
 path = "src/main.rs"
 
 [dependencies]
 shrimpk-core = { workspace = true, features = ["sysinfo"] }
 tray-icon = "0.19"
 image = { version = "0.25", default-features = false, features = ["png"] }
-tokio.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["blocking", "json"] }
 serde_json.workspace = true
 anyhow.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
