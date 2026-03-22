@@ -15,6 +15,7 @@
 
 pub mod bloom;
 pub mod consolidation;
+pub mod consolidator;
 pub mod echo;
 pub mod embedder;
 pub mod hebbian;

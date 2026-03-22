@@ -83,6 +83,10 @@ impl TopicFilter {
     ///
     /// A `false` return is **definitive** — no memories can match this query.
     /// A `true` return means memories *might* match (subject to Bloom FPR).
+    ///
+    /// Uses a single-fingerprint threshold to avoid rejecting semantically
+    /// valid but lexically distant queries (e.g., "What degree?" vs
+    /// "Business Administration").
     pub fn might_match(&self, query: &str) -> bool {
         let fingerprints = Self::extract_fingerprints(query);
         if fingerprints.is_empty() {
@@ -94,7 +98,7 @@ impl TopicFilter {
             .filter(|fp| self.filter.check(fp))
             .count();
 
-        hit_count >= 2
+        hit_count >= 1
     }
 
     /// Rebuild the filter from scratch with the given texts.

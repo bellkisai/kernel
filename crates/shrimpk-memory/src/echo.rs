@@ -19,6 +19,7 @@ use tracing::instrument;
 
 use crate::bloom::TopicFilter;
 use crate::consolidation::{self, ConsolidationResult};
+use crate::consolidator;
 use crate::embedder::Embedder;
 use crate::hebbian::HebbianGraph;
 use crate::lsh::CosineHash;
@@ -65,6 +66,8 @@ pub struct EchoEngine {
     stats: Mutex<EchoStats>,
     /// Handle to the background consolidation task (if started).
     consolidation_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Consolidator for LLM-based fact extraction during sleep consolidation.
+    consolidator: Box<dyn shrimpk_core::Consolidator>,
 }
 
 impl EchoEngine {
@@ -92,6 +95,8 @@ impl EchoEngine {
             "EchoEngine initialized (empty store)"
         );
 
+        let consolidator_impl = consolidator::from_config(&config);
+
         Ok(Self {
             embedder: Mutex::new(embedder),
             store,
@@ -104,6 +109,7 @@ impl EchoEngine {
             config,
             stats: Mutex::new(EchoStats::default()),
             consolidation_handle: Mutex::new(None),
+            consolidator: consolidator_impl,
         })
     }
 
@@ -269,10 +275,11 @@ impl EchoEngine {
             embedder.embed(query)?
         };
 
-        // 2. Bloom filter pre-check — skip everything if no fingerprints match
+        // 2. Bloom filter pre-check — skip everything if no fingerprints match.
+        //    Bypass for small stores (< 50 entries) where Bloom adds risk without benefit.
         if self.config.use_bloom {
             let bloom = self.bloom.read().await;
-            if !bloom.is_empty() && !bloom.might_match(query) {
+            if bloom.len() >= 50 && !bloom.is_empty() && !bloom.might_match(query) {
                 tracing::debug!("Bloom filter rejected query — no matching fingerprints");
                 self.record_latency(start.elapsed().as_micros() as u64);
                 return Ok(Vec::new());
@@ -336,14 +343,73 @@ impl EchoEngine {
                 .collect()
         };
 
-        let ranked = similarity::rank_candidates(
+        // 5b. Split pipeline: Pipe A (above threshold) + Pipe B (near-miss child rescue)
+        //     Use half-threshold to capture near-misses for potential child rescue.
+        let near_miss_threshold = self.config.similarity_threshold * 0.5;
+        let all_ranked = similarity::rank_candidates(
             &query_embedding,
             &candidates,
-            self.config.similarity_threshold,
+            near_miss_threshold,
         );
 
-        // 6. Take top results (first pass — cosine similarity only)
-        let top: Vec<(usize, f32)> = ranked.into_iter().take(max_results).collect();
+        let threshold = self.config.similarity_threshold;
+        let (pipe_a, pipe_b): (Vec<(usize, f32)>, Vec<(usize, f32)>) = all_ranked
+            .into_iter()
+            .partition(|&(_, score)| score >= threshold);
+
+        // 6. Pipe B: check if near-miss parents have enriched children that score better
+        let promoted: Vec<(usize, f32)> = if store.has_enriched_memories() && !pipe_b.is_empty() {
+            let mut promotions: Vec<(usize, f32)> = Vec::new();
+            for &(idx, _parent_score) in &pipe_b {
+                if let Some(entry) = store.entry_at(idx) {
+                    if !entry.enriched {
+                        continue;
+                    }
+                    let child_indices = store.children_of(&entry.id);
+                    if child_indices.is_empty() {
+                        continue;
+                    }
+                    let embeddings = store.all_embeddings();
+                    let mut best_child_score: f32 = 0.0;
+                    for &child_idx in child_indices {
+                        if let Some(child_emb) = embeddings.get(child_idx) {
+                            let child_sim =
+                                similarity::cosine_similarity(&query_embedding, child_emb);
+                            if child_sim > best_child_score {
+                                best_child_score = child_sim;
+                            }
+                        }
+                    }
+                    if best_child_score >= threshold {
+                        tracing::debug!(
+                            parent_idx = idx,
+                            child_score = best_child_score,
+                            "Pipe B: child rescued parent memory"
+                        );
+                        promotions.push((idx, best_child_score));
+                    }
+                }
+            }
+            promotions
+        } else {
+            Vec::new()
+        };
+
+        // Merge Pipe A + promoted, deduplicate
+        let mut combined = pipe_a;
+        if !promoted.is_empty() {
+            let existing: std::collections::HashSet<usize> =
+                combined.iter().map(|&(idx, _)| idx).collect();
+            for (idx, score) in promoted {
+                if !existing.contains(&idx) {
+                    combined.push((idx, score));
+                }
+            }
+            combined.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        }
+
+        // Take top results
+        let top: Vec<(usize, f32)> = combined.into_iter().take(max_results).collect();
 
         // 7. Hebbian two-pass ranking:
         //    a) Co-activate all pairs of returned memories (strengthens associations)
@@ -656,6 +722,8 @@ impl EchoEngine {
             "EchoEngine loaded from disk"
         );
 
+        let consolidator_impl = consolidator::from_config(&config);
+
         Ok(Self {
             embedder: Mutex::new(embedder),
             store: RwLock::new(loaded_store),
@@ -668,6 +736,7 @@ impl EchoEngine {
             config,
             stats: Mutex::new(EchoStats::default()),
             consolidation_handle: Mutex::new(None),
+            consolidator: consolidator_impl,
         })
     }
 
@@ -688,6 +757,7 @@ impl EchoEngine {
             &mut bloom,
             &mut bloom_dirty,
             &self.config,
+            &*self.consolidator,
         )
     }
 

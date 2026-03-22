@@ -86,6 +86,31 @@ pub struct ModelCapabilities {
     pub is_local: bool,
 }
 
+/// A backend that extracts atomic facts from memory text during consolidation.
+///
+/// Implementations call LLMs (local or cloud) to decompose a paragraph-length
+/// memory into standalone facts that can be embedded and retrieved individually.
+///
+/// # Contract
+/// - `extract_facts` must NEVER panic. On any error, return an empty `Vec`.
+/// - Implementations must be `Send + Sync` for use across tokio tasks.
+///
+/// # Providers
+/// - `OllamaConsolidator` — local Ollama (default, offline)
+/// - `HttpConsolidator` — any OpenAI-compatible API (cloud)
+/// - `NoopConsolidator` — disabled (returns empty)
+/// - Future: `BuiltinConsolidator` — bundled ShrimPK model
+pub trait Consolidator: Send + Sync {
+    /// Extract up to `max_facts` atomic facts from the given text.
+    ///
+    /// Each returned string should be a standalone, self-contained statement.
+    /// Returns an empty `Vec` on any error (network, parse, etc.).
+    fn extract_facts(&self, text: &str, max_facts: usize) -> Vec<String>;
+
+    /// Human-readable name for this consolidator backend.
+    fn name(&self) -> &str;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

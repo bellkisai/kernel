@@ -24,6 +24,7 @@ rand_distr.workspace = true
 regex.workspace = true
 sysinfo.workspace = true
 fs2.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

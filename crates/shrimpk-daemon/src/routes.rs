@@ -316,6 +316,7 @@ pub async fn consolidate(State(state): State<AppState>) -> Json<Value> {
         "bloom_rebuilt": result.bloom_rebuilt,
         "duplicates_merged": result.duplicates_merged,
         "echo_counts_decayed": result.echo_counts_decayed,
+        "facts_extracted": result.facts_extracted,
         "duration_ms": result.duration_ms
     }))
 }

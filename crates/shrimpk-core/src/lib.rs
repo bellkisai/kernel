@@ -21,4 +21,4 @@ pub use memory::{
     SensitivityLevel,
 };
 pub use pii::{PiiMatch, PiiType};
-pub use traits::{ModelBackend, Provider};
+pub use traits::{Consolidator, ModelBackend, Provider};

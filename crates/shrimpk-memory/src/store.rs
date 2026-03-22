@@ -28,6 +28,9 @@ pub struct EchoStore {
     embeddings: Vec<Vec<f32>>,
     /// Quick lookup: MemoryId -> index in entries/embeddings.
     id_to_index: HashMap<MemoryId, usize>,
+    /// Reverse index: parent MemoryId -> child entry indices.
+    /// Maintained incrementally on add/remove. Enables O(1) child lookup for Pipe B.
+    parent_children: HashMap<MemoryId, Vec<usize>>,
 }
 
 impl EchoStore {
@@ -37,6 +40,7 @@ impl EchoStore {
             entries: Vec::new(),
             embeddings: Vec::new(),
             id_to_index: HashMap::new(),
+            parent_children: HashMap::new(),
         }
     }
 
@@ -48,6 +52,10 @@ impl EchoStore {
         let index = self.entries.len();
         let embedding = entry.embedding.clone();
         self.id_to_index.insert(entry.id.clone(), index);
+        // Maintain parent-children index
+        if let Some(ref pid) = entry.parent_id {
+            self.parent_children.entry(pid.clone()).or_default().push(index);
+        }
         self.entries.push(entry);
         self.embeddings.push(embedding);
         index
@@ -61,10 +69,29 @@ impl EchoStore {
         let index = self.id_to_index.remove(id)?;
         let last_index = self.entries.len() - 1;
 
+        // Clean parent-children index before swap_remove
+        if let Some(ref pid) = self.entries[index].parent_id {
+            if let Some(children) = self.parent_children.get_mut(pid) {
+                children.retain(|&i| i != index);
+                if children.is_empty() {
+                    self.parent_children.remove(pid);
+                }
+            }
+        }
+        self.parent_children.remove(&self.entries[index].id);
+
         if index != last_index {
             // Swap the last entry into this slot
             let moved_id = self.entries[last_index].id.clone();
             self.id_to_index.insert(moved_id, index);
+            // Fix parent-children references from last_index to index
+            for children in self.parent_children.values_mut() {
+                for idx in children.iter_mut() {
+                    if *idx == last_index {
+                        *idx = index;
+                    }
+                }
+            }
         }
 
         self.embeddings.swap_remove(index);
@@ -118,6 +145,24 @@ impl EchoStore {
     /// Get a mutable entry at a specific index (for updating echo_count, last_echoed).
     pub fn entry_at_mut(&mut self, index: usize) -> Option<&mut MemoryEntry> {
         self.entries.get_mut(index)
+    }
+
+    /// Get the indices of all child memories for a given parent.
+    ///
+    /// Used by Pipe B in echo() to check if near-miss parents have
+    /// enriched children that score better.
+    pub fn children_of(&self, parent_id: &MemoryId) -> &[usize] {
+        self.parent_children
+            .get(parent_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Whether any memories have been enriched (have children).
+    ///
+    /// Used to short-circuit Pipe B entirely when no enrichment has occurred.
+    pub fn has_enriched_memories(&self) -> bool {
+        !self.parent_children.is_empty()
     }
 
     /// Save the store to a binary file.

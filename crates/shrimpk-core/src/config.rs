@@ -86,10 +86,38 @@ pub struct EchoConfig {
     /// Maximum disk usage in bytes for the data directory.
     #[serde(default = "default_max_disk_bytes")]
     pub max_disk_bytes: u64,
+    /// Ollama API URL for LLM-powered memory enrichment during consolidation.
+    #[serde(default = "default_ollama_url")]
+    pub ollama_url: String,
+    /// Ollama model for fact extraction during consolidation.
+    #[serde(default = "default_enrichment_model")]
+    pub enrichment_model: String,
+    /// Maximum number of extracted facts per parent memory.
+    #[serde(default = "default_max_facts_per_memory")]
+    pub max_facts_per_memory: usize,
+    /// Consolidation provider: "ollama" (default), "http", or "none".
+    #[serde(default = "default_consolidation_provider")]
+    pub consolidation_provider: String,
 }
 
 fn default_max_disk_bytes() -> u64 {
     DEFAULT_MAX_DISK_BYTES
+}
+
+fn default_ollama_url() -> String {
+    "http://127.0.0.1:11434".to_string()
+}
+
+fn default_enrichment_model() -> String {
+    "llama3.2:3b".to_string()
+}
+
+fn default_max_facts_per_memory() -> usize {
+    5
+}
+
+fn default_consolidation_provider() -> String {
+    "ollama".to_string()
 }
 
 impl Default for EchoConfig {
@@ -105,6 +133,10 @@ impl Default for EchoConfig {
             use_lsh: true,
             use_bloom: true,
             max_disk_bytes: DEFAULT_MAX_DISK_BYTES,
+            ollama_url: default_ollama_url(),
+            enrichment_model: default_enrichment_model(),
+            max_facts_per_memory: default_max_facts_per_memory(),
+            consolidation_provider: default_consolidation_provider(),
         }
     }
 }
@@ -326,6 +358,15 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
     if let Some(v) = env_path("SHRIMPK_DATA_DIR") {
         config.data_dir = v;
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_OLLAMA_URL") {
+        config.ollama_url = v;
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_ENRICHMENT_MODEL") {
+        config.enrichment_model = v;
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_CONSOLIDATION_PROVIDER") {
+        config.consolidation_provider = v;
     }
 
     Ok(config)

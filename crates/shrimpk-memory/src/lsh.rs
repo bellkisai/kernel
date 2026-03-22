@@ -125,7 +125,8 @@ impl CosineHash {
     /// Query the LSH index for candidate nearest neighbors.
     ///
     /// Hashes the query into each table and returns the deduplicated union
-    /// of all matching bucket contents.
+    /// of all matching bucket contents. Uses multi-probe (Hamming-1 neighbors)
+    /// to improve recall for moderate-similarity pairs without adding tables.
     pub fn query(&self, embedding: &[f32]) -> Vec<u32> {
         debug_assert_eq!(
             embedding.len(),
@@ -136,12 +137,25 @@ impl CosineHash {
         );
 
         let mut seen = HashSet::new();
+        let num_bits = self.tables.first().map_or(0, |t| t.hyperplanes.len());
 
         for table in &self.tables {
             let hash = hash_vector(table, embedding);
+
+            // Exact bucket
             if let Some(bucket) = table.buckets.get(&hash) {
                 for &id in bucket {
                     seen.insert(id);
+                }
+            }
+
+            // Multi-probe: check Hamming-1 neighbors (flip each bit)
+            for bit in 0..num_bits {
+                let neighbor_hash = hash ^ (1u64 << bit);
+                if let Some(bucket) = table.buckets.get(&neighbor_hash) {
+                    for &id in bucket {
+                        seen.insert(id);
+                    }
                 }
             }
         }

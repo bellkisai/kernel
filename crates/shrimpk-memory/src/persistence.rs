@@ -62,6 +62,10 @@ pub struct MemoryMeta {
     pub created_at: DateTime<Utc>,
     pub last_echoed: Option<DateTime<Utc>>,
     pub echo_count: u32,
+    #[serde(default)]
+    pub enriched: bool,
+    #[serde(default)]
+    pub parent_id: Option<MemoryId>,
 }
 
 impl MemoryMeta {
@@ -78,6 +82,8 @@ impl MemoryMeta {
             created_at: entry.created_at,
             last_echoed: entry.last_echoed,
             echo_count: entry.echo_count,
+            enriched: entry.enriched,
+            parent_id: entry.parent_id.clone(),
         }
     }
 
@@ -95,6 +101,8 @@ impl MemoryMeta {
             created_at: self.created_at,
             last_echoed: self.last_echoed,
             echo_count: self.echo_count,
+            enriched: self.enriched,
+            parent_id: self.parent_id,
         }
     }
 }

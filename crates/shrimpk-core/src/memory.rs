@@ -116,6 +116,14 @@ pub struct MemoryEntry {
     pub last_echoed: Option<DateTime<Utc>>,
     /// How many times this memory has self-activated.
     pub echo_count: u32,
+    /// Whether this memory has been enriched by LLM fact extraction during consolidation.
+    /// Enriched memories have child memories (linked via `parent_id`) with extracted facts.
+    #[serde(default)]
+    pub enriched: bool,
+    /// Link to parent memory. Child memories are LLM-extracted facts created during
+    /// consolidation. When a child matches during echo, the parent's content is returned.
+    #[serde(default)]
+    pub parent_id: Option<MemoryId>,
 }
 
 impl MemoryEntry {
@@ -133,6 +141,8 @@ impl MemoryEntry {
             created_at: Utc::now(),
             last_echoed: None,
             echo_count: 0,
+            enriched: false,
+            parent_id: None,
         }
     }
 

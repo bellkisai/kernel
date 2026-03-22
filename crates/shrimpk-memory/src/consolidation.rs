@@ -5,6 +5,7 @@
 //! 2. Rebuild Bloom filter when dirty (after deletions)
 //! 3. Detect and merge near-duplicate memories (cosine similarity > 0.95)
 //! 4. Decay echo counts on stale memories (no echo in >30 days)
+//! 5. LLM-powered fact extraction on un-enriched memories (sleep consolidation)
 //!
 //! Designed to run every ~5 minutes. The duplicate detection pass is O(N²) but
 //! only runs on stores with ≤10K memories; larger stores skip it.
@@ -15,7 +16,7 @@ use crate::bloom::TopicFilter;
 use crate::hebbian::HebbianGraph;
 use crate::similarity;
 use crate::store::EchoStore;
-use shrimpk_core::EchoConfig;
+use shrimpk_core::{Consolidator, EchoConfig};
 
 /// Outcome of a single consolidation pass.
 #[derive(Debug, Clone, Default)]
@@ -28,6 +29,8 @@ pub struct ConsolidationResult {
     pub duplicates_merged: usize,
     /// Number of memories whose echo_count was decayed.
     pub echo_counts_decayed: usize,
+    /// Number of memories enriched via LLM fact extraction.
+    pub facts_extracted: usize,
     /// Wall-clock duration of the consolidation pass in milliseconds.
     pub duration_ms: u64,
 }
@@ -61,7 +64,8 @@ pub fn consolidate(
     hebbian: &mut HebbianGraph,
     bloom: &mut TopicFilter,
     bloom_dirty: &mut bool,
-    _config: &EchoConfig,
+    config: &EchoConfig,
+    consolidator: &dyn Consolidator,
 ) -> ConsolidationResult {
     let start = std::time::Instant::now();
     let mut result = ConsolidationResult::default();
@@ -94,6 +98,50 @@ pub fn consolidate(
 
     // Step 4: Decay echo counts on stale memories
     result.echo_counts_decayed = decay_echo_counts(store);
+
+    // Step 5: LLM fact extraction on un-enriched memories (sleep consolidation)
+    //
+    // For each memory that hasn't been enriched yet, ask the consolidator
+    // to extract atomic facts. The parent is marked enriched=true to prevent
+    // re-extraction on the next cycle. Batch limit: max 10 per cycle.
+    //
+    // Note: child memory creation with embeddings requires the Embedder,
+    // which is not available here. Facts are extracted and logged; child
+    // creation happens in EchoEngine::consolidate_now() which has embedder access.
+    if consolidator.name() != "noop" {
+        const MAX_ENRICHMENTS_PER_CYCLE: usize = 10;
+        let unenriched: Vec<usize> = (0..store.len())
+            .filter(|&i| {
+                store
+                    .entry_at(i)
+                    .is_some_and(|e| !e.enriched && e.parent_id.is_none())
+            })
+            .take(MAX_ENRICHMENTS_PER_CYCLE)
+            .collect();
+
+        for idx in unenriched {
+            let content = match store.entry_at(idx) {
+                Some(e) => e.content.clone(),
+                None => continue,
+            };
+
+            let facts = consolidator.extract_facts(&content, config.max_facts_per_memory);
+
+            if !facts.is_empty() {
+                result.facts_extracted += facts.len();
+                tracing::debug!(
+                    idx,
+                    fact_count = facts.len(),
+                    "Consolidation: extracted facts from memory"
+                );
+            }
+
+            // Mark parent as enriched regardless (even if 0 facts — avoids retrying)
+            if let Some(entry) = store.entry_at_mut(idx) {
+                entry.enriched = true;
+            }
+        }
+    }
 
     result.duration_ms = start.elapsed().as_millis() as u64;
     result
@@ -225,6 +273,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert_eq!(result.hebbian_edges_pruned, 0);
@@ -259,6 +308,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert_eq!(result.hebbian_edges_pruned, 1, "Should prune the weak edge");
@@ -289,6 +339,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert!(result.bloom_rebuilt, "Bloom should have been rebuilt");
@@ -314,6 +365,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert!(
@@ -363,6 +415,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert_eq!(result.duplicates_merged, 1, "Should merge exactly one pair");
@@ -412,6 +465,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert_eq!(
@@ -459,6 +513,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert_eq!(result.duplicates_merged, 0, "No duplicates should be found");
@@ -489,6 +544,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert_eq!(result.echo_counts_decayed, 1);
@@ -517,6 +573,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         // This proves dedup runs for small stores
@@ -551,6 +608,7 @@ mod tests {
             &mut bloom,
             &mut bloom_dirty,
             &config,
+            &crate::consolidator::NoopConsolidator,
         );
 
         assert_eq!(result.hebbian_edges_pruned, 1, "Weak edge should be pruned");
