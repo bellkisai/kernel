@@ -24,7 +24,8 @@ serde_json.workspace = true
 sysinfo.workspace = true
 chrono.workspace = true
 dirs.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
-reqwest = { workspace = true, features = ["json", "blocking"] }
 serde_json.workspace = true

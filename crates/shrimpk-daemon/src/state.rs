@@ -13,4 +13,6 @@ pub struct AppState {
     pub started_at: Instant,
     pub auth_token: Option<String>,
     pub pii_filter: Arc<PiiFilter>,
+    /// Shared async HTTP client for proxy forwarding (connection pooling).
+    pub http_client: reqwest::Client,
 }

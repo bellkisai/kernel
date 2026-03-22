@@ -98,6 +98,25 @@ pub struct EchoConfig {
     /// Consolidation provider: "ollama" (default), "http", or "none".
     #[serde(default = "default_consolidation_provider")]
     pub consolidation_provider: String,
+    /// URL of the backend LLM provider for the proxy (default: Ollama).
+    #[serde(default = "default_proxy_target")]
+    pub proxy_target: String,
+    /// Whether the OpenAI-compatible proxy is enabled.
+    #[serde(default = "default_proxy_enabled")]
+    pub proxy_enabled: bool,
+    /// Maximum echo results to inject into proxy requests.
+    #[serde(default = "default_proxy_max_echo_results")]
+    pub proxy_max_echo_results: usize,
+}
+
+fn default_proxy_target() -> String {
+    "http://127.0.0.1:11434".to_string()
+}
+fn default_proxy_enabled() -> bool {
+    true
+}
+fn default_proxy_max_echo_results() -> usize {
+    5
 }
 
 fn default_max_disk_bytes() -> u64 {
@@ -137,6 +156,9 @@ impl Default for EchoConfig {
             enrichment_model: default_enrichment_model(),
             max_facts_per_memory: default_max_facts_per_memory(),
             consolidation_provider: default_consolidation_provider(),
+            proxy_target: default_proxy_target(),
+            proxy_enabled: default_proxy_enabled(),
+            proxy_max_echo_results: default_proxy_max_echo_results(),
         }
     }
 }
@@ -219,6 +241,9 @@ pub struct FileConfig {
     pub enrichment_model: Option<String>,
     pub max_facts_per_memory: Option<usize>,
     pub consolidation_provider: Option<String>,
+    pub proxy_target: Option<String>,
+    pub proxy_enabled: Option<bool>,
+    pub proxy_max_echo_results: Option<usize>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -357,6 +382,15 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Some(v) = fc.consolidation_provider {
             config.consolidation_provider = v;
         }
+        if let Some(v) = fc.proxy_target {
+            config.proxy_target = v;
+        }
+        if let Some(v) = fc.proxy_enabled {
+            config.proxy_enabled = v;
+        }
+        if let Some(v) = fc.proxy_max_echo_results {
+            config.proxy_max_echo_results = v;
+        }
     }
 
     // Layer 3: env var overrides (highest priority)
@@ -383,6 +417,12 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
     if let Ok(v) = std::env::var("SHRIMPK_CONSOLIDATION_PROVIDER") {
         config.consolidation_provider = v;
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_PROXY_TARGET") {
+        config.proxy_target = v;
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_PROXY_ENABLED") {
+        config.proxy_enabled = v.parse().unwrap_or(true);
     }
 
     Ok(config)

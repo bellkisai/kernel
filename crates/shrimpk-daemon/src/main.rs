@@ -6,6 +6,7 @@
 //!   shrimpk-daemon                     # serve on localhost:11435
 //!   shrimpk-daemon --port 8080         # custom port
 
+mod proxy;
 mod routes;
 mod state;
 
@@ -144,16 +145,24 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build app state
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .pool_max_idle_per_host(4)
+        .build()
+        .expect("Failed to build HTTP client");
+
     let state = AppState {
         engine,
         config: echo_config,
         started_at: Instant::now(),
         auth_token,
         pii_filter: Arc::new(shrimpk_memory::PiiFilter::new()),
+        http_client,
     };
 
     // Keep engine ref for shutdown persist (must clone before state moves into router)
     let engine_for_shutdown = state.engine.clone();
+    let proxy_target_display = state.config.proxy_target.clone();
 
     // Build router
     let app = Router::new()
@@ -167,6 +176,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/config", put(routes::config_set))
         .route("/api/persist", post(routes::persist))
         .route("/api/consolidate", post(routes::consolidate))
+        // OpenAI-compatible proxy routes
+        .route("/v1/chat/completions", post(proxy::chat_completions))
+        .route("/v1/models", get(proxy::models))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -184,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = format!("127.0.0.1:{port}");
     eprintln!("[shrimpk] Serving on http://{addr}");
+    eprintln!("[shrimpk] Proxy -> {proxy_target_display}");
     eprintln!("[shrimpk] Press Ctrl+C to stop.");
 
     // Serve with graceful shutdown

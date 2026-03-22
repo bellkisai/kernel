@@ -229,7 +229,10 @@ pub async fn config_show(State(state): State<AppState>) -> Json<Value> {
         "ollama_url": c.ollama_url,
         "enrichment_model": c.enrichment_model,
         "max_facts_per_memory": c.max_facts_per_memory,
-        "consolidation_provider": c.consolidation_provider
+        "consolidation_provider": c.consolidation_provider,
+        "proxy_target": c.proxy_target,
+        "proxy_enabled": c.proxy_enabled,
+        "proxy_max_echo_results": c.proxy_max_echo_results
     }))
 }
 
@@ -276,6 +279,23 @@ pub async fn config_set(
         "consolidation_provider" => fc.consolidation_provider = Some(req.value.clone()),
         "max_facts_per_memory" => {
             fc.max_facts_per_memory = Some(req.value.parse().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid integer"})),
+                )
+            })?)
+        }
+        "proxy_target" => fc.proxy_target = Some(req.value.clone()),
+        "proxy_enabled" => {
+            fc.proxy_enabled = Some(req.value.parse().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid boolean"})),
+                )
+            })?)
+        }
+        "proxy_max_echo_results" => {
+            fc.proxy_max_echo_results = Some(req.value.parse().map_err(|_| {
                 (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": "Invalid integer"})),

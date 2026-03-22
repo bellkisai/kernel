@@ -766,7 +766,18 @@ async fn main() -> anyhow::Result<()> {
             }
             Commands::Stats => {
                 let resp = daemon_get(base, "/api/stats").await?;
-                println!("{resp}");
+                if let Ok(s) = serde_json::from_str::<serde_json::Value>(&resp) {
+                    println!("[shrimpk] Stats:");
+                    println!("  Memories:          {}", format_number(s["total_memories"].as_u64().unwrap_or(0) as usize));
+                    println!("  Max capacity:      {}", format_number(s["max_capacity"].as_u64().unwrap_or(0) as usize));
+                    println!("  Index size:        {}", format_bytes(s["index_size_bytes"].as_u64().unwrap_or(0)));
+                    println!("  RAM usage:         {}", format_bytes(s["ram_usage_bytes"].as_u64().unwrap_or(0)));
+                    println!("  Disk usage:        {}", format_bytes(s["disk_usage_bytes"].as_u64().unwrap_or(0)));
+                    println!("  Echo queries:      {}", s["total_echo_queries"].as_u64().unwrap_or(0));
+                    println!("  Avg echo latency:  {:.2}ms", s["avg_echo_latency_ms"].as_f64().unwrap_or(0.0));
+                } else {
+                    println!("{resp}");
+                }
             }
             Commands::Forget { id } => {
                 let resp = daemon_delete(base, &format!("/api/memories/{id}")).await?;
