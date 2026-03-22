@@ -225,7 +225,11 @@ pub async fn config_show(State(state): State<AppState>) -> Json<Value> {
         "embedding_dim": c.embedding_dim,
         "use_lsh": c.use_lsh,
         "use_bloom": c.use_bloom,
-        "max_disk_bytes": c.max_disk_bytes
+        "max_disk_bytes": c.max_disk_bytes,
+        "ollama_url": c.ollama_url,
+        "enrichment_model": c.enrichment_model,
+        "max_facts_per_memory": c.max_facts_per_memory,
+        "consolidation_provider": c.consolidation_provider
     }))
 }
 
@@ -261,6 +265,17 @@ pub async fn config_set(
         }
         "max_disk_bytes" => {
             fc.max_disk_bytes = Some(req.value.parse().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid integer"})),
+                )
+            })?)
+        }
+        "ollama_url" => fc.ollama_url = Some(req.value.clone()),
+        "enrichment_model" => fc.enrichment_model = Some(req.value.clone()),
+        "consolidation_provider" => fc.consolidation_provider = Some(req.value.clone()),
+        "max_facts_per_memory" => {
+            fc.max_facts_per_memory = Some(req.value.parse().map_err(|_| {
                 (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": "Invalid integer"})),

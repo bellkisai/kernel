@@ -66,6 +66,8 @@ pub fn consolidate(
     bloom_dirty: &mut bool,
     config: &EchoConfig,
     consolidator: &dyn Consolidator,
+    embedder: Option<&std::sync::Mutex<crate::embedder::Embedder>>,
+    lsh: &mut crate::lsh::CosineHash,
 ) -> ConsolidationResult {
     let start = std::time::Instant::now();
     let mut result = ConsolidationResult::default();
@@ -134,6 +136,39 @@ pub fn consolidate(
                     fact_count = facts.len(),
                     "Consolidation: extracted facts from memory"
                 );
+            }
+
+            // Create child memories if embedder is available
+            if let Some(embedder) = embedder {
+                let parent_id = match store.entry_at(idx) {
+                    Some(e) => e.id.clone(),
+                    None => continue,
+                };
+
+                for fact in &facts {
+                    let embedding = match embedder.lock() {
+                        Ok(mut e) => match e.embed(fact) {
+                            Ok(emb) => emb,
+                            Err(err) => {
+                                tracing::debug!(error = %err, "Failed to embed fact, skipping");
+                                continue;
+                            }
+                        },
+                        Err(_) => continue,
+                    };
+
+                    let mut child = shrimpk_core::MemoryEntry::new(
+                        fact.clone(),
+                        embedding.clone(),
+                        "enrichment".to_string(),
+                    );
+                    child.parent_id = Some(parent_id.clone());
+                    child.enriched = true;
+
+                    let child_idx = store.add(child) as u32;
+                    lsh.insert(child_idx, &embedding);
+                    bloom.insert_memory(fact);
+                }
             }
 
             // Mark parent as enriched regardless (even if 0 facts — avoids retrying)
@@ -274,6 +309,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert_eq!(result.hebbian_edges_pruned, 0);
@@ -309,6 +346,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert_eq!(result.hebbian_edges_pruned, 1, "Should prune the weak edge");
@@ -340,6 +379,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert!(result.bloom_rebuilt, "Bloom should have been rebuilt");
@@ -366,6 +407,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert!(
@@ -416,6 +459,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert_eq!(result.duplicates_merged, 1, "Should merge exactly one pair");
@@ -466,6 +511,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert_eq!(
@@ -514,6 +561,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert_eq!(result.duplicates_merged, 0, "No duplicates should be found");
@@ -545,6 +594,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert_eq!(result.echo_counts_decayed, 1);
@@ -574,6 +625,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         // This proves dedup runs for small stores
@@ -609,6 +662,8 @@ mod tests {
             &mut bloom_dirty,
             &config,
             &crate::consolidator::NoopConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
         );
 
         assert_eq!(result.hebbian_edges_pruned, 1, "Weak edge should be pruned");

@@ -215,6 +215,10 @@ pub struct FileConfig {
     pub use_lsh: Option<bool>,
     pub use_bloom: Option<bool>,
     pub max_disk_bytes: Option<u64>,
+    pub ollama_url: Option<String>,
+    pub enrichment_model: Option<String>,
+    pub max_facts_per_memory: Option<usize>,
+    pub consolidation_provider: Option<String>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -340,6 +344,18 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.max_disk_bytes {
             config.max_disk_bytes = v;
+        }
+        if let Some(v) = fc.ollama_url {
+            config.ollama_url = v;
+        }
+        if let Some(v) = fc.enrichment_model {
+            config.enrichment_model = v;
+        }
+        if let Some(v) = fc.max_facts_per_memory {
+            config.max_facts_per_memory = v;
+        }
+        if let Some(v) = fc.consolidation_provider {
+            config.consolidation_provider = v;
         }
     }
 

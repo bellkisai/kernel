@@ -550,6 +550,30 @@ fn cmd_config_show(config: &EchoConfig) {
             "auto"
         }
     );
+    println!(
+        "  {:25} {:>15}  {}",
+        "consolidation_provider",
+        &config.consolidation_provider,
+        source("SHRIMPK_CONSOLIDATION_PROVIDER", fc.consolidation_provider.is_some())
+    );
+    println!(
+        "  {:25} {:>15}  {}",
+        "ollama_url",
+        &config.ollama_url,
+        source("SHRIMPK_OLLAMA_URL", fc.ollama_url.is_some())
+    );
+    println!(
+        "  {:25} {:>15}  {}",
+        "enrichment_model",
+        &config.enrichment_model,
+        source("SHRIMPK_ENRICHMENT_MODEL", fc.enrichment_model.is_some())
+    );
+    println!(
+        "  {:25} {:>15}  {}",
+        "max_facts_per_memory",
+        config.max_facts_per_memory,
+        if fc.max_facts_per_memory.is_some() { "file" } else { "auto" }
+    );
 }
 
 fn cmd_config_set(key: &str, value: &str) -> anyhow::Result<()> {
@@ -568,6 +592,10 @@ fn cmd_config_set(key: &str, value: &str) -> anyhow::Result<()> {
             fc.quantization = Some(value.parse().map_err(|e: String| anyhow::anyhow!(e))?)
         }
         "data_dir" => fc.data_dir = Some(std::path::PathBuf::from(value)),
+        "ollama_url" => fc.ollama_url = Some(value.to_string()),
+        "enrichment_model" => fc.enrichment_model = Some(value.to_string()),
+        "consolidation_provider" => fc.consolidation_provider = Some(value.to_string()),
+        "max_facts_per_memory" => fc.max_facts_per_memory = Some(value.parse()?),
         other => anyhow::bail!("Unknown config key: \"{other}\""),
     }
 

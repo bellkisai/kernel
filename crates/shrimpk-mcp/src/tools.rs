@@ -304,6 +304,30 @@ pub fn handle_config_show(config: &EchoConfig) -> Result<String, String> {
             truncate(&config.data_dir.to_string_lossy(), 30),
             source("SHRIMPK_DATA_DIR", fc.data_dir.is_some())
         ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "consolidation_provider",
+            &config.consolidation_provider,
+            source("SHRIMPK_CONSOLIDATION_PROVIDER", fc.consolidation_provider.is_some())
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "ollama_url",
+            truncate(&config.ollama_url, 30),
+            source("SHRIMPK_OLLAMA_URL", fc.ollama_url.is_some())
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "enrichment_model",
+            &config.enrichment_model,
+            source("SHRIMPK_ENRICHMENT_MODEL", fc.enrichment_model.is_some())
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "max_facts_per_memory",
+            config.max_facts_per_memory,
+            if fc.max_facts_per_memory.is_some() { "file" } else { "auto" }
+        ),
     ];
 
     Ok(lines.join("\n"))
@@ -337,6 +361,12 @@ pub fn handle_config_set(args: &Value) -> Result<String, String> {
         "data_dir" => fc.data_dir = Some(std::path::PathBuf::from(value)),
         "use_lsh" => fc.use_lsh = Some(value.parse().map_err(|_| "Invalid boolean")?),
         "use_bloom" => fc.use_bloom = Some(value.parse().map_err(|_| "Invalid boolean")?),
+        "ollama_url" => fc.ollama_url = Some(value.to_string()),
+        "enrichment_model" => fc.enrichment_model = Some(value.to_string()),
+        "consolidation_provider" => fc.consolidation_provider = Some(value.to_string()),
+        "max_facts_per_memory" => {
+            fc.max_facts_per_memory = Some(value.parse().map_err(|_| "Invalid integer")?)
+        }
         other => return Err(format!("Unknown config key: \"{other}\"")),
     }
 

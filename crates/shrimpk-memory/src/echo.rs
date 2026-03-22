@@ -750,6 +750,7 @@ impl EchoEngine {
         let mut hebbian = self.hebbian.write().await;
         let mut bloom = self.bloom.write().await;
         let mut bloom_dirty = self.bloom_dirty.lock().unwrap_or_else(|e| e.into_inner());
+        let mut lsh = self.lsh.lock().unwrap_or_else(|e| e.into_inner());
 
         consolidation::consolidate(
             &mut store,
@@ -758,6 +759,8 @@ impl EchoEngine {
             &mut bloom_dirty,
             &self.config,
             &*self.consolidator,
+            Some(&self.embedder),
+            &mut lsh,
         )
     }
 
