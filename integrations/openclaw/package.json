@@ -1,0 +1,21 @@
+{
+  "name": "shrimpk-openclaw",
+  "version": "0.3.2",
+  "description": "ShrimPK Echo Memory plugin for OpenClaw — persistent AI memory that works automatically",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": ["openclaw", "memory", "shrimpk", "echo-memory", "ai-memory"],
+  "author": "Bellkis AI <hello@bellkis.com>",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bellkisai/kernel"
+  },
+  "devDependencies": {
+    "typescript": "^5.4"
+  }
+}

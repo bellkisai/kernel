@@ -343,6 +343,40 @@ pub async fn persist(
     })))
 }
 
+/// GET /api/detect — re-scan for local LLM providers and update routing table.
+pub async fn detect_providers(
+    State(state): State<AppState>,
+) -> Json<Value> {
+    let providers = crate::detect::detect_providers(&state.http_client).await;
+    let new_routes = crate::detect::build_model_routes(&providers);
+    let total_models: usize = providers.iter().map(|p| p.models.len()).sum();
+
+    // Update the shared routing table
+    {
+        let mut routes = state.model_routes.write().await;
+        *routes = new_routes;
+    }
+
+    let providers_json: Vec<Value> = providers
+        .iter()
+        .map(|p| {
+            json!({
+                "name": p.name,
+                "url": p.url,
+                "port": p.port,
+                "models": p.models,
+                "is_running": p.is_running
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "providers": providers_json,
+        "total_providers": providers.len(),
+        "total_models": total_models
+    }))
+}
+
 /// POST /api/consolidate
 pub async fn consolidate(State(state): State<AppState>) -> Json<Value> {
     let result = state.engine.consolidate_now().await;

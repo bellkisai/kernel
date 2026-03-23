@@ -203,6 +203,88 @@ shrimpk-kernel          (facade — re-exports all)
 4. **Hebbian boost** — co-activated memories get promoted
 5. **Category decay** — Identity (365d) → Conversation (3d)
 
+## Memory Proxy — Works With Any LLM
+
+ShrimPK sits between your client and your LLM provider. Point your app at `localhost:11435` instead of your provider's port. Memory injection is automatic and invisible.
+
+### Quick Setup
+
+| Provider | Default Port | ShrimPK Config |
+|----------|:---:|---|
+| Ollama | 11434 | Default — works out of the box |
+| LM Studio | 1234 | `shrimpk config set proxy_target http://127.0.0.1:1234` |
+| Jan.ai | 1337 | `shrimpk config set proxy_target http://127.0.0.1:1337` |
+| vLLM | 8000 | `shrimpk config set proxy_target http://127.0.0.1:8000` |
+| LocalAI | 8080 | `shrimpk config set proxy_target http://127.0.0.1:8080` |
+| GPT4All | 4891 | `shrimpk config set proxy_target http://127.0.0.1:4891` |
+| OpenAI API | — | `shrimpk config set proxy_target https://api.openai.com` |
+| xAI (Grok) | — | `shrimpk config set proxy_target https://api.x.ai` |
+
+### How It Works
+
+```
+Client Request → ShrimPK (11435)
+                    │
+              ┌─────┴─────┐
+              │ 1. Echo    │ ← find relevant memories (3.50ms)
+              │ 2. Inject  │ ← prepend to system prompt
+              │ 3. Store   │ ← save user message for future
+              │ 4. Forward │ ← send to LLM provider
+              └─────┬─────┘
+                    │
+              Provider (Ollama, LM Studio, etc.)
+                    │
+              Response → Client (streamed transparently)
+```
+
+### Auto-Detection
+
+```bash
+$ shrimpk detect
+
+  Provider     Port   Status    Models
+  ------------ ------ --------- ------
+  Ollama       11434  RUNNING   gemma3:1b, phi4-mini
+  LM Studio    1234   NOT FOUND
+```
+
+ShrimPK auto-routes requests by model name. If you have Ollama and LM Studio running, a request for `gemma3:1b` goes to Ollama and `mistral-7b` goes to LM Studio.
+
+### Open WebUI
+
+Settings → Connections → Ollama URL → change to `http://localhost:11435`
+
+All conversations now have persistent memory across sessions.
+
+### curl
+
+```bash
+curl http://localhost:11435/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemma3:1b","messages":[{"role":"user","content":"hello"}]}'
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/chat/completions` | Chat with memory injection |
+| GET | `/v1/models` | List available models from backend |
+
+### Configuration
+
+```bash
+shrimpk config set proxy_target http://127.0.0.1:11434  # Backend URL
+shrimpk config set proxy_enabled true                     # Enable/disable
+shrimpk config set proxy_max_echo_results 5               # Memories per request
+```
+
+Or via environment variables:
+```bash
+SHRIMPK_PROXY_TARGET=http://127.0.0.1:11434
+SHRIMPK_PROXY_ENABLED=true
+```
+
 ## Configuration
 
 ShrimPK auto-detects from system RAM. Override via config file or env vars:

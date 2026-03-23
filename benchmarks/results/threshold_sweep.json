@@ -1,0 +1,802 @@
+[
+  {
+    "threshold": 0.05,
+    "avg_results": 14.5,
+    "answer_found_rate": 0.5,
+    "overall_avg_sim": 0.1947586216032505,
+    "total_found": 5,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 5,
+        "answer_found": true,
+        "avg_sim": 0.04999999962747097,
+        "top_sim": 0.10000000149011612
+      },
+      {
+        "qid": "118b2229",
+        "count": 7,
+        "answer_found": true,
+        "avg_sim": 0.11142857026840959,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 1,
+        "answer_found": false,
+        "avg_sim": 0.029999999329447746,
+        "top_sim": 0.029999999329447746
+      },
+      {
+        "qid": "6ade9755",
+        "count": 20,
+        "answer_found": true,
+        "avg_sim": 0.31000000312924386,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 16,
+        "answer_found": true,
+        "avg_sim": 0.1750000020256266,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 16,
+        "answer_found": true,
+        "avg_sim": 0.09500000020489097,
+        "top_sim": 0.33000001311302185
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.3285000003874302,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.2145000010728836,
+        "top_sim": 0.4399999976158142
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.14650000110268593,
+        "top_sim": 0.23000000417232513
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.14349999967962504,
+        "top_sim": 0.3199999928474426
+      }
+    ]
+  },
+  {
+    "threshold": 0.08,
+    "avg_results": 10.7,
+    "answer_found_rate": 0.7,
+    "overall_avg_sim": 0.2430841128959834,
+    "total_found": 7,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 1,
+        "answer_found": true,
+        "avg_sim": 0.10000000149011612,
+        "top_sim": 0.10000000149011612
+      },
+      {
+        "qid": "118b2229",
+        "count": 5,
+        "answer_found": true,
+        "avg_sim": 0.2419999957084656,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 9,
+        "answer_found": true,
+        "avg_sim": 0.2444444480869505,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 20,
+        "answer_found": true,
+        "avg_sim": 0.2705000028014183,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 6,
+        "answer_found": true,
+        "avg_sim": 0.2750000022351742,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 8,
+        "answer_found": true,
+        "avg_sim": 0.17374999914318323,
+        "top_sim": 0.33000001311302185
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.3674999997019768,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 10,
+        "answer_found": false,
+        "avg_sim": 0.2450000002980232,
+        "top_sim": 0.44999998807907104
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 15,
+        "answer_found": false,
+        "avg_sim": 0.12200000087420146,
+        "top_sim": 0.17000000178813934
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 13,
+        "answer_found": true,
+        "avg_sim": 0.18615384571827376,
+        "top_sim": 0.3199999928474426
+      }
+    ]
+  },
+  {
+    "threshold": 0.1,
+    "avg_results": 11.6,
+    "answer_found_rate": 0.6,
+    "overall_avg_sim": 0.22750000045474233,
+    "total_found": 6,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 1,
+        "answer_found": false,
+        "avg_sim": 0.10999999940395355,
+        "top_sim": 0.10999999940395355
+      },
+      {
+        "qid": "118b2229",
+        "count": 12,
+        "answer_found": true,
+        "avg_sim": 0.18499999617536864,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 11,
+        "answer_found": true,
+        "avg_sim": 0.23727272857319226,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 20,
+        "answer_found": true,
+        "avg_sim": 0.275500001758337,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 4,
+        "answer_found": true,
+        "avg_sim": 0.33500000461935997,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 8,
+        "answer_found": true,
+        "avg_sim": 0.15250000171363354,
+        "top_sim": 0.33000001311302185
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.2845000006258488,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 19,
+        "answer_found": false,
+        "avg_sim": 0.22947368417915545,
+        "top_sim": 0.4300000071525574
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 14,
+        "answer_found": false,
+        "avg_sim": 0.14999999957425253,
+        "top_sim": 0.20000000298023224
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 7,
+        "answer_found": true,
+        "avg_sim": 0.17571428737470082,
+        "top_sim": 0.30000001192092896
+      }
+    ]
+  },
+  {
+    "threshold": 0.12,
+    "avg_results": 10.8,
+    "answer_found_rate": 0.6,
+    "overall_avg_sim": 0.2515740746425258,
+    "total_found": 6,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "118b2229",
+        "count": 4,
+        "answer_found": true,
+        "avg_sim": 0.27999999560415745,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 16,
+        "answer_found": true,
+        "avg_sim": 0.21687500085681677,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 20,
+        "answer_found": true,
+        "avg_sim": 0.24000000059604645,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 5,
+        "answer_found": true,
+        "avg_sim": 0.37200000286102297,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 2,
+        "answer_found": true,
+        "avg_sim": 0.23000000417232513,
+        "top_sim": 0.33000001311302185
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.3435000002384186,
+        "top_sim": 0.550000011920929
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 17,
+        "answer_found": false,
+        "avg_sim": 0.2523529415621477,
+        "top_sim": 0.44999998807907104
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 15,
+        "answer_found": false,
+        "avg_sim": 0.16400000254313152,
+        "top_sim": 0.27000001072883606
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 9,
+        "answer_found": true,
+        "avg_sim": 0.20444444235828188,
+        "top_sim": 0.3499999940395355
+      }
+    ]
+  },
+  {
+    "threshold": 0.14,
+    "avg_results": 8.7,
+    "answer_found_rate": 0.5,
+    "overall_avg_sim": 0.2614942542437849,
+    "total_found": 5,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "118b2229",
+        "count": 3,
+        "answer_found": true,
+        "avg_sim": 0.3166666626930237,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 5,
+        "answer_found": true,
+        "avg_sim": 0.2920000046491623,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 14,
+        "answer_found": true,
+        "avg_sim": 0.24642857483455113,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 4,
+        "answer_found": true,
+        "avg_sim": 0.33500000461935997,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 3,
+        "answer_found": false,
+        "avg_sim": 0.1899999976158142,
+        "top_sim": 0.23999999463558197
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.3370000012218952,
+        "top_sim": 0.550000011920929
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 15,
+        "answer_found": false,
+        "avg_sim": 0.24399999976158143,
+        "top_sim": 0.44999998807907104
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 15,
+        "answer_found": false,
+        "avg_sim": 0.17533333599567413,
+        "top_sim": 0.27000001072883606
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 8,
+        "answer_found": true,
+        "avg_sim": 0.24374999850988388,
+        "top_sim": 0.3499999940395355
+      }
+    ]
+  },
+  {
+    "threshold": 0.18,
+    "avg_results": 6.9,
+    "answer_found_rate": 0.3,
+    "overall_avg_sim": 0.3063768128985944,
+    "total_found": 3,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "118b2229",
+        "count": 1,
+        "answer_found": false,
+        "avg_sim": 0.20999999344348907,
+        "top_sim": 0.20999999344348907
+      },
+      {
+        "qid": "51a45a95",
+        "count": 10,
+        "answer_found": true,
+        "avg_sim": 0.2490000009536743,
+        "top_sim": 0.3700000047683716
+      },
+      {
+        "qid": "6ade9755",
+        "count": 20,
+        "answer_found": true,
+        "avg_sim": 0.2945000022649765,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 5,
+        "answer_found": false,
+        "avg_sim": 0.3420000046491623,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 20,
+        "answer_found": false,
+        "avg_sim": 0.3515000008046627,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 8,
+        "answer_found": false,
+        "avg_sim": 0.31124999932944775,
+        "top_sim": 0.44999998807907104
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 3,
+        "answer_found": false,
+        "avg_sim": 0.2266666740179062,
+        "top_sim": 0.27000001072883606
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 2,
+        "answer_found": true,
+        "avg_sim": 0.3199999928474426,
+        "top_sim": 0.3499999940395355
+      }
+    ]
+  },
+  {
+    "threshold": 0.22,
+    "avg_results": 4.4,
+    "answer_found_rate": 0.4,
+    "overall_avg_sim": 0.34704545580528,
+    "total_found": 4,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "118b2229",
+        "count": 2,
+        "answer_found": true,
+        "avg_sim": 0.41499999165534973,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 6,
+        "answer_found": true,
+        "avg_sim": 0.34000000605980557,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 5,
+        "answer_found": false,
+        "avg_sim": 0.3720000058412552,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 5,
+        "answer_found": true,
+        "avg_sim": 0.35800000429153445,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 2,
+        "answer_found": false,
+        "avg_sim": 0.14000000059604645,
+        "top_sim": 0.17000000178813934
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 13,
+        "answer_found": false,
+        "avg_sim": 0.37846153516035813,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 8,
+        "answer_found": false,
+        "avg_sim": 0.3425000011920929,
+        "top_sim": 0.4399999976158142
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 1,
+        "answer_found": false,
+        "avg_sim": 0.23000000417232513,
+        "top_sim": 0.23000000417232513
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 2,
+        "answer_found": true,
+        "avg_sim": 0.2900000065565109,
+        "top_sim": 0.30000001192092896
+      }
+    ]
+  },
+  {
+    "threshold": 0.28,
+    "avg_results": 5.3,
+    "answer_found_rate": 0.4,
+    "overall_avg_sim": 0.3000000017993855,
+    "total_found": 4,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "118b2229",
+        "count": 1,
+        "answer_found": false,
+        "avg_sim": 0.3199999928474426,
+        "top_sim": 0.3199999928474426
+      },
+      {
+        "qid": "51a45a95",
+        "count": 3,
+        "answer_found": true,
+        "avg_sim": 0.30666667222976685,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 6,
+        "answer_found": true,
+        "avg_sim": 0.4400000075499217,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 7,
+        "answer_found": true,
+        "avg_sim": 0.38714286259242464,
+        "top_sim": 0.4399999976158142
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 6,
+        "answer_found": true,
+        "avg_sim": 0.18666666746139526,
+        "top_sim": 0.33000001311302185
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 8,
+        "answer_found": false,
+        "avg_sim": 0.4262499986216426,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 3,
+        "answer_found": false,
+        "avg_sim": 0.41333333651224774,
+        "top_sim": 0.44999998807907104
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 17,
+        "answer_found": false,
+        "avg_sim": 0.1723529420354787,
+        "top_sim": 0.28999999165534973
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 2,
+        "answer_found": false,
+        "avg_sim": 0.3049999922513962,
+        "top_sim": 0.3199999928474426
+      }
+    ]
+  },
+  {
+    "threshold": 0.35,
+    "avg_results": 2.5,
+    "answer_found_rate": 0.5,
+    "overall_avg_sim": 0.4528000020980835,
+    "total_found": 5,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "118b2229",
+        "count": 1,
+        "answer_found": true,
+        "avg_sim": 0.5099999904632568,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 2,
+        "answer_found": true,
+        "avg_sim": 0.48500001430511475,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 4,
+        "answer_found": true,
+        "avg_sim": 0.4750000089406967,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 2,
+        "answer_found": true,
+        "avg_sim": 0.39000000059604645,
+        "top_sim": 0.4000000059604645
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 10,
+        "answer_found": false,
+        "avg_sim": 0.475,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 5,
+        "answer_found": false,
+        "avg_sim": 0.41200000047683716,
+        "top_sim": 0.44999998807907104
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 1,
+        "answer_found": true,
+        "avg_sim": 0.3499999940395355,
+        "top_sim": 0.3499999940395355
+      }
+    ]
+  },
+  {
+    "threshold": 0.45,
+    "avg_results": 0.9,
+    "answer_found_rate": 0.3,
+    "overall_avg_sim": 0.5355555613835653,
+    "total_found": 3,
+    "total_questions": 10,
+    "per_question": [
+      {
+        "qid": "e47becba",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "118b2229",
+        "count": 1,
+        "answer_found": true,
+        "avg_sim": 0.5099999904632568,
+        "top_sim": 0.5099999904632568
+      },
+      {
+        "qid": "51a45a95",
+        "count": 1,
+        "answer_found": true,
+        "avg_sim": 0.6000000238418579,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "6ade9755",
+        "count": 2,
+        "answer_found": true,
+        "avg_sim": 0.550000011920929,
+        "top_sim": 0.6000000238418579
+      },
+      {
+        "qid": "c5e8278d",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "6f9b354f",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "58ef2f1c",
+        "count": 5,
+        "answer_found": false,
+        "avg_sim": 0.522000002861023,
+        "top_sim": 0.5799999833106995
+      },
+      {
+        "qid": "f8c5f88b",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "5d3d2817",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      },
+      {
+        "qid": "7527f7e2",
+        "count": 0,
+        "answer_found": false,
+        "avg_sim": 0,
+        "top_sim": 0
+      }
+    ]
+  }
+]

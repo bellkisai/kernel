@@ -67,6 +67,8 @@ enum Commands {
     },
     /// Show disk usage and system status
     Status,
+    /// Scan for installed LLM providers
+    Detect,
 }
 
 #[derive(Subcommand)]
@@ -790,6 +792,34 @@ async fn main() -> anyhow::Result<()> {
             Commands::Bench { .. } => {
                 anyhow::bail!("Bench requires in-process engine. Stop daemon and retry.");
             }
+            Commands::Detect => {
+                let resp = daemon_get(base, "/api/detect").await?;
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&resp) {
+                    let total_providers = parsed["total_providers"].as_u64().unwrap_or(0);
+                    let total_models = parsed["total_models"].as_u64().unwrap_or(0);
+                    println!("[shrimpk] Provider scan: {total_providers} provider(s), {total_models} model(s)");
+                    if let Some(providers) = parsed["providers"].as_array() {
+                        for p in providers {
+                            let name = p["name"].as_str().unwrap_or("?");
+                            let url = p["url"].as_str().unwrap_or("?");
+                            let models = p["models"].as_array().map(|a| a.len()).unwrap_or(0);
+                            println!("  {name} at {url} ({models} models)");
+                            if let Some(model_list) = p["models"].as_array() {
+                                for m in model_list {
+                                    if let Some(model_name) = m.as_str() {
+                                        println!("    - {model_name}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if total_providers == 0 {
+                        println!("  No local LLM providers detected.");
+                    }
+                } else {
+                    println!("{resp}");
+                }
+            }
             Commands::Config { .. } | Commands::Status => unreachable!(),
         }
         return Ok(());
@@ -848,6 +878,9 @@ async fn main() -> anyhow::Result<()> {
                 anyhow::bail!("Count must be at least 1");
             }
             cmd_bench(&engine, count).await?;
+        }
+        Commands::Detect => {
+            anyhow::bail!("Detect requires running daemon. Start daemon first: shrimpk-daemon");
         }
         Commands::Config { .. } | Commands::Status => unreachable!(),
     }

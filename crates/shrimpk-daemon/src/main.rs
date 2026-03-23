@@ -6,6 +6,7 @@
 //!   shrimpk-daemon                     # serve on localhost:11435
 //!   shrimpk-daemon --port 8080         # custom port
 
+mod detect;
 mod proxy;
 mod routes;
 mod state;
@@ -151,6 +152,28 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .expect("Failed to build HTTP client");
 
+    // Auto-detect local LLM providers and build model routing table
+    let providers = detect::detect_providers(&http_client).await;
+    let model_routes = detect::build_model_routes(&providers);
+    let total_models: usize = providers.iter().map(|p| p.models.len()).sum();
+    for p in &providers {
+        eprintln!(
+            "[shrimpk] Detected: {} ({} models) at {}",
+            p.name,
+            p.models.len(),
+            p.url
+        );
+    }
+    if providers.is_empty() {
+        eprintln!("[shrimpk] No local LLM providers detected.");
+    } else {
+        eprintln!(
+            "[shrimpk] Total: {} provider(s), {} model(s) routable.",
+            providers.len(),
+            total_models
+        );
+    }
+
     let state = AppState {
         engine,
         config: echo_config,
@@ -158,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
         auth_token,
         pii_filter: Arc::new(shrimpk_memory::PiiFilter::new()),
         http_client,
+        model_routes: Arc::new(tokio::sync::RwLock::new(model_routes)),
     };
 
     // Keep engine ref for shutdown persist (must clone before state moves into router)
@@ -176,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/config", put(routes::config_set))
         .route("/api/persist", post(routes::persist))
         .route("/api/consolidate", post(routes::consolidate))
+        .route("/api/detect", get(routes::detect_providers))
         // OpenAI-compatible proxy routes
         .route("/v1/chat/completions", post(proxy::chat_completions))
         .route("/v1/models", get(proxy::models))

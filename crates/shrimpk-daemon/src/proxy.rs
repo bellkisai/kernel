@@ -121,10 +121,17 @@ pub async fn chat_completions(
         });
     }
 
-    // 5. Build backend URL
+    // 5. Build backend URL — route by model name if known, else default
+    let backend_base = {
+        let routes = state.model_routes.read().await;
+        routes
+            .get(&req.model)
+            .cloned()
+            .unwrap_or_else(|| state.config.proxy_target.clone())
+    };
     let backend_url = format!(
         "{}/v1/chat/completions",
-        state.config.proxy_target.trim_end_matches('/')
+        backend_base.trim_end_matches('/')
     );
 
     // 6. Forward to backend
@@ -224,34 +231,68 @@ async fn forward_streaming(
 pub async fn models(
     State(state): State<AppState>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let url = format!(
-        "{}/v1/models",
-        state.config.proxy_target.trim_end_matches('/')
-    );
+    // Aggregate models from the routing table — each model entry includes its
+    // provider URL so clients know where it lives.
+    let routes = state.model_routes.read().await;
 
-    let resp = state
-        .http_client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| {
+    if routes.is_empty() {
+        // No detected providers — fall back to proxying the default target
+        drop(routes);
+        let url = format!(
+            "{}/v1/models",
+            state.config.proxy_target.trim_end_matches('/')
+        );
+
+        let resp = state
+            .http_client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({"error": {"message": format!("Backend unreachable: {e}"), "type": "proxy_error"}})),
+                )
+            })?;
+
+        let status = StatusCode::from_u16(resp.status().as_u16())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let body = resp.bytes().await.map_err(|e| {
             (
                 StatusCode::BAD_GATEWAY,
-                Json(json!({"error": {"message": format!("Backend unreachable: {e}"), "type": "proxy_error"}})),
+                Json(json!({"error": {"message": format!("Backend read error: {e}"), "type": "proxy_error"}})),
             )
         })?;
 
-    let status =
-        StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let body = resp.bytes().await.map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({"error": {"message": format!("Backend read error: {e}"), "type": "proxy_error"}})),
-        )
-    })?;
+        let mut response = Response::new(axum::body::Body::from(body));
+        *response.status_mut() = status;
+        response
+            .headers_mut()
+            .insert("content-type", "application/json".parse().unwrap());
+        return Ok(response);
+    }
 
-    let mut response = Response::new(axum::body::Body::from(body));
-    *response.status_mut() = status;
+    // Build an OpenAI-compatible model list from all detected providers
+    let model_entries: Vec<serde_json::Value> = routes
+        .iter()
+        .map(|(model_name, provider_url)| {
+            json!({
+                "id": model_name,
+                "object": "model",
+                "owned_by": provider_url
+            })
+        })
+        .collect();
+    drop(routes);
+
+    let body = json!({
+        "object": "list",
+        "data": model_entries
+    });
+
+    let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+    let mut response = Response::new(axum::body::Body::from(body_bytes));
+    *response.status_mut() = StatusCode::OK;
     response
         .headers_mut()
         .insert("content-type", "application/json".parse().unwrap());

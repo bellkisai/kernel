@@ -1,0 +1,202 @@
+{
+  "test": "sustained_daemon",
+  "threshold": 0.1,
+  "total_stored": 2551,
+  "mem_after_consolidation": -1,
+  "consolidation_result": {
+    "bloom_rebuilt": false,
+    "duplicates_merged": 1,
+    "duration_ms": 177,
+    "echo_counts_decayed": 0,
+    "hebbian_edges_pruned": 0
+  },
+  "pass1": [
+    {
+      "qid": "e47becba",
+      "question": "What degree did I graduate with?",
+      "answer": "Business Administration",
+      "echo_count": 0,
+      "answer_found": false,
+      "top_sim": 0.0,
+      "rank": -1
+    },
+    {
+      "qid": "118b2229",
+      "question": "How long is my daily commute to work?",
+      "answer": "45 minutes each way",
+      "echo_count": 19,
+      "answer_found": false,
+      "top_sim": 0.30000001192092896,
+      "rank": -1
+    },
+    {
+      "qid": "51a45a95",
+      "question": "Where did I redeem a $5 coupon on coffee creamer?",
+      "answer": "Target",
+      "echo_count": 20,
+      "answer_found": true,
+      "top_sim": 0.6000000238418579,
+      "rank": 1
+    },
+    {
+      "qid": "6ade9755",
+      "question": "Where do I take yoga classes?",
+      "answer": "Serenity Yoga",
+      "echo_count": 20,
+      "answer_found": false,
+      "top_sim": 0.36000001430511475,
+      "rank": -1
+    },
+    {
+      "qid": "c5e8278d",
+      "question": "What was my last name before I changed it?",
+      "answer": "Johnson",
+      "echo_count": 7,
+      "answer_found": false,
+      "top_sim": 0.49000000953674316,
+      "rank": -1
+    },
+    {
+      "qid": "6f9b354f",
+      "question": "What color did I repaint my bedroom walls?",
+      "answer": "a lighter shade of gray",
+      "echo_count": 18,
+      "answer_found": true,
+      "top_sim": 0.5199999809265137,
+      "rank": 4
+    },
+    {
+      "qid": "58ef2f1c",
+      "question": "When did I volunteer at the local animal shelter's fundraising dinner?",
+      "answer": "February 14th",
+      "echo_count": 20,
+      "answer_found": false,
+      "top_sim": 0.6399999856948853,
+      "rank": -1
+    },
+    {
+      "qid": "f8c5f88b",
+      "question": "Where did I buy my new tennis racket from?",
+      "answer": "the sports store downtown",
+      "echo_count": 10,
+      "answer_found": false,
+      "top_sim": 0.44999998807907104,
+      "rank": -1
+    },
+    {
+      "qid": "5d3d2817",
+      "question": "What was my previous occupation?",
+      "answer": "Marketing specialist at a small startup",
+      "echo_count": 9,
+      "answer_found": false,
+      "top_sim": 0.28999999165534973,
+      "rank": -1
+    },
+    {
+      "qid": "7527f7e2",
+      "question": "How much did I spend on a designer handbag?",
+      "answer": "$800",
+      "echo_count": 20,
+      "answer_found": false,
+      "top_sim": 0.44999998807907104,
+      "rank": -1
+    }
+  ],
+  "pass2": [
+    {
+      "qid": "e47becba",
+      "question": "What degree did I graduate with?",
+      "answer": "Business Administration",
+      "echo_count": 0,
+      "answer_found": false,
+      "top_sim": 0.0,
+      "rank": -1
+    },
+    {
+      "qid": "118b2229",
+      "question": "How long is my daily commute to work?",
+      "answer": "45 minutes each way",
+      "echo_count": 19,
+      "answer_found": false,
+      "top_sim": 0.30000001192092896,
+      "rank": -1
+    },
+    {
+      "qid": "51a45a95",
+      "question": "Where did I redeem a $5 coupon on coffee creamer?",
+      "answer": "Target",
+      "echo_count": 20,
+      "answer_found": true,
+      "top_sim": 0.6000000238418579,
+      "rank": 1
+    },
+    {
+      "qid": "6ade9755",
+      "question": "Where do I take yoga classes?",
+      "answer": "Serenity Yoga",
+      "echo_count": 20,
+      "answer_found": false,
+      "top_sim": 0.36000001430511475,
+      "rank": -1
+    },
+    {
+      "qid": "c5e8278d",
+      "question": "What was my last name before I changed it?",
+      "answer": "Johnson",
+      "echo_count": 7,
+      "answer_found": false,
+      "top_sim": 0.49000000953674316,
+      "rank": -1
+    },
+    {
+      "qid": "6f9b354f",
+      "question": "What color did I repaint my bedroom walls?",
+      "answer": "a lighter shade of gray",
+      "echo_count": 18,
+      "answer_found": true,
+      "top_sim": 0.5199999809265137,
+      "rank": 4
+    },
+    {
+      "qid": "58ef2f1c",
+      "question": "When did I volunteer at the local animal shelter's fundraising dinner?",
+      "answer": "February 14th",
+      "echo_count": 20,
+      "answer_found": false,
+      "top_sim": 0.6399999856948853,
+      "rank": -1
+    },
+    {
+      "qid": "f8c5f88b",
+      "question": "Where did I buy my new tennis racket from?",
+      "answer": "the sports store downtown",
+      "echo_count": 10,
+      "answer_found": false,
+      "top_sim": 0.44999998807907104,
+      "rank": -1
+    },
+    {
+      "qid": "5d3d2817",
+      "question": "What was my previous occupation?",
+      "answer": "Marketing specialist at a small startup",
+      "echo_count": 9,
+      "answer_found": false,
+      "top_sim": 0.28999999165534973,
+      "rank": -1
+    },
+    {
+      "qid": "7527f7e2",
+      "question": "How much did I spend on a designer handbag?",
+      "answer": "$800",
+      "echo_count": 20,
+      "answer_found": false,
+      "top_sim": 0.44999998807907104,
+      "rank": -1
+    }
+  ],
+  "pass1_found": 2,
+  "pass2_found": 2,
+  "baseline_found": 7,
+  "hebbian_improvement": 0,
+  "avg_sim_delta": 0.0
+}
