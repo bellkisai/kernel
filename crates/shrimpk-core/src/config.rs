@@ -143,7 +143,7 @@ fn default_daemon_rate_limit() -> u64 {
 }
 
 fn default_recency_weight() -> f32 {
-    0.05
+    0.15
 }
 
 fn default_max_disk_bytes() -> u64 {
@@ -770,6 +770,6 @@ mod tests {
     #[test]
     fn default_config_has_recency_weight() {
         let config = EchoConfig::default();
-        assert!((config.recency_weight - 0.05).abs() < f32::EPSILON);
+        assert!((config.recency_weight - 0.15).abs() < f32::EPSILON);
     }
 }

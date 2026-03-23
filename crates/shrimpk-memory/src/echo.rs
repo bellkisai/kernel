@@ -510,12 +510,12 @@ impl EchoEngine {
                 let half_life = entry.category.half_life_secs();
                 let decay = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
 
-                // Recency boost (KS18 Track 3): newer memories get a small advantage.
-                // Formula: recency_weight / (1.0 + days_since_stored)
-                // At 0 days: full weight (0.05). At 7 days: 0.00625. At 30 days: ~0.0016.
-                // This helps Knowledge Update queries surface corrections over stale facts.
+                // Recency boost (KS18 Track 3, tuned KS19 Track 2): sqrt-based decay.
+                // Formula: recency_weight / (1.0 + sqrt(days_since_stored))
+                // At 0 days: +0.15. At 1 day: +0.075. At 7 days: +0.050. At 30 days: +0.026.
+                // Stronger differentiation for recent memories while still fading gracefully.
                 let days_since_stored = age_secs / 86400.0;
-                let recency_boost = recency_weight / (1.0 + days_since_stored);
+                let recency_boost = recency_weight / (1.0 + days_since_stored.sqrt());
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
