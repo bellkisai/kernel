@@ -188,9 +188,9 @@ Optional auth: set `SHRIMPK_AUTH_TOKEN` env var → required as `Authorization: 
 shrimpk-kernel          (facade — re-exports all)
   shrimpk-core          (types, config, errors, PII types)
   shrimpk-memory        (Echo Memory engine)
-  shrimpk-router        (provider routing + cascade)
-  shrimpk-context       (context assembly + token budgeting)
-  shrimpk-security      (sandbox, permissions — stub)
+  shrimpk-router        (provider routing + cascade) — LIBRARY, not yet wired to daemon
+  shrimpk-context       (context assembly + token budgeting) — WIRING in KS15
+  shrimpk-security      (sandbox, permissions) — STUB, planned for future
   shrimpk-python        (PyO3 bindings)
   shrimpk-mcp           (MCP server — JSON-RPC stdio)
   shrimpk-daemon        (HTTP daemon — localhost:11435)

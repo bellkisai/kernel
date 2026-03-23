@@ -107,6 +107,9 @@ pub struct EchoConfig {
     /// Maximum echo results to inject into proxy requests.
     #[serde(default = "default_proxy_max_echo_results")]
     pub proxy_max_echo_results: usize,
+    /// Context window size (in tokens) for proxy token budgeting.
+    #[serde(default = "default_proxy_context_window")]
+    pub proxy_context_window: usize,
 }
 
 fn default_proxy_target() -> String {
@@ -117,6 +120,9 @@ fn default_proxy_enabled() -> bool {
 }
 fn default_proxy_max_echo_results() -> usize {
     5
+}
+fn default_proxy_context_window() -> usize {
+    8000
 }
 
 fn default_max_disk_bytes() -> u64 {
@@ -159,6 +165,7 @@ impl Default for EchoConfig {
             proxy_target: default_proxy_target(),
             proxy_enabled: default_proxy_enabled(),
             proxy_max_echo_results: default_proxy_max_echo_results(),
+            proxy_context_window: default_proxy_context_window(),
         }
     }
 }
@@ -244,6 +251,7 @@ pub struct FileConfig {
     pub proxy_target: Option<String>,
     pub proxy_enabled: Option<bool>,
     pub proxy_max_echo_results: Option<usize>,
+    pub proxy_context_window: Option<usize>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -391,6 +399,9 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Some(v) = fc.proxy_max_echo_results {
             config.proxy_max_echo_results = v;
         }
+        if let Some(v) = fc.proxy_context_window {
+            config.proxy_context_window = v;
+        }
     }
 
     // Layer 3: env var overrides (highest priority)
@@ -423,6 +434,9 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
     if let Ok(v) = std::env::var("SHRIMPK_PROXY_ENABLED") {
         config.proxy_enabled = v.parse().unwrap_or(true);
+    }
+    if let Some(v) = env_usize("SHRIMPK_PROXY_CONTEXT_WINDOW")? {
+        config.proxy_context_window = v;
     }
 
     Ok(config)

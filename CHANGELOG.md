@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — KS13: Provider Integration (v0.3.2)
+- **Provider Scanner**: auto-detect 6 LLM providers via parallel port probing (Ollama, LM Studio, Jan.ai, vLLM, LocalAI, GPT4All)
+- **Model-Name Routing**: requests routed by model name to correct provider backend
+- **`shrimpk detect` CLI command**: scan and display detected providers + models
+- **GET /api/detect**: daemon endpoint for re-scanning providers
+- **README**: "Memory Proxy" documentation section with provider setup table
+- **OpenClaw Plugin** (`integrations/openclaw/`): TypeScript plugin with `before_prompt_build` hook for automatic memory injection, zero runtime deps
+
+### Added — KS12: OpenAI-Compatible Proxy (v0.3.2)
+- **POST /v1/chat/completions**: transparent memory-injecting proxy to any backend
+- **GET /v1/models**: passthrough to backend model list
+- Streaming via raw byte passthrough (no SSE parsing overhead)
+- `#[serde(flatten)]` preserves unknown request fields for compatibility
+- Fire-and-forget user message storage via `engine.store()`
+- Config: `proxy_target`, `proxy_enabled`, `proxy_max_echo_results`
+
+### Added — KS11: Sleep Consolidation (v0.3.0 + v0.3.1)
+- **Consolidator trait** with swappable backends: OllamaConsolidator, HttpConsolidator, NoopConsolidator
+- **Sleep consolidation Step 5**: LLM fact extraction during 5-min background cycle
+- **Split pipeline (Pipe A/B)**: child memory rescue for near-miss candidates
+- **Parent-children index** on EchoStore (O(1) child lookup via HashMap)
+- **Child memory creation** with embedded vectors in consolidation (v0.3.1)
+- MemoryEntry: `enriched` + `parent_id` fields, backward-compatible persistence
+- Bloom filter: lower match threshold (2→1), bypass for stores <50 memories
+- LSH: Hamming-1 multi-probe for improved recall
+- Config: `consolidation_provider`, `ollama_url`, `enrichment_model`, `max_facts_per_memory`
+- FileConfig support for all consolidation fields (config.toml)
+- Config show/set for consolidation in daemon, CLI, MCP
+- CLI stats formatting fix (was printing raw JSON via daemon proxy)
+
+### Added — KS10: MSI Installer (v0.2.0)
+- WiX v3 MSI installer (per-user, no admin, 4 binaries + 3 scripts)
+- PATH environment variable added during install
+- Start Menu shortcuts (app, terminal, uninstall)
+- PowerShell-based hook registration (register-hook.ps1 / unregister-hook.ps1)
+- All WiX custom actions use `powershell.exe -WindowStyle Hidden` (no CMD flash)
+- Auto-start daemon + tray on login via Registry Run keys
+
+### Added — KS9: Product Polish (v0.2.0)
+- **System tray** (`shrimpk-app.exe`): Win32 message pump, background stats, periodic health check
+- README restyled as landing page
+- Uninstaller clears autostart registry keys
+- Competitive scan update (MuninnDB, memU, Hindsight, NeuralMemory)
+
 ### Added — KS7: MCP Server
 - **MCP Server** (`shrimpk-mcp`): 9 tools over JSON-RPC 2.0 stdio
   - store, echo, stats, forget, dump, config_show, config_set, persist, status

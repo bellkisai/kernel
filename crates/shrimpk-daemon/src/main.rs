@@ -16,6 +16,7 @@ use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{delete, get, post, put};
+use shrimpk_context::{ContextAssembler, ContextConfig};
 use shrimpk_core::config;
 use shrimpk_memory::EchoEngine;
 use state::AppState;
@@ -174,6 +175,13 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // Build context assembler for token-budgeted proxy injection
+    let context_config = ContextConfig {
+        max_echo_results: echo_config.proxy_max_echo_results,
+        ..ContextConfig::default()
+    };
+    let context_assembler = Arc::new(ContextAssembler::new(context_config));
+
     let state = AppState {
         engine,
         config: echo_config,
@@ -182,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
         pii_filter: Arc::new(shrimpk_memory::PiiFilter::new()),
         http_client,
         model_routes: Arc::new(tokio::sync::RwLock::new(model_routes)),
+        context_assembler,
     };
 
     // Keep engine ref for shutdown persist (must clone before state moves into router)

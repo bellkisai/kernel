@@ -1,7 +1,8 @@
 //! OpenAI-compatible proxy with transparent memory injection.
 //!
 //! Sits between any client and any OpenAI-compatible backend (Ollama, etc.).
-//! Injects echo memories into the system prompt before forwarding.
+//! Uses the `shrimpk-context` ContextAssembler for token-budgeted memory
+//! injection. Falls back to naive string injection if assembly fails.
 //! Stores user messages for future recall.
 
 use axum::extract::State;
@@ -10,6 +11,7 @@ use axum::response::{Json, Response};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use shrimpk_context::ContextSegment;
 
 use crate::state::AppState;
 
@@ -86,6 +88,70 @@ fn inject_memories(messages: &mut Vec<ChatMessage>, memory_block: &str) {
     );
 }
 
+/// Convert ContextAssembler segments back into ChatMessages for the backend.
+///
+/// Maps segment types to OpenAI-compatible roles:
+/// - `SystemPrompt` + `EchoMemory` + `RagDocument` → merged into one `system` message
+/// - `ConversationMessage` → preserved role + content
+/// - `UserQuery` → `user` role
+fn segments_to_messages(segments: &[ContextSegment]) -> Vec<ChatMessage> {
+    let mut messages = Vec::new();
+
+    // Merge system prompt + echo memories + RAG into a single system message
+    let mut system_parts: Vec<String> = Vec::new();
+    for seg in segments {
+        match seg {
+            ContextSegment::SystemPrompt(text) => {
+                if !text.is_empty() {
+                    system_parts.push(text.clone());
+                }
+            }
+            ContextSegment::EchoMemory {
+                content,
+                similarity,
+                ..
+            } => {
+                system_parts.push(format!(
+                    "[Echo Memory (relevance: {:.0}%)] {}",
+                    similarity * 100.0,
+                    content,
+                ));
+            }
+            ContextSegment::RagDocument { content, source } => {
+                system_parts.push(format!("[Document: {}] {}", source, content));
+            }
+            _ => {}
+        }
+    }
+    if !system_parts.is_empty() {
+        messages.push(ChatMessage {
+            role: "system".to_string(),
+            content: system_parts.join("\n"),
+        });
+    }
+
+    // Add conversation messages and user query in order
+    for seg in segments {
+        match seg {
+            ContextSegment::ConversationMessage { role, content } => {
+                messages.push(ChatMessage {
+                    role: role.clone(),
+                    content: content.clone(),
+                });
+            }
+            ContextSegment::UserQuery(text) => {
+                messages.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: text.clone(),
+                });
+            }
+            _ => {} // system/echo/rag already handled above
+        }
+    }
+
+    messages
+}
+
 // ---------------------------------------------------------------------------
 // Main handler — POST /v1/chat/completions
 // ---------------------------------------------------------------------------
@@ -94,6 +160,15 @@ pub async fn chat_completions(
     State(state): State<AppState>,
     Json(mut req): Json<ChatCompletionRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    // Reject oversized payloads (1MB max)
+    let body_size = serde_json::to_vec(&req).map(|v| v.len()).unwrap_or(0);
+    if body_size > 1_048_576 {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({"error": {"message": "Request body too large (max 1MB)", "type": "proxy_error"}}))
+        ));
+    }
+
     let is_streaming = req.stream.unwrap_or(false);
 
     // 1. Extract last user message
@@ -109,9 +184,47 @@ pub async fn chat_completions(
             .await
             .unwrap_or_default();
 
-        // 3. Inject memories into system prompt
-        let memory_block = build_memory_block(&echo_results);
-        inject_memories(&mut req.messages, &memory_block);
+        // 3. Assemble token-budgeted context (fallback to naive injection on failure)
+        if !echo_results.is_empty() {
+            // Extract system prompt and conversation from the original messages
+            let system_prompt: Option<String> = req
+                .messages
+                .iter()
+                .find(|m| m.role == "system")
+                .map(|m| m.content.clone());
+
+            let conversation: Vec<(String, String)> = req
+                .messages
+                .iter()
+                .filter(|m| m.role != "system")
+                // Skip the last user message — the assembler receives it separately
+                .rev()
+                .skip(1)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .map(|m| (m.role.clone(), m.content.clone()))
+                .collect();
+
+            let assembled = state.context_assembler.assemble(
+                state.config.proxy_context_window,
+                system_prompt.as_deref(),
+                &echo_results,
+                &[],           // no RAG chunks in proxy
+                &conversation,
+                &user_msg,
+            );
+
+            // Convert assembled segments back to ChatMessages
+            let new_messages = segments_to_messages(&assembled.segments);
+            if !new_messages.is_empty() {
+                req.messages = new_messages;
+            } else {
+                // Fallback: assembler produced empty output — use naive injection
+                let memory_block = build_memory_block(&echo_results);
+                inject_memories(&mut req.messages, &memory_block);
+            }
+        }
 
         // 4. Store user message for future recall (fire-and-forget)
         let engine = state.engine.clone();
@@ -393,5 +506,97 @@ mod tests {
     #[test]
     fn build_memory_block_empty() {
         assert!(build_memory_block(&[]).is_empty());
+    }
+
+    #[test]
+    fn segments_to_messages_merges_system_and_echo() {
+        let segments = vec![
+            ContextSegment::SystemPrompt("You are helpful.".into()),
+            ContextSegment::EchoMemory {
+                content: "user likes Rust".into(),
+                similarity: 0.92,
+                source: "proxy".into(),
+            },
+            ContextSegment::ConversationMessage {
+                role: "user".into(),
+                content: "hello".into(),
+            },
+            ContextSegment::ConversationMessage {
+                role: "assistant".into(),
+                content: "hi there".into(),
+            },
+            ContextSegment::UserQuery("what is Rust?".into()),
+        ];
+
+        let msgs = segments_to_messages(&segments);
+
+        // First message should be system with both system prompt and echo memory
+        assert_eq!(msgs[0].role, "system");
+        assert!(msgs[0].content.contains("You are helpful."));
+        assert!(msgs[0].content.contains("user likes Rust"));
+        assert!(msgs[0].content.contains("92%"));
+
+        // Conversation messages should follow
+        assert_eq!(msgs[1].role, "user");
+        assert_eq!(msgs[1].content, "hello");
+        assert_eq!(msgs[2].role, "assistant");
+        assert_eq!(msgs[2].content, "hi there");
+
+        // User query should be last
+        assert_eq!(msgs[3].role, "user");
+        assert_eq!(msgs[3].content, "what is Rust?");
+    }
+
+    #[test]
+    fn segments_to_messages_no_system_prompt() {
+        let segments = vec![
+            ContextSegment::SystemPrompt(String::new()),
+            ContextSegment::EchoMemory {
+                content: "a fact".into(),
+                similarity: 0.80,
+                source: "test".into(),
+            },
+            ContextSegment::UserQuery("q".into()),
+        ];
+
+        let msgs = segments_to_messages(&segments);
+
+        // System message should exist with echo memory only (empty system prompt filtered)
+        assert_eq!(msgs[0].role, "system");
+        assert!(msgs[0].content.contains("a fact"));
+        // User query last
+        assert_eq!(msgs[1].role, "user");
+        assert_eq!(msgs[1].content, "q");
+    }
+
+    #[test]
+    fn segments_to_messages_query_only() {
+        let segments = vec![
+            ContextSegment::SystemPrompt(String::new()),
+            ContextSegment::UserQuery("hello".into()),
+        ];
+
+        let msgs = segments_to_messages(&segments);
+        // No system parts with content -> only user query
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[0].content, "hello");
+    }
+
+    #[test]
+    fn segments_to_messages_with_rag() {
+        let segments = vec![
+            ContextSegment::SystemPrompt("sys".into()),
+            ContextSegment::RagDocument {
+                content: "doc content".into(),
+                source: "chunk_0".into(),
+            },
+            ContextSegment::UserQuery("q".into()),
+        ];
+
+        let msgs = segments_to_messages(&segments);
+        assert_eq!(msgs[0].role, "system");
+        assert!(msgs[0].content.contains("sys"));
+        assert!(msgs[0].content.contains("[Document: chunk_0] doc content"));
     }
 }

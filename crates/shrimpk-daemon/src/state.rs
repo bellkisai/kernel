@@ -1,5 +1,6 @@
 //! Shared application state for the daemon.
 
+use shrimpk_context::ContextAssembler;
 use shrimpk_core::EchoConfig;
 use shrimpk_memory::{EchoEngine, PiiFilter};
 use std::collections::HashMap;
@@ -20,4 +21,6 @@ pub struct AppState {
     /// Model-name -> provider base URL routing table.
     /// Updated on re-scan without stopping the daemon.
     pub model_routes: Arc<RwLock<HashMap<String, String>>>,
+    /// Token-budgeted context assembler for the proxy.
+    pub context_assembler: Arc<ContextAssembler>,
 }

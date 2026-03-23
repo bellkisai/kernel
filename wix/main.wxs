@@ -270,7 +270,7 @@
         <CustomAction
             Id='UnregisterMCP'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { &amp; claude mcp remove shrimpk } } catch { exit 0 }; exit 0"'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { Stop-Process -Name shrimpk-mcp -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { &amp; claude mcp remove shrimpk } } catch { exit 0 }; exit 0"'
             Execute='immediate'
             Return='ignore'/>
 
@@ -294,7 +294,15 @@
         <CustomAction
             Id='StopProcesses'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Stop-Process -Name shrimpk-daemon,shrimpk-app -Force -ErrorAction SilentlyContinue"'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Stop-Process -Name shrimpk-daemon,shrimpk-app -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2"'
+            Execute='deferred'
+            Return='ignore'/>
+
+        <!-- Uninstall: remove .fastembed_cache directory (deferred, hidden) -->
+        <CustomAction
+            Id='RemoveCache'
+            Property='POWERSHELLEXE'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "try { Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\bin\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue } catch { exit 0 }; exit 0"'
             Execute='deferred'
             Return='ignore'/>
 
@@ -331,6 +339,9 @@
                 NOT REMOVE
             </Custom>
             <Custom Action='StopProcesses' Before='RemoveFiles'>
+                REMOVE="ALL"
+            </Custom>
+            <Custom Action='RemoveCache' Before='UnregisterHook'>
                 REMOVE="ALL"
             </Custom>
             <Custom Action='UnregisterHook' Before='StopProcesses'>
