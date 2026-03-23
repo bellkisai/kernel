@@ -11,9 +11,10 @@
 //! only runs on stores with ≤10K memories; larger stores skip it.
 
 use chrono::{Duration, Utc};
+use regex::Regex;
 
 use crate::bloom::TopicFilter;
-use crate::hebbian::HebbianGraph;
+use crate::hebbian::{HebbianGraph, RelationshipType};
 use crate::similarity;
 use crate::store::EchoStore;
 use shrimpk_core::{Consolidator, EchoConfig};
@@ -31,6 +32,10 @@ pub struct ConsolidationResult {
     pub echo_counts_decayed: usize,
     /// Number of memories enriched via LLM fact extraction.
     pub facts_extracted: usize,
+    /// Number of typed relationship edges created during this pass.
+    pub relationships_created: usize,
+    /// Number of Supersedes edges created (contradictory fact updates).
+    pub supersedes_created: usize,
     /// Wall-clock duration of the consolidation pass in milliseconds.
     pub duration_ms: u64,
 }
@@ -168,6 +173,37 @@ pub fn consolidate(
                     let child_idx = store.add(child) as u32;
                     lsh.insert(child_idx, &embedding);
                     bloom.insert_memory(fact);
+
+                    // Detect typed relationship from fact text and create
+                    // a Hebbian edge between parent and child.
+                    if let Some(rel) = detect_relationship(fact) {
+                        hebbian.co_activate_with_relationship(
+                            idx as u32,
+                            child_idx,
+                            0.5, // moderate strength for extracted relationships
+                            rel,
+                        );
+                        result.relationships_created += 1;
+                    }
+                }
+
+                // Step 5b: Detect Supersedes edges — when a new fact
+                // contradicts an older fact about the same entity.
+                let supersedes_pairs = detect_supersedes_pairs(store, &facts, idx);
+                for (old_idx, new_fact_text) in &supersedes_pairs {
+                    hebbian.co_activate_with_relationship(
+                        *old_idx as u32,
+                        idx as u32,
+                        0.3, // lighter weight — recency boost handles the rest
+                        RelationshipType::Supersedes,
+                    );
+                    result.supersedes_created += 1;
+                    tracing::debug!(
+                        old_idx,
+                        new_parent_idx = idx,
+                        fact = %new_fact_text,
+                        "Supersedes edge created: new memory replaces old"
+                    );
                 }
             }
 
@@ -180,6 +216,203 @@ pub fn consolidate(
 
     result.duration_ms = start.elapsed().as_millis() as u64;
     result
+}
+
+// ===========================================================================
+// Relationship detection (KS18 Track 4)
+// ===========================================================================
+
+/// Detect a typed relationship from a fact string using regex patterns.
+///
+/// Scans the fact text for known relationship patterns:
+/// - "works at" / "employed at" / "joined" -> WorksAt
+/// - "lives in" / "moved to" / "based in" -> LivesIn
+/// - "prefers" / "likes" / "uses" / "switched to" -> PrefersTool
+/// - "part of" / "belongs to" / "member of" -> PartOf
+///
+/// Returns `None` if no pattern matches (edge will be plain co-activation).
+pub fn detect_relationship(fact: &str) -> Option<RelationshipType> {
+    let lower = fact.to_lowercase();
+
+    // WorksAt patterns: "X works at Y", "X employed at Y", "X joined Y"
+    let works_re = Regex::new(
+        r"(?i)(?:works?\s+at|employed\s+at|joined|works?\s+for|employed\s+by)\s+(.+)"
+    ).ok()?;
+    if let Some(caps) = works_re.captures(&lower) {
+        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        if let Some(e) = entity {
+            if !e.is_empty() {
+                return Some(RelationshipType::WorksAt(e));
+            }
+        }
+    }
+
+    // LivesIn patterns: "X lives in Y", "X moved to Y", "X based in Y"
+    let lives_re = Regex::new(
+        r"(?i)(?:lives?\s+in|moved\s+to|based\s+in|relocated\s+to|resides?\s+in)\s+(.+)"
+    ).ok()?;
+    if let Some(caps) = lives_re.captures(&lower) {
+        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        if let Some(e) = entity {
+            if !e.is_empty() {
+                return Some(RelationshipType::LivesIn(e));
+            }
+        }
+    }
+
+    // PrefersTool patterns: "X prefers Y", "X uses Y", "X likes Y", "X switched to Y"
+    let pref_re = Regex::new(
+        r"(?i)(?:prefers?\s+|likes?\s+|uses?\s+|switched\s+to\s+|chose\s+)(.+)"
+    ).ok()?;
+    if let Some(caps) = pref_re.captures(&lower) {
+        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        if let Some(e) = entity {
+            if !e.is_empty() {
+                return Some(RelationshipType::PrefersTool(e));
+            }
+        }
+    }
+
+    // PartOf patterns: "X part of Y", "X belongs to Y", "X member of Y"
+    let part_re = Regex::new(
+        r"(?i)(?:part\s+of|belongs?\s+to|member\s+of|component\s+of)\s+(.+)"
+    ).ok()?;
+    if let Some(caps) = part_re.captures(&lower) {
+        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        if let Some(e) = entity {
+            if !e.is_empty() {
+                return Some(RelationshipType::PartOf(e));
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract a clean entity string from a fact, using the ORIGINAL casing.
+///
+/// Takes the byte offsets from the lowercase match and maps them back to
+/// the original text, then trims trailing punctuation and whitespace.
+fn extract_entity(original: &str, start: usize, end: usize) -> String {
+    // Map byte offsets: the original and lowercase have the same byte length
+    // for ASCII-safe text. For safety, clamp to original length.
+    let start = start.min(original.len());
+    let end = end.min(original.len());
+    let raw = &original[start..end];
+    raw.trim()
+        .trim_end_matches(|c: char| c == '.' || c == ',' || c == ';' || c == '!' || c == '?')
+        .trim()
+        .to_string()
+}
+
+/// Detect entity-level contradictions between new facts and existing memories.
+///
+/// Looks for cases where a new fact about the same subject contradicts an
+/// older memory. For example:
+/// - Old: "Alex works at Google" + New: "Alex works at Meta" -> Supersedes
+/// - Old: "User lives in NYC" + New: "User moved to SF" -> Supersedes
+///
+/// Returns `(old_memory_index, new_fact_text)` pairs for each detected supersession.
+fn detect_supersedes_pairs(
+    store: &EchoStore,
+    new_facts: &[String],
+    _current_parent_idx: usize,
+) -> Vec<(usize, String)> {
+    let mut pairs = Vec::new();
+
+    for fact in new_facts {
+        let new_rel = match detect_relationship(fact) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        // Extract the relationship category and entity for comparison
+        let (new_category, _new_entity) = categorize_relationship(&new_rel);
+
+        // Scan existing enriched child memories for contradictions
+        for i in 0..store.len() {
+            let entry = match store.entry_at(i) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            // Only compare against enrichment-sourced entries (child facts)
+            if entry.source != "enrichment" {
+                continue;
+            }
+
+            // Detect the relationship in the old fact
+            let old_rel = match detect_relationship(&entry.content) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            let (old_category, _old_entity) = categorize_relationship(&old_rel);
+
+            // Same relationship category but different entity = contradiction
+            if new_category == old_category && new_rel != old_rel {
+                // Check if the facts share a subject (simple heuristic:
+                // first word or first two words overlap)
+                if subjects_overlap(fact, &entry.content) {
+                    pairs.push((i, fact.clone()));
+                    break; // One supersession per fact is enough
+                }
+            }
+        }
+    }
+
+    pairs
+}
+
+/// Categorize a relationship into a comparable key (ignoring the entity value).
+fn categorize_relationship(rel: &RelationshipType) -> (&str, Option<&str>) {
+    match rel {
+        RelationshipType::WorksAt(e) => ("works_at", Some(e.as_str())),
+        RelationshipType::LivesIn(e) => ("lives_in", Some(e.as_str())),
+        RelationshipType::PrefersTool(e) => ("prefers", Some(e.as_str())),
+        RelationshipType::PartOf(e) => ("part_of", Some(e.as_str())),
+        RelationshipType::CoActivation => ("co_activation", None),
+        RelationshipType::TemporalSequence => ("temporal", None),
+        RelationshipType::Supersedes => ("supersedes", None),
+        RelationshipType::Custom(e) => ("custom", Some(e.as_str())),
+    }
+}
+
+/// Check if two fact strings share a subject (simple heuristic).
+///
+/// Compares the first meaningful word(s) of each fact. Works for patterns like
+/// "Alex works at Google" vs "Alex works at Meta" (subject = "Alex").
+fn subjects_overlap(fact_a: &str, fact_b: &str) -> bool {
+    let subj_a = extract_subject(fact_a);
+    let subj_b = extract_subject(fact_b);
+    if subj_a.is_empty() || subj_b.is_empty() {
+        return false;
+    }
+    subj_a.to_lowercase() == subj_b.to_lowercase()
+}
+
+/// Extract the subject from a fact string (first word or "User").
+///
+/// Handles patterns like:
+/// - "Alex works at Google" -> "Alex"
+/// - "User prefers Rust" -> "User"
+/// - "The project is part of Bellkis" -> "project"
+fn extract_subject(fact: &str) -> String {
+    let trimmed = fact.trim();
+    // Skip common articles
+    let without_article = trimmed
+        .strip_prefix("The ")
+        .or_else(|| trimmed.strip_prefix("the "))
+        .or_else(|| trimmed.strip_prefix("A "))
+        .or_else(|| trimmed.strip_prefix("a "))
+        .unwrap_or(trimmed);
+
+    without_article
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(|c: char| !c.is_alphanumeric())
+        .to_string()
 }
 
 /// Detect and merge near-duplicate memory pairs.
@@ -680,5 +913,252 @@ mod tests {
             result.duration_ms < 10_000,
             "Should complete in under 10 seconds"
         );
+    }
+
+    // ---- Relationship detection tests (KS18 Track 4) ----
+
+    #[test]
+    fn detect_works_at() {
+        let rel = detect_relationship("Alex works at Google").expect("Should detect WorksAt");
+        match rel {
+            RelationshipType::WorksAt(entity) => {
+                assert_eq!(entity, "Google");
+            }
+            other => panic!("Expected WorksAt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_employed_at() {
+        let rel = detect_relationship("Sarah employed at Microsoft").expect("Should detect");
+        match rel {
+            RelationshipType::WorksAt(entity) => {
+                assert!(entity.contains("Microsoft"), "Got: {entity}");
+            }
+            other => panic!("Expected WorksAt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_joined() {
+        let rel = detect_relationship("Lior joined Anthropic last year").expect("Should detect");
+        match rel {
+            RelationshipType::WorksAt(entity) => {
+                assert!(entity.contains("Anthropic"), "Got: {entity}");
+            }
+            other => panic!("Expected WorksAt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_lives_in() {
+        let rel = detect_relationship("User lives in Tel Aviv").expect("Should detect LivesIn");
+        match rel {
+            RelationshipType::LivesIn(entity) => {
+                assert_eq!(entity, "Tel Aviv");
+            }
+            other => panic!("Expected LivesIn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_moved_to() {
+        let rel = detect_relationship("Alex moved to San Francisco").expect("Should detect");
+        match rel {
+            RelationshipType::LivesIn(entity) => {
+                assert!(entity.contains("San Francisco"), "Got: {entity}");
+            }
+            other => panic!("Expected LivesIn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_based_in() {
+        let rel = detect_relationship("Company based in New York").expect("Should detect");
+        match rel {
+            RelationshipType::LivesIn(entity) => {
+                assert!(entity.contains("New York"), "Got: {entity}");
+            }
+            other => panic!("Expected LivesIn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_prefers_tool() {
+        let rel = detect_relationship("User prefers Rust for backend").expect("Should detect");
+        match rel {
+            RelationshipType::PrefersTool(entity) => {
+                assert!(entity.contains("Rust"), "Got: {entity}");
+            }
+            other => panic!("Expected PrefersTool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_uses_tool() {
+        let rel = detect_relationship("Developer uses TypeScript daily").expect("Should detect");
+        match rel {
+            RelationshipType::PrefersTool(entity) => {
+                assert!(entity.contains("TypeScript"), "Got: {entity}");
+            }
+            other => panic!("Expected PrefersTool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_switched_to() {
+        let rel = detect_relationship("Team switched to Tauri from Electron").expect("Should detect");
+        match rel {
+            RelationshipType::PrefersTool(entity) => {
+                assert!(entity.contains("Tauri"), "Got: {entity}");
+            }
+            other => panic!("Expected PrefersTool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_part_of() {
+        let rel = detect_relationship("ShrimPK is part of Bellkis ecosystem").expect("Should detect");
+        match rel {
+            RelationshipType::PartOf(entity) => {
+                assert!(entity.contains("Bellkis"), "Got: {entity}");
+            }
+            other => panic!("Expected PartOf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_belongs_to() {
+        let rel = detect_relationship("Module belongs to the core crate").expect("Should detect");
+        match rel {
+            RelationshipType::PartOf(entity) => {
+                assert!(entity.contains("core"), "Got: {entity}");
+            }
+            other => panic!("Expected PartOf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_member_of() {
+        let rel = detect_relationship("Alice is a member of the board").expect("Should detect");
+        match rel {
+            RelationshipType::PartOf(entity) => {
+                assert!(entity.contains("board"), "Got: {entity}");
+            }
+            other => panic!("Expected PartOf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_no_relationship() {
+        assert!(
+            detect_relationship("The sky is blue today").is_none(),
+            "Should return None for non-matching text"
+        );
+        assert!(
+            detect_relationship("").is_none(),
+            "Should return None for empty text"
+        );
+        assert!(
+            detect_relationship("Hello world").is_none(),
+            "Should return None for generic text"
+        );
+    }
+
+    #[test]
+    fn detect_case_insensitive() {
+        let rel = detect_relationship("USER WORKS AT OPENAI").expect("Should be case-insensitive");
+        match rel {
+            RelationshipType::WorksAt(entity) => {
+                assert!(entity.contains("OPENAI"), "Should preserve original case, got: {entity}");
+            }
+            other => panic!("Expected WorksAt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_strips_trailing_punctuation() {
+        let rel = detect_relationship("User works at Google.").expect("Should detect");
+        match rel {
+            RelationshipType::WorksAt(entity) => {
+                assert_eq!(entity, "Google", "Should strip trailing period");
+            }
+            other => panic!("Expected WorksAt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subjects_overlap_same_subject() {
+        assert!(subjects_overlap("Alex works at Google", "Alex works at Meta"));
+        assert!(subjects_overlap("User prefers Rust", "User uses Python"));
+    }
+
+    #[test]
+    fn subjects_overlap_different_subject() {
+        assert!(!subjects_overlap("Alex works at Google", "Sarah works at Meta"));
+        assert!(!subjects_overlap("", "User lives in NYC"));
+    }
+
+    #[test]
+    fn extract_subject_strips_articles() {
+        assert_eq!(extract_subject("The project is part of Bellkis"), "project");
+        assert_eq!(extract_subject("Alex works at Google"), "Alex");
+        assert_eq!(extract_subject("a small module"), "small");
+    }
+
+    #[test]
+    fn detect_supersedes_finds_contradictions() {
+        let mut store = EchoStore::new();
+
+        // Old enrichment child: "Alex works at Google"
+        let mut old_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        old_child.source = "enrichment".to_string();
+        old_child.enriched = true;
+        store.add(old_child);
+
+        // Some other unrelated memory
+        store.add(make_entry("The weather is nice", vec![0.0, 1.0, 0.0]));
+
+        // New facts extracted from a new parent
+        let new_facts = vec!["Alex works at Meta".to_string()];
+
+        let pairs = detect_supersedes_pairs(&store, &new_facts, 2);
+        assert_eq!(pairs.len(), 1, "Should detect one supersession");
+        assert_eq!(pairs[0].0, 0, "Should reference old child at index 0");
+        assert_eq!(pairs[0].1, "Alex works at Meta");
+    }
+
+    #[test]
+    fn detect_supersedes_no_contradiction() {
+        let mut store = EchoStore::new();
+
+        // Old enrichment child: "Alex works at Google"
+        let mut old_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        old_child.source = "enrichment".to_string();
+        old_child.enriched = true;
+        store.add(old_child);
+
+        // New fact about a different person
+        let new_facts = vec!["Sarah works at Meta".to_string()];
+
+        let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
+        assert!(pairs.is_empty(), "Different subjects should not trigger supersedes");
+    }
+
+    #[test]
+    fn detect_supersedes_same_value_no_contradiction() {
+        let mut store = EchoStore::new();
+
+        // Old enrichment child: "Alex works at Google"
+        let mut old_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        old_child.source = "enrichment".to_string();
+        old_child.enriched = true;
+        store.add(old_child);
+
+        // Same fact repeated — should NOT create a supersedes edge
+        let new_facts = vec!["Alex works at Google".to_string()];
+
+        let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
+        assert!(pairs.is_empty(), "Same fact should not trigger supersedes");
     }
 }

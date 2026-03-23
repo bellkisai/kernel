@@ -39,7 +39,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_tool_returns_error() {
-        let config = EchoConfig::default();
+        let _config = EchoConfig::default();
         // We can't easily create an EchoEngine in tests without fastembed,
         // but we can test the unknown tool path since it doesn't use the engine.
         // For now, just verify the error message format.

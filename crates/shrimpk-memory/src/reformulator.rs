@@ -17,16 +17,23 @@ struct ReformulationRule {
     template: &'static str,
 }
 
+/// Compiled regex pattern for detecting temporal keywords in memory text.
+struct TemporalPattern {
+    regex: Regex,
+}
+
 /// Reformulates natural-language memory text into structured forms
 /// that produce higher cosine similarity scores during echo recall.
 ///
 /// Example:
 /// - "I prefer FastAPI for REST APIs" -> "Preference: FastAPI for REST APIs"
 /// - "I use Neovim" -> "Tool/technology: Neovim"
+/// - "Yesterday I switched to Neovim" -> "Temporal: yesterday — Yesterday I switched to Neovim"
 ///
 /// If no pattern matches, returns `None` (the original text is kept as-is).
 pub struct MemoryReformulator {
     rules: Vec<ReformulationRule>,
+    temporal_patterns: Vec<TemporalPattern>,
 }
 
 impl MemoryReformulator {
@@ -80,7 +87,42 @@ impl MemoryReformulator {
             })
             .collect();
 
-        Self { rules }
+        // Temporal keyword patterns (KS18 Track 3).
+        // These detect time-related phrases in memory text so that the
+        // reformulated text carries an explicit temporal prefix, improving
+        // embedding quality for temporal reasoning queries.
+        let temporal_defs: Vec<&str> = vec![
+            r"(?i)\byesterday\b",
+            r"(?i)\btoday\b",
+            r"(?i)\blast\s+week\b",
+            r"(?i)\blast\s+month\b",
+            r"(?i)\blast\s+year\b",
+            r"(?i)\brecently\b",
+            r"(?i)\bjust\s+now\b",
+            r"(?i)\bthis\s+morning\b",
+            r"(?i)\bthis\s+week\b",
+            r"(?i)\bthis\s+month\b",
+            r"(?i)\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+            r"(?i)\bin\s+20\d{2}\b",
+            r"(?i)\b\d+\s+days?\s+ago\b",
+            r"(?i)\b\d+\s+weeks?\s+ago\b",
+            r"(?i)\b\d+\s+months?\s+ago\b",
+        ];
+
+        let temporal_patterns = temporal_defs
+            .into_iter()
+            .map(|pat| {
+                let regex = Regex::new(pat).unwrap_or_else(|e| {
+                    panic!("Bug: temporal pattern '{pat}' failed to compile: {e}")
+                });
+                TemporalPattern { regex }
+            })
+            .collect();
+
+        Self {
+            rules,
+            temporal_patterns,
+        }
     }
 
     /// Try to reformulate text into a structured form for better embedding.
@@ -88,12 +130,18 @@ impl MemoryReformulator {
     /// Returns `Some(reformulated)` if a pattern matched, `None` otherwise.
     /// The caller should embed the reformulated text but store the original
     /// for display to the user.
+    ///
+    /// Priority order:
+    /// 1. Structural reformulation rules (e.g., "I prefer X" -> "Preference: X")
+    /// 2. Temporal keyword tagging (e.g., "Yesterday I ..." -> "Temporal: yesterday — ...")
+    /// 3. None (no reformulation)
     pub fn reformulate(&self, text: &str) -> Option<String> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return None;
         }
 
+        // First: try structural reformulation rules (highest value)
         for rule in &self.rules {
             if rule.regex.is_match(trimmed) {
                 let result = rule.regex.replace(trimmed, rule.template).to_string();
@@ -104,6 +152,26 @@ impl MemoryReformulator {
             }
         }
 
+        // Second: try temporal keyword tagging (KS18 Track 3)
+        if let Some(keyword) = self.detect_temporal_keyword(trimmed) {
+            return Some(format!("Temporal: {keyword} — {trimmed}"));
+        }
+
+        None
+    }
+
+    /// Detect a temporal keyword in the given text.
+    ///
+    /// Returns the matched keyword string (lowercased) if found, `None` otherwise.
+    /// Used by `reformulate` to tag temporal memories with a structured prefix,
+    /// which improves embedding quality for temporal reasoning queries.
+    pub fn detect_temporal_keyword(&self, text: &str) -> Option<String> {
+        for pattern in &self.temporal_patterns {
+            if let Some(m) = pattern.regex.find(text) {
+                // Return the matched keyword, trimmed and lowercased
+                return Some(m.as_str().trim().to_lowercase());
+            }
+        }
         None
     }
 
@@ -449,5 +517,154 @@ mod tests {
             r.categorize("CURRENTLY BUILDING something"),
             MemoryCategory::ActiveProject
         );
+    }
+
+    // --- Temporal keyword detection tests (KS18 Track 3) ---
+
+    #[test]
+    fn temporal_detect_yesterday() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("Yesterday I went to the store"),
+            Some("yesterday".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_last_week() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("Last week I attended a conference"),
+            Some("last week".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_last_month() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("I switched jobs last month"),
+            Some("last month".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_recently() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("I recently started using Rust"),
+            Some("recently".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_in_month() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("In January I moved to a new city"),
+            Some("in january".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_in_year() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("In 2025 I started my company"),
+            Some("in 2025".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_days_ago() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("3 days ago I finished the project"),
+            Some("3 days ago".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_weeks_ago() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("2 weeks ago I submitted the paper"),
+            Some("2 weeks ago".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_this_morning() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("This morning I fixed the CI pipeline"),
+            Some("this morning".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_today() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("Today I deployed the new version"),
+            Some("today".to_string())
+        );
+    }
+
+    #[test]
+    fn temporal_detect_none() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("I prefer Rust for systems programming"),
+            None
+        );
+    }
+
+    #[test]
+    fn temporal_detect_case_insensitive() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.detect_temporal_keyword("YESTERDAY I changed my mind"),
+            Some("yesterday".to_string())
+        );
+    }
+
+    // --- Temporal reformulation tests (KS18 Track 3) ---
+
+    #[test]
+    fn reformulate_temporal_yesterday() {
+        let r = MemoryReformulator::new();
+        // "Yesterday I switched to Neovim" doesn't match structural rules,
+        // so temporal tagging should kick in.
+        assert_eq!(
+            r.reformulate("Yesterday I switched to Neovim"),
+            Some("Temporal: yesterday — Yesterday I switched to Neovim".to_string())
+        );
+    }
+
+    #[test]
+    fn reformulate_temporal_last_month() {
+        let r = MemoryReformulator::new();
+        assert_eq!(
+            r.reformulate("Last month I attended a Rust conference in Berlin"),
+            Some("Temporal: last month — Last month I attended a Rust conference in Berlin".to_string())
+        );
+    }
+
+    #[test]
+    fn reformulate_structural_takes_priority_over_temporal() {
+        let r = MemoryReformulator::new();
+        // "I prefer X" matches a structural rule — temporal should NOT override.
+        // "I prefer" does not contain temporal keywords anyway, but test the priority.
+        assert_eq!(
+            r.reformulate("I prefer dark mode"),
+            Some("Preference: dark mode".to_string())
+        );
+    }
+
+    #[test]
+    fn reformulate_temporal_no_match_returns_none() {
+        let r = MemoryReformulator::new();
+        assert_eq!(r.reformulate("Random text with no pattern"), None);
     }
 }

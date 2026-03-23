@@ -13,6 +13,38 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Typed relationship between two memories in the Hebbian graph.
+///
+/// Enhances co-activation edges with semantic meaning. The default
+/// `CoActivation` variant preserves existing behavior. Typed variants
+/// are detected during sleep consolidation via regex-based entity
+/// extraction from fact text.
+///
+/// The `Supersedes` variant is especially important for knowledge
+/// updates: when a newer memory contradicts an older one, the newer
+/// memory gets a stronger echo boost (freshness signal).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RelationshipType {
+    /// Default — memories co-occurred in an echo result set.
+    CoActivation,
+    /// "X works at Y" / "X employed at Y" / "X joined Y".
+    WorksAt(String),
+    /// "X lives in Y" / "X moved to Y" / "X based in Y".
+    LivesIn(String),
+    /// "X prefers Y" / "X uses Y" / "X likes Y" / "X switched to Y".
+    PrefersTool(String),
+    /// "X part of Y" / "X belongs to Y" / "X member of Y".
+    PartOf(String),
+    /// Event A happened before Event B (temporal ordering).
+    TemporalSequence,
+    /// New information replaces old information (knowledge update).
+    /// The edge points from the OLD memory to the NEW memory.
+    /// During echo ranking, the newer memory gets an extra boost.
+    Supersedes,
+    /// Extensible catch-all for domain-specific relationships.
+    Custom(String),
+}
+
 /// A single co-activation edge between two memories.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CoActivation {
@@ -22,6 +54,12 @@ pub struct CoActivation {
     pub last_activated: f64,
     /// How many times this pair has co-activated.
     pub activation_count: u32,
+    /// Optional typed relationship between the two memories.
+    /// `None` for legacy edges (treated as `CoActivation` during ranking).
+    /// New edges created by co_activate() default to `None` (pure co-activation).
+    /// Typed relationships are set by the consolidator during sleep consolidation.
+    #[serde(default)]
+    pub relationship: Option<RelationshipType>,
 }
 
 /// Sparse co-activation graph implementing Hebbian learning.
@@ -114,6 +152,7 @@ impl HebbianGraph {
             weight: 0.0,
             last_activated: now,
             activation_count: 0,
+            relationship: None,
         });
 
         // Apply exponential decay since last activation
@@ -145,6 +184,7 @@ impl HebbianGraph {
             weight: 0.0,
             last_activated: timestamp,
             activation_count: 0,
+            relationship: None,
         });
 
         let elapsed = timestamp - entry.last_activated;
@@ -159,6 +199,57 @@ impl HebbianGraph {
 
         self.ensure_adjacency(id_a, id_b);
         self.ensure_adjacency(id_b, id_a);
+    }
+
+    /// Record co-activation of two memories with a typed relationship.
+    ///
+    /// Same as [`co_activate`] but also sets the relationship type on the edge.
+    /// If the edge already exists, the relationship is updated (overwritten).
+    pub fn co_activate_with_relationship(
+        &mut self,
+        id_a: u32,
+        id_b: u32,
+        strength: f64,
+        relationship: RelationshipType,
+    ) {
+        self.co_activate(id_a, id_b, strength);
+        let key = Self::key(id_a, id_b);
+        if let Some(entry) = self.edges.get_mut(&key) {
+            entry.relationship = Some(relationship);
+        }
+    }
+
+    /// Set or update the relationship type on an existing edge.
+    ///
+    /// Returns `true` if the edge exists and was updated, `false` if no edge
+    /// exists between the two nodes.
+    pub fn set_relationship(
+        &mut self,
+        id_a: u32,
+        id_b: u32,
+        relationship: RelationshipType,
+    ) -> bool {
+        let key = Self::key(id_a, id_b);
+        if let Some(entry) = self.edges.get_mut(&key) {
+            entry.relationship = Some(relationship);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the relationship type for an edge, if one exists.
+    ///
+    /// Returns `None` if the edge doesn't exist or has no typed relationship.
+    pub fn get_relationship(&self, id_a: u32, id_b: u32) -> Option<&RelationshipType> {
+        let key = Self::key(id_a, id_b);
+        self.edges.get(&key).and_then(|co| co.relationship.as_ref())
+    }
+
+    /// Get the raw co-activation edge between two memories, if it exists.
+    pub fn get_edge(&self, id_a: u32, id_b: u32) -> Option<&CoActivation> {
+        let key = Self::key(id_a, id_b);
+        self.edges.get(&key)
     }
 
     /// Get the current (decayed) weight between two memories.
@@ -219,6 +310,38 @@ impl HebbianGraph {
                     let decayed = co.weight * (-self.lambda * elapsed).exp();
                     if decayed >= min_weight {
                         Some((neighbor, decayed))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Get associations with their relationship types, for use in typed echo ranking.
+    ///
+    /// Returns `(neighbor_id, decayed_weight, Option<&RelationshipType>)` triples
+    /// where weight >= `min_weight`.
+    pub fn get_associations_typed(
+        &self,
+        id: u32,
+        min_weight: f64,
+    ) -> Vec<(u32, f64, Option<&RelationshipType>)> {
+        let now = Self::now();
+        let neighbors = match self.adjacency.get(&id) {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+
+        neighbors
+            .iter()
+            .filter_map(|&neighbor| {
+                let key = Self::key(id, neighbor);
+                self.edges.get(&key).and_then(|co| {
+                    let elapsed = now - co.last_activated;
+                    let decayed = co.weight * (-self.lambda * elapsed).exp();
+                    if decayed >= min_weight {
+                        Some((neighbor, decayed, co.relationship.as_ref()))
                     } else {
                         None
                     }
@@ -640,6 +763,211 @@ mod tests {
         assert!(
             (w2 - 0.8).abs() < 0.01,
             "Weight should be ~0.8 after two activations, got {w2}"
+        );
+    }
+
+    // ---- Typed relationship edge tests (KS18 Track 4) ----
+
+    #[test]
+    fn co_activate_default_has_no_relationship() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate(1, 2, 0.5);
+
+        let edge = graph.get_edge(1, 2).expect("Edge should exist");
+        assert!(
+            edge.relationship.is_none(),
+            "Default co_activate should have no relationship"
+        );
+        assert!(
+            graph.get_relationship(1, 2).is_none(),
+            "get_relationship should return None for default edges"
+        );
+    }
+
+    #[test]
+    fn co_activate_with_relationship_sets_type() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate_with_relationship(
+            1,
+            2,
+            0.5,
+            RelationshipType::WorksAt("Google".to_string()),
+        );
+
+        let rel = graph
+            .get_relationship(1, 2)
+            .expect("Relationship should be set");
+        assert_eq!(*rel, RelationshipType::WorksAt("Google".to_string()));
+
+        // Weight should still be there
+        let w = graph.get_weight(1, 2);
+        assert!(w > 0.4, "Weight should be close to 0.5, got {w}");
+    }
+
+    #[test]
+    fn set_relationship_updates_existing_edge() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate(1, 2, 0.5);
+
+        // Initially no relationship
+        assert!(graph.get_relationship(1, 2).is_none());
+
+        // Set relationship
+        let updated = graph.set_relationship(1, 2, RelationshipType::Supersedes);
+        assert!(updated, "Should return true for existing edge");
+
+        let rel = graph.get_relationship(1, 2).expect("Should have relationship");
+        assert_eq!(*rel, RelationshipType::Supersedes);
+    }
+
+    #[test]
+    fn set_relationship_returns_false_for_missing_edge() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        let updated = graph.set_relationship(1, 2, RelationshipType::Supersedes);
+        assert!(!updated, "Should return false when no edge exists");
+    }
+
+    #[test]
+    fn relationship_survives_reinforcement() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+
+        // Create edge with relationship
+        graph.co_activate_with_relationship(
+            1,
+            2,
+            0.5,
+            RelationshipType::LivesIn("Tel Aviv".to_string()),
+        );
+
+        // Reinforce with plain co_activate (should NOT clear relationship)
+        graph.co_activate(1, 2, 0.3);
+
+        let rel = graph
+            .get_relationship(1, 2)
+            .expect("Relationship should survive reinforcement");
+        assert_eq!(*rel, RelationshipType::LivesIn("Tel Aviv".to_string()));
+    }
+
+    #[test]
+    fn relationship_serialization_roundtrip() {
+        let types = vec![
+            RelationshipType::CoActivation,
+            RelationshipType::WorksAt("Anthropic".to_string()),
+            RelationshipType::LivesIn("San Francisco".to_string()),
+            RelationshipType::PrefersTool("Rust".to_string()),
+            RelationshipType::PartOf("Bellkis".to_string()),
+            RelationshipType::TemporalSequence,
+            RelationshipType::Supersedes,
+            RelationshipType::Custom("mentor-of".to_string()),
+        ];
+
+        for rel_type in &types {
+            let json = serde_json::to_string(rel_type)
+                .unwrap_or_else(|e| panic!("Failed to serialize {rel_type:?}: {e}"));
+            let deserialized: RelationshipType = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("Failed to deserialize {rel_type:?}: {e}"));
+            assert_eq!(*rel_type, deserialized, "Roundtrip failed for {rel_type:?}");
+        }
+    }
+
+    #[test]
+    fn edge_with_relationship_serialization_roundtrip() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("hebbian_rel.json");
+
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate_with_relationship(
+            1,
+            2,
+            0.8,
+            RelationshipType::WorksAt("Google".to_string()),
+        );
+        graph.co_activate_with_relationship(3, 4, 0.6, RelationshipType::Supersedes);
+        graph.co_activate(5, 6, 0.4); // plain edge — no relationship
+
+        graph.save(&path).expect("Should save");
+
+        let loaded =
+            HebbianGraph::load(&path, HALF_LIFE, PRUNE_THRESHOLD).expect("Should load");
+
+        // Check typed edges survived
+        let rel_12 = loaded
+            .get_relationship(1, 2)
+            .expect("Relationship (1,2) should persist");
+        assert_eq!(*rel_12, RelationshipType::WorksAt("Google".to_string()));
+
+        let rel_34 = loaded
+            .get_relationship(3, 4)
+            .expect("Relationship (3,4) should persist");
+        assert_eq!(*rel_34, RelationshipType::Supersedes);
+
+        // Plain edge should have no relationship
+        assert!(
+            loaded.get_relationship(5, 6).is_none(),
+            "Plain edge should have no relationship after load"
+        );
+    }
+
+    #[test]
+    fn legacy_edges_deserialize_without_relationship() {
+        // Simulate loading a legacy JSON that has no `relationship` field.
+        // The #[serde(default)] attribute should make it deserialize as None.
+        let legacy_json = r#"{
+            "edges":[[[1,2],{"weight":0.5,"last_activated":1000000.0,"activation_count":3}]],
+            "activation_count":3
+        }"#;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("legacy_hebbian.json");
+        std::fs::write(&path, legacy_json).expect("Write legacy JSON");
+
+        let loaded =
+            HebbianGraph::load(&path, HALF_LIFE, PRUNE_THRESHOLD).expect("Should load legacy");
+        assert_eq!(loaded.len(), 1);
+
+        // The edge should exist but have no relationship (legacy compat)
+        let edge = loaded.get_edge(1, 2).expect("Edge should exist");
+        assert!(
+            edge.relationship.is_none(),
+            "Legacy edges should have relationship = None"
+        );
+    }
+
+    #[test]
+    fn get_associations_typed_returns_relationships() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate_with_relationship(
+            1,
+            2,
+            1.0,
+            RelationshipType::WorksAt("ACME".to_string()),
+        );
+        graph.co_activate_with_relationship(1, 3, 0.8, RelationshipType::Supersedes);
+        graph.co_activate(1, 4, 0.5); // no typed relationship
+
+        let assocs = graph.get_associations_typed(1, 0.1);
+        assert_eq!(assocs.len(), 3, "Should return all three associations");
+
+        // Find the typed associations
+        let works_at = assocs.iter().find(|(id, _, _)| *id == 2);
+        let supersedes = assocs.iter().find(|(id, _, _)| *id == 3);
+        let plain = assocs.iter().find(|(id, _, _)| *id == 4);
+
+        assert!(works_at.is_some(), "Should find WorksAt association");
+        assert_eq!(
+            *works_at.unwrap().2.unwrap(),
+            RelationshipType::WorksAt("ACME".to_string())
+        );
+
+        assert!(supersedes.is_some(), "Should find Supersedes association");
+        assert_eq!(
+            *supersedes.unwrap().2.unwrap(),
+            RelationshipType::Supersedes
+        );
+
+        assert!(plain.is_some(), "Should find plain association");
+        assert!(
+            plain.unwrap().2.is_none(),
+            "Plain association should have no relationship"
         );
     }
 }

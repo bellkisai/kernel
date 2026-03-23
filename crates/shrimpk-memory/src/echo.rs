@@ -113,6 +113,24 @@ impl EchoEngine {
         })
     }
 
+    /// Explicitly shut down the engine, dropping it in a blocking context.
+    ///
+    /// This avoids the Tokio runtime nesting panic caused by `ort`'s internal
+    /// runtime when `EchoEngine` is implicitly dropped inside an async context.
+    /// Call this instead of relying on implicit drop in async tests/code.
+    pub async fn shutdown(self) {
+        tokio::task::spawn_blocking(move || drop(self))
+            .await
+            .expect("shutdown task panicked");
+    }
+
+    /// Arc variant of shutdown for use with shared engine references.
+    pub async fn shutdown_arc(self: Arc<Self>) {
+        tokio::task::spawn_blocking(move || drop(self))
+            .await
+            .expect("shutdown task panicked");
+    }
+
     /// Store a new memory.
     ///
     /// Pipeline:
@@ -430,26 +448,57 @@ impl EchoEngine {
             }
         }
 
-        // 7b. Second pass — compute Hebbian boost for each result
+        // 7b. Second pass — compute Hebbian boost for each result.
+        //     Enhanced with typed relationship awareness (KS18 Track 4):
+        //     - Supersedes edges: the NEWER memory gets an extra boost (knowledge updates)
+        //     - Typed relationships: small extra boost when relationship type is relevant
         let hebbian_boosts: Vec<f64> = {
             let hebbian = self.hebbian.read().await;
             top.iter()
                 .map(|&(idx, _)| {
                     let idx = idx as u32;
-                    // Sum Hebbian weights with other results in this set
-                    let boost: f64 = top_indices
-                        .iter()
-                        .filter(|&&other| other != idx)
-                        .map(|&other| hebbian.get_weight(idx, other))
-                        .sum();
-                    // Cap Hebbian boost at 0.3 — similarity should dominate
-                    boost.min(0.3)
+                    let mut boost: f64 = 0.0;
+
+                    for &other in top_indices.iter().filter(|&&o| o != idx) {
+                        let weight = hebbian.get_weight(idx, other);
+                        if weight <= 0.0 {
+                            continue;
+                        }
+                        boost += weight;
+
+                        // Typed relationship bonus
+                        if let Some(rel) = hebbian.get_relationship(idx, other) {
+                            match rel {
+                                // Supersedes: the node with the HIGHER index is newer
+                                // (added later to the store). Give it an extra boost.
+                                crate::hebbian::RelationshipType::Supersedes => {
+                                    if idx > other {
+                                        // This node is the newer memory — boost it
+                                        boost += 0.1;
+                                    }
+                                    // If idx < other, the OTHER node is newer — no boost for us
+                                }
+                                // Any typed (non-CoActivation) relationship gets a small
+                                // relevance bonus — these edges carry semantic meaning
+                                // beyond mere co-occurrence.
+                                crate::hebbian::RelationshipType::CoActivation => {}
+                                _ => {
+                                    boost += 0.05;
+                                }
+                            }
+                        }
+                    }
+
+                    // Cap Hebbian boost at 0.4 (raised from 0.3 to accommodate
+                    // relationship bonuses without squeezing co-activation boost)
+                    boost.min(0.4)
                 })
                 .collect()
         };
 
-        // 7c. Build EchoResult vec with final_score = similarity + hebbian_boost + category decay
+        // 7c. Build EchoResult vec with final_score = similarity + hebbian + recency, scaled by decay
         let now = Utc::now();
+        let recency_weight = self.config.recency_weight as f64;
         let mut results: Vec<EchoResult> = top
             .iter()
             .zip(hebbian_boosts.iter())
@@ -461,11 +510,18 @@ impl EchoEngine {
                 let half_life = entry.category.half_life_secs();
                 let decay = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
 
+                // Recency boost (KS18 Track 3): newer memories get a small advantage.
+                // Formula: recency_weight / (1.0 + days_since_stored)
+                // At 0 days: full weight (0.05). At 7 days: 0.00625. At 30 days: ~0.0016.
+                // This helps Knowledge Update queries surface corrections over stale facts.
+                let days_since_stored = age_secs / 86400.0;
+                let recency_boost = recency_weight / (1.0 + days_since_stored);
+
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
                     content: entry.display_content().to_string(),
                     similarity: score,
-                    final_score: (score as f64 + boost) * decay,
+                    final_score: (score as f64 + boost + recency_boost) * decay,
                     source: entry.source.clone(),
                     echoed_at: now,
                 })
@@ -783,6 +839,8 @@ impl EchoEngine {
                     merged = result.duplicates_merged,
                     bloom = result.bloom_rebuilt,
                     decayed = result.echo_counts_decayed,
+                    relationships = result.relationships_created,
+                    supersedes = result.supersedes_created,
                     ms = result.duration_ms,
                     "Consolidation complete"
                 );
@@ -967,5 +1025,87 @@ mod tests {
 
         let result = engine.store("third", "test").await;
         assert!(result.is_err(), "Should reject when at capacity");
+    }
+
+    // --- Recency boost tests (KS18 Track 3) ---
+
+    #[tokio::test]
+    #[ignore = "requires fastembed model download"]
+    async fn recency_boost_newer_memory_ranks_higher() {
+        // Two semantically similar memories about the same topic.
+        // The newer one (stored later) should rank higher due to recency boost.
+        let mut config = test_config();
+        config.recency_weight = 0.05;
+
+        let engine = EchoEngine::new(config).expect("Should init");
+
+        // Store old fact
+        engine
+            .store("I work as an engineer at Google on the Cloud team", "old_session")
+            .await
+            .expect("Should store old");
+
+        // Manually backdate the old memory's created_at
+        {
+            let mut store = engine.store.write().await;
+            if let Some(entry) = store.entry_at_mut(0) {
+                entry.created_at = Utc::now() - chrono::Duration::days(30);
+            }
+        }
+
+        // Store new correction (created_at = now, so recency boost is maximal)
+        engine
+            .store("I left Google. I now work at Meta on the infrastructure team", "new_session")
+            .await
+            .expect("Should store new");
+
+        let results = engine
+            .echo("Where do I currently work?", 5)
+            .await
+            .expect("Should echo");
+
+        assert!(results.len() >= 2, "Should have at least 2 results");
+
+        // Find both memories in results
+        let meta_result = results.iter().find(|r| r.content.contains("Meta"));
+        let google_result = results.iter().find(|r| r.content.contains("Google"));
+
+        assert!(meta_result.is_some(), "Meta memory should surface");
+        assert!(google_result.is_some(), "Google memory should surface");
+
+        // Newer memory (Meta) should have a higher final_score than older (Google)
+        let meta_score = meta_result.unwrap().final_score;
+        let google_score = google_result.unwrap().final_score;
+        assert!(
+            meta_score > google_score,
+            "Newer memory (Meta, score={meta_score:.6}) should rank higher than older (Google, score={google_score:.6})"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires fastembed model download"]
+    async fn recency_boost_disabled_when_zero() {
+        // When recency_weight is 0, no recency boost should be applied.
+        let mut config = test_config();
+        config.recency_weight = 0.0;
+
+        let engine = EchoEngine::new(config).expect("Should init");
+        engine
+            .store("Test memory for recency", "test")
+            .await
+            .expect("Should store");
+
+        let results = engine
+            .echo("test memory recency", 5)
+            .await
+            .expect("Should echo");
+
+        assert!(!results.is_empty(), "Should have results");
+        // With recency_weight=0 and a fresh memory, score should just be
+        // similarity * decay (decay ~1.0 for fresh memory) + hebbian (0 with single result)
+        let result = &results[0];
+        // Just verify it doesn't crash and returns a sane score
+        assert!(result.final_score > 0.0);
+        assert!(result.final_score <= 2.0, "Score should be reasonable");
     }
 }

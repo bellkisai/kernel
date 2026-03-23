@@ -27,9 +27,9 @@ pub mod similarity;
 pub mod store;
 
 // Re-export the main types
-pub use consolidation::ConsolidationResult;
+pub use consolidation::{detect_relationship, ConsolidationResult};
 pub use echo::EchoEngine;
-pub use hebbian::HebbianGraph;
+pub use hebbian::{HebbianGraph, RelationshipType};
 pub use pii::PiiFilter;
 pub use reformulator::MemoryReformulator;
 pub use shrimpk_core::{

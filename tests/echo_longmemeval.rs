@@ -15,6 +15,11 @@
 //!     cargo test --test echo_longmemeval -- --ignored --nocapture
 //!
 //! The model is cached after first download, so subsequent runs are fast.
+//!
+//! **ort runtime fix**: Every test creates `EchoEngine` OUTSIDE the tokio
+//! runtime, then uses `block_on` only for async store/echo operations.
+//! This avoids the ort 2.0.0-rc.11 panic when its internal runtime is
+//! dropped while another tokio runtime is active.
 
 use shrimpk_core::EchoConfig;
 use shrimpk_memory::EchoEngine;
@@ -57,6 +62,77 @@ fn top_n_contains(results: &[shrimpk_core::EchoResult], n: usize, needle: &str) 
 }
 
 // ===========================================================================
+// Sync seed helper
+// ===========================================================================
+
+/// Seed the engine with a diverse user profile across multiple sessions.
+/// Must be called with an engine created OUTSIDE the tokio runtime.
+fn seed_user_profile_sync(engine: &EchoEngine, rt: &tokio::runtime::Runtime) {
+    rt.block_on(async {
+        // Session 1: personal basics
+        let session1 = [
+            "My name is Alex Chen and I'm 32 years old",
+            "I was born in Taipei, Taiwan but grew up in Vancouver, Canada",
+            "I have a golden retriever named Pixel who is 4 years old",
+            "My partner's name is Jordan and we've been together for 6 years",
+            "I'm allergic to shellfish and cats",
+        ];
+
+        // Session 2: work and education
+        let session2 = [
+            "I work as a senior backend engineer at Stripe in San Francisco",
+            "I graduated from the University of British Columbia with a CS degree in 2015",
+            "Before Stripe I worked at Shopify for 3 years on their payments team",
+            "My team at Stripe works on the billing infrastructure service",
+            "I'm being considered for a staff engineer promotion next quarter",
+        ];
+
+        // Session 3: technical preferences
+        let session3 = [
+            "I prefer Rust for systems programming and Go for microservices",
+            "My IDE is Neovim with LazyVim config and Catppuccin theme",
+            "For databases I use PostgreSQL for OLTP and ClickHouse for analytics",
+            "I run NixOS on my personal machines and macOS at work",
+            "My dotfiles are managed with chezmoi and stored on GitHub",
+        ];
+
+        // Session 4: hobbies and lifestyle
+        let session4 = [
+            "I practice Brazilian jiu-jitsu three times a week at a Gracie gym",
+            "I'm learning Japanese and currently at JLPT N3 level",
+            "I collect mechanical keyboards and my daily driver is a Keychron Q1 with Boba U4T switches",
+            "I brew pour-over coffee every morning using a Hario V60 and light roast beans",
+            "My favorite cuisine is Thai food, especially pad see ew and massaman curry",
+        ];
+
+        // Session 5: travel and goals
+        let session5 = [
+            "I visited Tokyo last November and stayed in Shinjuku for two weeks",
+            "My next trip is planned for Barcelona in April 2027",
+            "My long-term goal is to start a developer tools company focused on observability",
+            "I'm saving for a house in the Oakland Hills area",
+            "I want to compete in a jiu-jitsu tournament by the end of the year",
+        ];
+
+        for text in &session1 {
+            engine.store(text, "session1").await.unwrap();
+        }
+        for text in &session2 {
+            engine.store(text, "session2").await.unwrap();
+        }
+        for text in &session3 {
+            engine.store(text, "session3").await.unwrap();
+        }
+        for text in &session4 {
+            engine.store(text, "session4").await.unwrap();
+        }
+        for text in &session5 {
+            engine.store(text, "session5").await.unwrap();
+        }
+    });
+}
+
+// ===========================================================================
 // Category 1: Information Extraction (5 tests)
 //
 // Can the system recall specific facts from past conversations?
@@ -65,87 +141,39 @@ fn top_n_contains(results: &[shrimpk_core::EchoResult], n: usize, needle: &str) 
 // Pass criterion: relevant memory appears in top-3 results.
 // ===========================================================================
 
-/// Seed the engine with a diverse user profile across multiple sessions.
-/// Returns the engine ready for querying.
-async fn seed_user_profile(data_dir: PathBuf) -> EchoEngine {
-    let config = longmemeval_config(data_dir);
+/// IE-1: Direct fact recall — profession
+#[test]
+#[ignore = "requires fastembed model download"]
+fn longmemeval_ie_1_profession() {
+    // Create engine OUTSIDE tokio runtime to avoid ort runtime conflict
+    let dir = tempdir().expect("temp dir");
+    let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    // Session 1: personal basics
-    let session1 = [
-        "My name is Alex Chen and I'm 32 years old",
-        "I was born in Taipei, Taiwan but grew up in Vancouver, Canada",
-        "I have a golden retriever named Pixel who is 4 years old",
-        "My partner's name is Jordan and we've been together for 6 years",
-        "I'm allergic to shellfish and cats",
-    ];
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        // Seed memories
+        for text in &[
+            "My name is Alex Chen and I'm 32 years old",
+            "I work as a senior software engineer at Stripe",
+            "I have a golden retriever named Pixel who is 4 years old",
+            "I studied Computer Science at University of British Columbia",
+            "I'm allergic to shellfish, which is ironic given my love for seafood restaurants",
+        ] {
+            engine.store(text, "test").await.expect("store");
+        }
+        engine
+            .echo("What is my job? Where do I work?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+    // engine drops here on plain thread — no tokio context
 
-    // Session 2: work and education
-    let session2 = [
-        "I work as a senior backend engineer at Stripe in San Francisco",
-        "I graduated from the University of British Columbia with a CS degree in 2015",
-        "Before Stripe I worked at Shopify for 3 years on their payments team",
-        "My team at Stripe works on the billing infrastructure service",
-        "I'm being considered for a staff engineer promotion next quarter",
-    ];
-
-    // Session 3: technical preferences
-    let session3 = [
-        "I prefer Rust for systems programming and Go for microservices",
-        "My IDE is Neovim with LazyVim config and Catppuccin theme",
-        "For databases I use PostgreSQL for OLTP and ClickHouse for analytics",
-        "I run NixOS on my personal machines and macOS at work",
-        "My dotfiles are managed with chezmoi and stored on GitHub",
-    ];
-
-    // Session 4: hobbies and lifestyle
-    let session4 = [
-        "I practice Brazilian jiu-jitsu three times a week at a Gracie gym",
-        "I'm learning Japanese and currently at JLPT N3 level",
-        "I collect mechanical keyboards and my daily driver is a Keychron Q1 with Boba U4T switches",
-        "I brew pour-over coffee every morning using a Hario V60 and light roast beans",
-        "My favorite cuisine is Thai food, especially pad see ew and massaman curry",
-    ];
-
-    // Session 5: travel and goals
-    let session5 = [
-        "I visited Tokyo last November and stayed in Shinjuku for two weeks",
-        "My next trip is planned for Barcelona in April 2027",
-        "My long-term goal is to start a developer tools company focused on observability",
-        "I'm saving for a house in the Oakland Hills area",
-        "I want to compete in a jiu-jitsu tournament by the end of the year",
-    ];
-
-    for text in &session1 {
-        engine.store(text, "session1").await.unwrap();
+    println!("IE-1 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
     }
-    for text in &session2 {
-        engine.store(text, "session2").await.unwrap();
-    }
-    for text in &session3 {
-        engine.store(text, "session3").await.unwrap();
-    }
-    for text in &session4 {
-        engine.store(text, "session4").await.unwrap();
-    }
-    for text in &session5 {
-        engine.store(text, "session5").await.unwrap();
-    }
-
-    engine
-}
-
-/// IE-1: Direct fact recall — profession
-#[tokio::test]
-#[ignore = "requires fastembed model download"]
-async fn longmemeval_ie_1_profession() {
-    let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
-
-    let results = engine
-        .echo("What is my job? Where do I work?", 5)
-        .await
-        .expect("echo should succeed");
 
     assert!(
         top_n_contains(&results, 3, "Stripe"),
@@ -155,16 +183,27 @@ async fn longmemeval_ie_1_profession() {
 }
 
 /// IE-2: Direct fact recall — pet
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_ie_2_pet() {
+fn longmemeval_ie_2_pet() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("Do I have any pets?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("Do I have any pets?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("IE-2 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     assert!(
         top_n_contains(&results, 3, "golden retriever"),
@@ -174,16 +213,27 @@ async fn longmemeval_ie_2_pet() {
 }
 
 /// IE-3: Direct fact recall — education
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_ie_3_education() {
+fn longmemeval_ie_3_education() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("Where did I go to university?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("Where did I go to university?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("IE-3 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     assert!(
         top_n_contains(&results, 3, "British Columbia"),
@@ -193,16 +243,27 @@ async fn longmemeval_ie_3_education() {
 }
 
 /// IE-4: Indirect recall — food allergy (phrased differently from stored text)
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_ie_4_allergy() {
+fn longmemeval_ie_4_allergy() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("What foods should I avoid? Any allergies?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("What foods should I avoid? Any allergies?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("IE-4 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     assert!(
         top_n_contains(&results, 3, "shellfish"),
@@ -212,16 +273,27 @@ async fn longmemeval_ie_4_allergy() {
 }
 
 /// IE-5: Indirect recall — hobby (phrased as a question about exercise)
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_ie_5_hobby() {
+fn longmemeval_ie_5_hobby() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("What martial art do I train? How often?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("What martial art do I train? How often?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("IE-5 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     assert!(
         top_n_contains(&results, 3, "jiu-jitsu"),
@@ -240,16 +312,27 @@ async fn longmemeval_ie_5_hobby() {
 
 /// MSR-1: Connect workplace + programming languages
 /// "What language should I use at work?" requires knowing both the job and the language prefs.
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_msr_1_work_and_language() {
+fn longmemeval_msr_1_work_and_language() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("What programming language do I use for backend work?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("What programming language do I use for backend work?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("MSR-1 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // Should surface both the language preference memory AND the work context
     let has_language = top_n_contains(&results, 5, "Rust")
@@ -272,16 +355,27 @@ async fn longmemeval_msr_1_work_and_language() {
 
 /// MSR-2: Connect travel history + language learning
 /// "Can I get by with my Japanese in Tokyo?" requires knowing both the trip and the language level.
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_msr_2_travel_and_language() {
+fn longmemeval_msr_2_travel_and_language() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("How was my Japanese when I visited Tokyo?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("How was my Japanese when I visited Tokyo?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("MSR-2 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     let has_japanese = top_n_contains(&results, 5, "Japanese")
         || top_n_contains(&results, 5, "JLPT");
@@ -296,16 +390,27 @@ async fn longmemeval_msr_2_travel_and_language() {
 
 /// MSR-3: Connect hobby + goal
 /// "Am I ready for competition?" requires knowing both the training regimen and the goal.
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_msr_3_hobby_and_goal() {
+fn longmemeval_msr_3_hobby_and_goal() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("Am I training enough for the jiu-jitsu tournament?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("Am I training enough for the jiu-jitsu tournament?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("MSR-3 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     let has_training = top_n_contains(&results, 5, "three times a week")
         || top_n_contains(&results, 5, "jiu-jitsu");
@@ -321,16 +426,27 @@ async fn longmemeval_msr_3_hobby_and_goal() {
 
 /// MSR-4: Connect career history + current role
 /// "How did I end up at Stripe?" requires Shopify history + current Stripe role.
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_msr_4_career_path() {
+fn longmemeval_msr_4_career_path() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("What's my career history in the payments industry?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("What's my career history in the payments industry?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("MSR-4 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     let has_shopify = top_n_contains(&results, 5, "Shopify");
     let has_stripe = top_n_contains(&results, 5, "Stripe");
@@ -344,16 +460,27 @@ async fn longmemeval_msr_4_career_path() {
 
 /// MSR-5: Connect personal + professional goals
 /// "What am I working toward financially and professionally?" requires house savings + startup goal.
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_msr_5_combined_goals() {
+fn longmemeval_msr_5_combined_goals() {
     let dir = tempdir().expect("temp dir");
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
 
-    let results = engine
-        .echo("What are my big life goals? What am I saving up for?", 5)
-        .await
-        .expect("echo should succeed");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
+    let results = rt.block_on(async {
+        engine
+            .echo("What are my big life goals? What am I saving up for?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("MSR-5 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     let has_house = top_n_contains(&results, 5, "house")
         || top_n_contains(&results, 5, "Oakland");
@@ -378,31 +505,40 @@ async fn longmemeval_msr_5_combined_goals() {
 // ===========================================================================
 
 /// TR-1: Temporal ordering of job changes
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_tr_1_job_timeline() {
+fn longmemeval_tr_1_job_timeline() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    // Store in chronological order (simulating real conversation flow)
-    engine
-        .store("In 2018 I started my first job as a junior developer at a small startup in Vancouver", "session_early")
-        .await
-        .unwrap();
-    engine
-        .store("In 2019 I joined Shopify as a backend engineer on their payments team", "session_mid")
-        .await
-        .unwrap();
-    engine
-        .store("In 2022 I moved to Stripe as a senior backend engineer in San Francisco", "session_recent")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        // Store in chronological order (simulating real conversation flow)
+        engine
+            .store("In 2018 I started my first job as a junior developer at a small startup in Vancouver", "session_early")
+            .await
+            .unwrap();
+        engine
+            .store("In 2019 I joined Shopify as a backend engineer on their payments team", "session_mid")
+            .await
+            .unwrap();
+        engine
+            .store("In 2022 I moved to Stripe as a senior backend engineer in San Francisco", "session_recent")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("Where have I worked over the years?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("Where have I worked over the years?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("TR-1 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // All three jobs should surface in top-5
     let has_startup = top_n_contains(&results, 5, "2018")
@@ -418,30 +554,39 @@ async fn longmemeval_tr_1_job_timeline() {
 }
 
 /// TR-2: Temporal ordering of recent events
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_tr_2_recent_events() {
+fn longmemeval_tr_2_recent_events() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    engine
-        .store("Last month I attended a Rust conference in Berlin", "session_a")
-        .await
-        .unwrap();
-    engine
-        .store("Last week I gave a talk on observability at the local meetup", "session_b")
-        .await
-        .unwrap();
-    engine
-        .store("Yesterday I submitted a CFP for RustConf 2027", "session_c")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        engine
+            .store("Last month I attended a Rust conference in Berlin", "session_a")
+            .await
+            .unwrap();
+        engine
+            .store("Last week I gave a talk on observability at the local meetup", "session_b")
+            .await
+            .unwrap();
+        engine
+            .store("Yesterday I submitted a CFP for RustConf 2027", "session_c")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("What tech events have I been involved in recently?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("What tech events have I been involved in recently?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("TR-2 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // At minimum the most recent event should surface in top-3
     assert!(
@@ -470,36 +615,45 @@ async fn longmemeval_tr_2_recent_events() {
 }
 
 /// TR-3: Temporal specificity — "last week" vs "last year"
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_tr_3_temporal_specificity() {
+fn longmemeval_tr_3_temporal_specificity() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    engine
-        .store("Last year I started learning piano as a complete beginner", "session_old")
-        .await
-        .unwrap();
-    engine
-        .store("Last week I finished learning my first Chopin nocturne on piano", "session_new")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        engine
+            .store("Last year I started learning piano as a complete beginner", "session_old")
+            .await
+            .unwrap();
+        engine
+            .store("Last week I finished learning my first Chopin nocturne on piano", "session_new")
+            .await
+            .unwrap();
 
-    // Noise entries to make ranking harder
-    engine
-        .store("I enjoy listening to classical music while coding", "session_noise")
-        .await
-        .unwrap();
-    engine
-        .store("My neighbor plays guitar every evening", "session_noise2")
-        .await
-        .unwrap();
+        // Noise entries to make ranking harder
+        engine
+            .store("I enjoy listening to classical music while coding", "session_noise")
+            .await
+            .unwrap();
+        engine
+            .store("My neighbor plays guitar every evening", "session_noise2")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("How is my piano playing going?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("How is my piano playing going?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("TR-3 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // Both piano memories should surface
     let has_beginner = top_n_contains(&results, 5, "beginner")
@@ -521,43 +675,53 @@ async fn longmemeval_tr_3_temporal_specificity() {
 // Store a fact, then store a correction. Query for the current state.
 // Pass criterion: the corrected/updated memory ranks HIGHER than the stale one.
 //
-// Note: Echo Memory currently ranks by cosine similarity to the query, so
-// "recency bias" is not built in. These tests verify that the CORRECTED
-// memory is at least semantically relevant and surfaces alongside the
-// original. Full knowledge-update handling (superseding old facts) is a
-// future capability tracked in the backlog.
+// Note: KS18 Track 3 added a configurable recency boost to the echo
+// scoring pipeline. Newer memories get a small advantage via the formula
+// recency_weight / (1.0 + days_since_stored), where recency_weight
+// defaults to 0.05. This helps corrections rank above stale facts when
+// both have similar cosine similarity. Full knowledge-update handling
+// (explicit superseding of old facts) is a future capability.
 // ===========================================================================
 
 /// KU-1: Job change — "Where do I work?"
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_ku_1_job_change() {
+fn longmemeval_ku_1_job_change() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    // Old fact
-    engine
-        .store("I work as a backend engineer at Google on the Cloud Spanner team", "session_old")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        // Old fact
+        engine
+            .store("I work as a backend engineer at Google on the Cloud Spanner team", "session_old")
+            .await
+            .unwrap();
 
-    // Noise
-    engine
-        .store("I enjoy hiking on weekends in the bay area", "session_noise")
-        .await
-        .unwrap();
+        // Noise
+        engine
+            .store("I enjoy hiking on weekends in the bay area", "session_noise")
+            .await
+            .unwrap();
 
-    // Correction (stored later, simulating a new conversation)
-    engine
-        .store("I left Google last month. I now work at Meta on the infrastructure team", "session_new")
-        .await
-        .unwrap();
+        // Correction (stored later, simulating a new conversation)
+        engine
+            .store("I left Google last month. I now work at Meta on the infrastructure team", "session_new")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("Where do I currently work?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("Where do I currently work?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("KU-1 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // The Meta memory should surface
     assert!(
@@ -577,30 +741,39 @@ async fn longmemeval_ku_1_job_change() {
 }
 
 /// KU-2: Address change — "Where do I live?"
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_ku_2_address_change() {
+fn longmemeval_ku_2_address_change() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    engine
-        .store("I live in a one-bedroom apartment in downtown Seattle", "session_old")
-        .await
-        .unwrap();
-    engine
-        .store("My favorite restaurant is the Thai place on Pike Street in Seattle", "session_noise")
-        .await
-        .unwrap();
-    engine
-        .store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "session_new")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        engine
+            .store("I live in a one-bedroom apartment in downtown Seattle", "session_old")
+            .await
+            .unwrap();
+        engine
+            .store("My favorite restaurant is the Thai place on Pike Street in Seattle", "session_noise")
+            .await
+            .unwrap();
+        engine
+            .store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "session_new")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("Where do I live right now?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("Where do I live right now?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("KU-2 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // Portland should surface
     assert!(
@@ -611,30 +784,39 @@ async fn longmemeval_ku_2_address_change() {
 }
 
 /// KU-3: Technology preference update — "What language do I use?"
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_ku_3_tech_preference_update() {
+fn longmemeval_ku_3_tech_preference_update() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    engine
-        .store("Python is my go-to programming language for everything", "session_old")
-        .await
-        .unwrap();
-    engine
-        .store("I started a new side project building a web scraper", "session_noise")
-        .await
-        .unwrap();
-    engine
-        .store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "session_new")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        engine
+            .store("Python is my go-to programming language for everything", "session_old")
+            .await
+            .unwrap();
+        engine
+            .store("I started a new side project building a web scraper", "session_noise")
+            .await
+            .unwrap();
+        engine
+            .store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "session_new")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("What is my primary programming language?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("What is my primary programming language?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("KU-3 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // Rust (current) should surface
     assert!(
@@ -660,31 +842,40 @@ async fn longmemeval_ku_3_tech_preference_update() {
 // ===========================================================================
 
 /// PT-1: IDE preference tracking across sessions
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_pt_1_ide_preference() {
+fn longmemeval_pt_1_ide_preference() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    // Preferences evolve over time
-    engine
-        .store("I use Sublime Text as my code editor, it's fast and lightweight", "month1")
-        .await
-        .unwrap();
-    engine
-        .store("I switched to VS Code because of the extension ecosystem", "month3")
-        .await
-        .unwrap();
-    engine
-        .store("I've moved to Neovim with a custom Lua config for maximum speed", "month6")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        // Preferences evolve over time
+        engine
+            .store("I use Sublime Text as my code editor, it's fast and lightweight", "month1")
+            .await
+            .unwrap();
+        engine
+            .store("I switched to VS Code because of the extension ecosystem", "month3")
+            .await
+            .unwrap();
+        engine
+            .store("I've moved to Neovim with a custom Lua config for maximum speed", "month6")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("What code editor do I use?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("What code editor do I use?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("PT-1 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // All three should surface as they're all about editors
     let has_neovim = top_n_contains(&results, 5, "Neovim");
@@ -709,36 +900,45 @@ async fn longmemeval_pt_1_ide_preference() {
 }
 
 /// PT-2: Dietary preference tracking
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_pt_2_dietary_preference() {
+fn longmemeval_pt_2_dietary_preference() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    engine
-        .store("I eat everything, no dietary restrictions", "early")
-        .await
-        .unwrap();
-    engine
-        .store("I've started reducing meat, mostly eating vegetarian meals now", "mid")
-        .await
-        .unwrap();
-    engine
-        .store("I'm fully vegan now, it's been great for my energy levels", "recent")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        engine
+            .store("I eat everything, no dietary restrictions", "early")
+            .await
+            .unwrap();
+        engine
+            .store("I've started reducing meat, mostly eating vegetarian meals now", "mid")
+            .await
+            .unwrap();
+        engine
+            .store("I'm fully vegan now, it's been great for my energy levels", "recent")
+            .await
+            .unwrap();
 
-    // Noise
-    engine
-        .store("I run 5K every morning before work", "noise")
-        .await
-        .unwrap();
+        // Noise
+        engine
+            .store("I run 5K every morning before work", "noise")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("What's my diet like? What do I eat?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("What's my diet like? What do I eat?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("PT-2 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     assert!(
         top_n_contains(&results, 3, "vegan"),
@@ -748,36 +948,45 @@ async fn longmemeval_pt_2_dietary_preference() {
 }
 
 /// PT-3: Coffee preference tracking (specific and nuanced)
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_pt_3_coffee_preference() {
+fn longmemeval_pt_3_coffee_preference() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    engine
-        .store("I drink regular drip coffee with cream and sugar", "month1")
-        .await
-        .unwrap();
-    engine
-        .store("I switched to espresso-based drinks, usually a latte with whole milk", "month4")
-        .await
-        .unwrap();
-    engine
-        .store("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "month8")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        engine
+            .store("I drink regular drip coffee with cream and sugar", "month1")
+            .await
+            .unwrap();
+        engine
+            .store("I switched to espresso-based drinks, usually a latte with whole milk", "month4")
+            .await
+            .unwrap();
+        engine
+            .store("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "month8")
+            .await
+            .unwrap();
 
-    // Additional noise
-    engine
-        .store("I like green tea in the afternoon as a lighter caffeine option", "noise")
-        .await
-        .unwrap();
+        // Additional noise
+        engine
+            .store("I like green tea in the afternoon as a lighter caffeine option", "noise")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("How do I take my coffee?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("How do I take my coffee?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("PT-3 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     // The most recent preference should surface
     assert!(
@@ -790,36 +999,45 @@ async fn longmemeval_pt_3_coffee_preference() {
 }
 
 /// PT-4: Operating system preference (multi-device)
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_pt_4_os_preference() {
+fn longmemeval_pt_4_os_preference() {
     let dir = tempdir().expect("temp dir");
     let config = longmemeval_config(dir.path().to_path_buf());
     let engine = EchoEngine::new(config).expect("engine init");
 
-    engine
-        .store("I use Windows 11 on all my machines for gaming and development", "early")
-        .await
-        .unwrap();
-    engine
-        .store("I dual-boot Linux Mint alongside Windows now for dev work", "mid")
-        .await
-        .unwrap();
-    engine
-        .store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "recent")
-        .await
-        .unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let results = rt.block_on(async {
+        engine
+            .store("I use Windows 11 on all my machines for gaming and development", "early")
+            .await
+            .unwrap();
+        engine
+            .store("I dual-boot Linux Mint alongside Windows now for dev work", "mid")
+            .await
+            .unwrap();
+        engine
+            .store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "recent")
+            .await
+            .unwrap();
 
-    // Noise
-    engine
-        .store("I bought a new 4K monitor for my desk setup", "noise")
-        .await
-        .unwrap();
+        // Noise
+        engine
+            .store("I bought a new 4K monitor for my desk setup", "noise")
+            .await
+            .unwrap();
 
-    let results = engine
-        .echo("What operating system do I run?", 5)
-        .await
-        .expect("echo should succeed");
+        engine
+            .echo("What operating system do I run?", 5)
+            .await
+            .expect("echo should succeed")
+    });
+    drop(rt);
+
+    println!("PT-4 results:");
+    for (i, r) in results.iter().enumerate() {
+        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+    }
 
     assert!(
         top_n_contains(&results, 3, "Arch")
@@ -838,15 +1056,10 @@ async fn longmemeval_pt_4_os_preference() {
 ///
 /// Scoring: for each test scenario, we check if the expected memory surfaces
 /// in the top-3 (strict) or top-5 (relaxed) results.
-#[tokio::test]
+#[test]
 #[ignore = "requires fastembed model download"]
-async fn longmemeval_full_scorecard() {
-    let dir = tempdir().expect("temp dir");
-
+fn longmemeval_full_scorecard() {
     println!("\n=== LongMemEval Benchmark — ShrimPK Echo Memory ===\n");
-
-    // ------ Category 1: Information Extraction ------
-    let engine = seed_user_profile(dir.path().to_path_buf()).await;
 
     struct TestCase {
         name: &'static str,
@@ -854,6 +1067,18 @@ async fn longmemeval_full_scorecard() {
         needles_strict: Vec<&'static str>,  // must be in top-3
         needles_relaxed: Vec<&'static str>, // must be in top-5
     }
+
+    let mut total_strict = 0u32;
+    let mut total_relaxed = 0u32;
+    let mut total_tests = 0u32;
+
+    // ------ Category 1: Information Extraction ------
+    let dir = tempdir().expect("temp dir");
+    let config = longmemeval_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_user_profile_sync(&engine, &rt);
 
     let ie_cases = vec![
         TestCase {
@@ -888,24 +1113,27 @@ async fn longmemeval_full_scorecard() {
         },
     ];
 
-    let mut total_strict = 0u32;
-    let mut total_relaxed = 0u32;
-    let mut total_tests = 0u32;
-
     println!("Category 1: Information Extraction");
     println!("{:<30} | {:>9} | {:>10}", "Test", "Top-3 Hit", "Top-5 Hit");
     println!("{}", "-".repeat(56));
 
-    for tc in &ie_cases {
-        let results = engine.echo(tc.query, 10).await.expect("echo");
+    let ie_results: Vec<_> = rt.block_on(async {
+        let mut results = Vec::new();
+        for tc in &ie_cases {
+            results.push(engine.echo(tc.query, 10).await.expect("echo"));
+        }
+        results
+    });
+
+    for (tc, results) in ie_cases.iter().zip(ie_results.iter()) {
         let strict = tc
             .needles_strict
             .iter()
-            .all(|n| top_n_contains(&results, 3, n));
+            .all(|n| top_n_contains(results, 3, n));
         let relaxed = tc
             .needles_relaxed
             .iter()
-            .any(|n| top_n_contains(&results, 5, n));
+            .any(|n| top_n_contains(results, 5, n));
         if strict {
             total_strict += 1;
         }
@@ -921,11 +1149,20 @@ async fn longmemeval_full_scorecard() {
         );
     }
 
+    // Drop the IE engine before creating the MSR engine
+    drop(engine);
+
     // ------ Category 2: Multi-Session Reasoning ------
     println!();
     println!("Category 2: Multi-Session Reasoning");
     println!("{:<30} | {:>9} | {:>10}", "Test", "Top-3 Hit", "Top-5 Hit");
     println!("{}", "-".repeat(56));
+
+    // Re-seed for MSR (the previous engine was dropped)
+    let dir_msr = tempdir().expect("temp dir");
+    let config_msr = longmemeval_config(dir_msr.path().to_path_buf());
+    let engine = EchoEngine::new(config_msr).expect("engine init");
+    seed_user_profile_sync(&engine, &rt);
 
     let msr_cases = vec![
         TestCase {
@@ -960,16 +1197,26 @@ async fn longmemeval_full_scorecard() {
         },
     ];
 
-    for tc in &msr_cases {
-        let results = engine.echo(tc.query, 10).await.expect("echo");
+    let msr_results: Vec<_> = rt.block_on(async {
+        let mut results = Vec::new();
+        for tc in &msr_cases {
+            results.push(engine.echo(tc.query, 10).await.expect("echo"));
+        }
+        results
+    });
+
+    // Drop MSR engine before creating TR engine
+    drop(engine);
+
+    for (tc, results) in msr_cases.iter().zip(msr_results.iter()) {
         let strict = tc
             .needles_strict
             .iter()
-            .all(|n| top_n_contains(&results, 3, n));
+            .all(|n| top_n_contains(results, 3, n));
         let relaxed = tc
             .needles_relaxed
             .iter()
-            .any(|n| top_n_contains(&results, 5, n));
+            .any(|n| top_n_contains(results, 5, n));
         if strict {
             total_strict += 1;
         }
@@ -996,16 +1243,18 @@ async fn longmemeval_full_scorecard() {
     let config_tr = longmemeval_config(dir_tr.path().to_path_buf());
     let engine_tr = EchoEngine::new(config_tr).expect("engine init");
 
-    engine_tr.store("In 2018 I started my first job as a junior developer at a small startup in Vancouver", "s1").await.unwrap();
-    engine_tr.store("In 2019 I joined Shopify as a backend engineer on their payments team", "s2").await.unwrap();
-    engine_tr.store("In 2022 I moved to Stripe as a senior backend engineer in San Francisco", "s3").await.unwrap();
-    engine_tr.store("Last month I attended a Rust conference in Berlin", "s4").await.unwrap();
-    engine_tr.store("Last week I gave a talk on observability at the local meetup", "s5").await.unwrap();
-    engine_tr.store("Yesterday I submitted a CFP for RustConf 2027", "s6").await.unwrap();
-    engine_tr.store("Last year I started learning piano as a complete beginner", "s7").await.unwrap();
-    engine_tr.store("Last week I finished learning my first Chopin nocturne on piano", "s8").await.unwrap();
-    engine_tr.store("I enjoy listening to classical music while coding", "noise1").await.unwrap();
-    engine_tr.store("My neighbor plays guitar every evening", "noise2").await.unwrap();
+    rt.block_on(async {
+        engine_tr.store("In 2018 I started my first job as a junior developer at a small startup in Vancouver", "s1").await.unwrap();
+        engine_tr.store("In 2019 I joined Shopify as a backend engineer on their payments team", "s2").await.unwrap();
+        engine_tr.store("In 2022 I moved to Stripe as a senior backend engineer in San Francisco", "s3").await.unwrap();
+        engine_tr.store("Last month I attended a Rust conference in Berlin", "s4").await.unwrap();
+        engine_tr.store("Last week I gave a talk on observability at the local meetup", "s5").await.unwrap();
+        engine_tr.store("Yesterday I submitted a CFP for RustConf 2027", "s6").await.unwrap();
+        engine_tr.store("Last year I started learning piano as a complete beginner", "s7").await.unwrap();
+        engine_tr.store("Last week I finished learning my first Chopin nocturne on piano", "s8").await.unwrap();
+        engine_tr.store("I enjoy listening to classical music while coding", "noise1").await.unwrap();
+        engine_tr.store("My neighbor plays guitar every evening", "noise2").await.unwrap();
+    });
 
     let tr_cases = vec![
         TestCase {
@@ -1028,16 +1277,26 @@ async fn longmemeval_full_scorecard() {
         },
     ];
 
-    for tc in &tr_cases {
-        let results = engine_tr.echo(tc.query, 10).await.expect("echo");
+    let tr_results: Vec<_> = rt.block_on(async {
+        let mut results = Vec::new();
+        for tc in &tr_cases {
+            results.push(engine_tr.echo(tc.query, 10).await.expect("echo"));
+        }
+        results
+    });
+
+    // Drop TR engine before creating KU engine
+    drop(engine_tr);
+
+    for (tc, results) in tr_cases.iter().zip(tr_results.iter()) {
         let strict = tc
             .needles_strict
             .iter()
-            .all(|n| top_n_contains(&results, 3, n));
+            .all(|n| top_n_contains(results, 3, n));
         let relaxed = tc
             .needles_relaxed
             .iter()
-            .any(|n| top_n_contains(&results, 5, n));
+            .any(|n| top_n_contains(results, 5, n));
         if strict {
             total_strict += 1;
         }
@@ -1063,15 +1322,17 @@ async fn longmemeval_full_scorecard() {
     let config_ku = longmemeval_config(dir_ku.path().to_path_buf());
     let engine_ku = EchoEngine::new(config_ku).expect("engine init");
 
-    engine_ku.store("I work as a backend engineer at Google on the Cloud Spanner team", "old").await.unwrap();
-    engine_ku.store("I enjoy hiking on weekends in the bay area", "noise").await.unwrap();
-    engine_ku.store("I left Google last month. I now work at Meta on the infrastructure team", "new").await.unwrap();
-    engine_ku.store("I live in a one-bedroom apartment in downtown Seattle", "old2").await.unwrap();
-    engine_ku.store("My favorite restaurant is the Thai place on Pike Street in Seattle", "noise2").await.unwrap();
-    engine_ku.store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new2").await.unwrap();
-    engine_ku.store("Python is my go-to programming language for everything", "old3").await.unwrap();
-    engine_ku.store("I started a new side project building a web scraper", "noise3").await.unwrap();
-    engine_ku.store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new3").await.unwrap();
+    rt.block_on(async {
+        engine_ku.store("I work as a backend engineer at Google on the Cloud Spanner team", "old").await.unwrap();
+        engine_ku.store("I enjoy hiking on weekends in the bay area", "noise").await.unwrap();
+        engine_ku.store("I left Google last month. I now work at Meta on the infrastructure team", "new").await.unwrap();
+        engine_ku.store("I live in a one-bedroom apartment in downtown Seattle", "old2").await.unwrap();
+        engine_ku.store("My favorite restaurant is the Thai place on Pike Street in Seattle", "noise2").await.unwrap();
+        engine_ku.store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new2").await.unwrap();
+        engine_ku.store("Python is my go-to programming language for everything", "old3").await.unwrap();
+        engine_ku.store("I started a new side project building a web scraper", "noise3").await.unwrap();
+        engine_ku.store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new3").await.unwrap();
+    });
 
     let ku_cases = vec![
         TestCase {
@@ -1094,16 +1355,26 @@ async fn longmemeval_full_scorecard() {
         },
     ];
 
-    for tc in &ku_cases {
-        let results = engine_ku.echo(tc.query, 10).await.expect("echo");
+    let ku_results: Vec<_> = rt.block_on(async {
+        let mut results = Vec::new();
+        for tc in &ku_cases {
+            results.push(engine_ku.echo(tc.query, 10).await.expect("echo"));
+        }
+        results
+    });
+
+    // Drop KU engine before creating PT engine
+    drop(engine_ku);
+
+    for (tc, results) in ku_cases.iter().zip(ku_results.iter()) {
         let strict = tc
             .needles_strict
             .iter()
-            .all(|n| top_n_contains(&results, 3, n));
+            .all(|n| top_n_contains(results, 3, n));
         let relaxed = tc
             .needles_relaxed
             .iter()
-            .any(|n| top_n_contains(&results, 5, n));
+            .any(|n| top_n_contains(results, 5, n));
         if strict {
             total_strict += 1;
         }
@@ -1129,21 +1400,23 @@ async fn longmemeval_full_scorecard() {
     let config_pt = longmemeval_config(dir_pt.path().to_path_buf());
     let engine_pt = EchoEngine::new(config_pt).expect("engine init");
 
-    engine_pt.store("I use Sublime Text as my code editor, it's fast and lightweight", "m1").await.unwrap();
-    engine_pt.store("I switched to VS Code because of the extension ecosystem", "m3").await.unwrap();
-    engine_pt.store("I've moved to Neovim with a custom Lua config for maximum speed", "m6").await.unwrap();
-    engine_pt.store("I eat everything, no dietary restrictions", "d1").await.unwrap();
-    engine_pt.store("I've started reducing meat, mostly eating vegetarian meals now", "d2").await.unwrap();
-    engine_pt.store("I'm fully vegan now, it's been great for my energy levels", "d3").await.unwrap();
-    engine_pt.store("I run 5K every morning before work", "noise_d").await.unwrap();
-    engine_pt.store("I drink regular drip coffee with cream and sugar", "c1").await.unwrap();
-    engine_pt.store("I switched to espresso-based drinks, usually a latte with whole milk", "c2").await.unwrap();
-    engine_pt.store("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "c3").await.unwrap();
-    engine_pt.store("I like green tea in the afternoon as a lighter caffeine option", "noise_c").await.unwrap();
-    engine_pt.store("I use Windows 11 on all my machines for gaming and development", "o1").await.unwrap();
-    engine_pt.store("I dual-boot Linux Mint alongside Windows now for dev work", "o2").await.unwrap();
-    engine_pt.store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "o3").await.unwrap();
-    engine_pt.store("I bought a new 4K monitor for my desk setup", "noise_o").await.unwrap();
+    rt.block_on(async {
+        engine_pt.store("I use Sublime Text as my code editor, it's fast and lightweight", "m1").await.unwrap();
+        engine_pt.store("I switched to VS Code because of the extension ecosystem", "m3").await.unwrap();
+        engine_pt.store("I've moved to Neovim with a custom Lua config for maximum speed", "m6").await.unwrap();
+        engine_pt.store("I eat everything, no dietary restrictions", "d1").await.unwrap();
+        engine_pt.store("I've started reducing meat, mostly eating vegetarian meals now", "d2").await.unwrap();
+        engine_pt.store("I'm fully vegan now, it's been great for my energy levels", "d3").await.unwrap();
+        engine_pt.store("I run 5K every morning before work", "noise_d").await.unwrap();
+        engine_pt.store("I drink regular drip coffee with cream and sugar", "c1").await.unwrap();
+        engine_pt.store("I switched to espresso-based drinks, usually a latte with whole milk", "c2").await.unwrap();
+        engine_pt.store("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "c3").await.unwrap();
+        engine_pt.store("I like green tea in the afternoon as a lighter caffeine option", "noise_c").await.unwrap();
+        engine_pt.store("I use Windows 11 on all my machines for gaming and development", "o1").await.unwrap();
+        engine_pt.store("I dual-boot Linux Mint alongside Windows now for dev work", "o2").await.unwrap();
+        engine_pt.store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "o3").await.unwrap();
+        engine_pt.store("I bought a new 4K monitor for my desk setup", "noise_o").await.unwrap();
+    });
 
     let pt_cases = vec![
         TestCase {
@@ -1172,16 +1445,26 @@ async fn longmemeval_full_scorecard() {
         },
     ];
 
-    for tc in &pt_cases {
-        let results = engine_pt.echo(tc.query, 10).await.expect("echo");
+    let pt_results: Vec<_> = rt.block_on(async {
+        let mut results = Vec::new();
+        for tc in &pt_cases {
+            results.push(engine_pt.echo(tc.query, 10).await.expect("echo"));
+        }
+        results
+    });
+
+    // Drop PT engine before final summary
+    drop(engine_pt);
+
+    for (tc, results) in pt_cases.iter().zip(pt_results.iter()) {
         let strict = tc
             .needles_strict
             .iter()
-            .all(|n| top_n_contains(&results, 3, n));
+            .all(|n| top_n_contains(results, 3, n));
         let relaxed = tc
             .needles_relaxed
             .iter()
-            .any(|n| top_n_contains(&results, 5, n));
+            .any(|n| top_n_contains(results, 5, n));
         if strict {
             total_strict += 1;
         }
@@ -1196,6 +1479,9 @@ async fn longmemeval_full_scorecard() {
             if relaxed { "PASS" } else { "MISS" },
         );
     }
+
+    // Drop the runtime before engines (engines already dropped above)
+    drop(rt);
 
     // ------ Summary ------
     let strict_pct = (total_strict as f64 / total_tests as f64) * 100.0;

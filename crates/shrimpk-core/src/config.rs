@@ -117,6 +117,12 @@ pub struct EchoConfig {
     /// Required when `consolidation_provider = "http"`. Default: false.
     #[serde(default)]
     pub consolidation_consent_given: bool,
+    /// Recency weight for echo scoring (KS18 Track 3).
+    /// Newer memories get a small boost: `recency_weight / (1.0 + days_since_stored)`.
+    /// This helps Knowledge Update queries surface corrections over stale facts.
+    /// Default: 0.05 (small — cosine similarity should still dominate).
+    #[serde(default = "default_recency_weight")]
+    pub recency_weight: f32,
 }
 
 fn default_proxy_target() -> String {
@@ -134,6 +140,10 @@ fn default_proxy_context_window() -> usize {
 
 fn default_daemon_rate_limit() -> u64 {
     100
+}
+
+fn default_recency_weight() -> f32 {
+    0.05
 }
 
 fn default_max_disk_bytes() -> u64 {
@@ -179,6 +189,7 @@ impl Default for EchoConfig {
             proxy_context_window: default_proxy_context_window(),
             daemon_rate_limit: default_daemon_rate_limit(),
             consolidation_consent_given: false,
+            recency_weight: default_recency_weight(),
         }
     }
 }
@@ -267,6 +278,7 @@ pub struct FileConfig {
     pub proxy_context_window: Option<usize>,
     pub daemon_rate_limit: Option<u64>,
     pub consolidation_consent_given: Option<bool>,
+    pub recency_weight: Option<f32>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -423,6 +435,9 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Some(v) = fc.consolidation_consent_given {
             config.consolidation_consent_given = v;
         }
+        if let Some(v) = fc.recency_weight {
+            config.recency_weight = v;
+        }
     }
 
     // Layer 3: env var overrides (highest priority)
@@ -464,6 +479,9 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
     if let Ok(v) = std::env::var("SHRIMPK_CONSOLIDATION_CONSENT") {
         config.consolidation_consent_given = v.parse().unwrap_or(false);
+    }
+    if let Some(v) = env_f32("SHRIMPK_RECENCY_WEIGHT")? {
+        config.recency_weight = v;
     }
 
     Ok(config)
@@ -747,5 +765,11 @@ mod tests {
     fn default_config_has_disk_limit() {
         let config = EchoConfig::default();
         assert_eq!(config.max_disk_bytes, DEFAULT_MAX_DISK_BYTES);
+    }
+
+    #[test]
+    fn default_config_has_recency_weight() {
+        let config = EchoConfig::default();
+        assert!((config.recency_weight - 0.05).abs() < f32::EPSILON);
     }
 }
