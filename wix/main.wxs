@@ -238,22 +238,19 @@
         <!-- ============================================================ -->
 
         <!--
-            All Custom Actions use cmd.exe /c start /min to suppress the
-            visible CMD window that PowerShell (or any console child)
-            would otherwise flash.  The Property-based pattern (Type 50)
-            resolves [APPLICATIONFOLDER] at runtime and does not require
-            the executable to exist inside a specific Directory.
-
-            StopProcesses uses taskkill directly (no PowerShell) because
-            deferred actions run in a restricted context. taskkill /F is
-            silent on "not found" when combined with >nul 2>&1.
-        -->
-
-        <!--
             All Custom Actions use powershell.exe directly with -WindowStyle Hidden
             to avoid CMD window flash. Property-based (Type 50) custom actions.
-            LaunchDaemon/LaunchApp use Start-Process to launch without a visible window.
-            StopProcesses uses Stop-Process instead of taskkill.
+
+            All uninstall actions run as immediate (not deferred) since this is a
+            per-user install — no elevation needed. This ensures MSI property
+            resolution works correctly for [APPLICATIONFOLDER] paths.
+
+            Uninstall order:
+              1. StopProcesses  — kills all shrimpk-* processes + 3s sleep for handle release
+              2. UnregisterMCP  — removes MCP registration from Claude Code (--scope user)
+              3. UnregisterHook — removes hook from Claude Code settings.json
+              4. RemoveCache    — deletes .fastembed_cache from all possible locations
+              5. RemoveFiles    — standard MSI file removal (built-in)
         -->
 
         <Property Id='POWERSHELLEXE' Value='powershell.exe'/>
@@ -270,7 +267,7 @@
         <CustomAction
             Id='UnregisterMCP'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { Stop-Process -Name shrimpk-mcp -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { &amp; claude mcp remove shrimpk } } catch { exit 0 }; exit 0"'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { Stop-Process -Name shrimpk-mcp -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { &amp; claude mcp remove shrimpk --scope user } } catch { exit 0 }; exit 0"'
             Execute='immediate'
             Return='ignore'/>
 
@@ -290,20 +287,20 @@
             Execute='immediate'
             Return='asyncNoWait'/>
 
-        <!-- Pre-uninstall: stop processes before removing files (deferred, hidden) -->
+        <!-- Pre-uninstall: stop ALL ShrimPK processes, then wait for file handles to release -->
         <CustomAction
             Id='StopProcesses'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Stop-Process -Name shrimpk-daemon,shrimpk-app -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2"'
-            Execute='deferred'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Stop-Process -Name shrimpk-daemon,shrimpk-app,shrimpk-mcp,shrimpk -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3"'
+            Execute='immediate'
             Return='ignore'/>
 
-        <!-- Uninstall: remove .fastembed_cache directory (deferred, hidden) -->
+        <!-- Uninstall: remove .fastembed_cache directories from all possible locations -->
         <CustomAction
             Id='RemoveCache'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "try { Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\bin\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue } catch { exit 0 }; exit 0"'
-            Execute='deferred'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "try { Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\bin\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:USERPROFILE &apos;.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue } catch { exit 0 }; exit 0"'
+            Execute='immediate'
             Return='ignore'/>
 
         <!-- Install: register shrimpk hook in Claude Code settings.json (hidden) -->
@@ -326,6 +323,7 @@
         <!-- Install sequence                                             -->
         <!-- ============================================================ -->
         <InstallExecuteSequence>
+            <!-- ── Install actions ── -->
             <Custom Action='RegisterMCP' After='InstallFiles'>
                 NOT Installed AND NOT REMOVE
             </Custom>
@@ -338,16 +336,21 @@
             <Custom Action='LaunchApp' After='LaunchDaemon'>
                 NOT REMOVE
             </Custom>
+
+            <!-- ── Uninstall actions (all immediate, ordered chain) ──
+                 Order: StopProcesses → wait 3s → UnregisterMCP → UnregisterHook → RemoveCache → RemoveFiles
+                 StopProcesses kills all ShrimPK processes and sleeps 3s so file
+                 handles are fully released before MSI's RemoveFiles runs. -->
             <Custom Action='StopProcesses' Before='RemoveFiles'>
                 REMOVE="ALL"
             </Custom>
-            <Custom Action='RemoveCache' Before='UnregisterHook'>
+            <Custom Action='UnregisterMCP' After='StopProcesses'>
                 REMOVE="ALL"
             </Custom>
-            <Custom Action='UnregisterHook' Before='StopProcesses'>
+            <Custom Action='UnregisterHook' After='UnregisterMCP'>
                 REMOVE="ALL"
             </Custom>
-            <Custom Action='UnregisterMCP' Before='UnregisterHook'>
+            <Custom Action='RemoveCache' After='UnregisterHook'>
                 REMOVE="ALL"
             </Custom>
         </InstallExecuteSequence>

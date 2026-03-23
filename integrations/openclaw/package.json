@@ -1,6 +1,6 @@
 {
   "name": "shrimpk-openclaw",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "ShrimPK Echo Memory plugin for OpenClaw — persistent AI memory that works automatically",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

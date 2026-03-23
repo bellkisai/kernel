@@ -264,6 +264,16 @@ async fn forward_non_streaming(
     url: &str,
     req: &ChatCompletionRequest,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let data_bytes = serde_json::to_vec(req).map(|v| v.len()).unwrap_or(0);
+    tracing::info!(
+        target: "shrimpk::audit",
+        endpoint = %url,
+        data_bytes = data_bytes,
+        direction = "outbound",
+        component = "proxy",
+        "External data transmission"
+    );
+
     let resp = state
         .http_client
         .post(url)
@@ -303,6 +313,16 @@ async fn forward_streaming(
     url: &str,
     req: &ChatCompletionRequest,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let data_bytes = serde_json::to_vec(req).map(|v| v.len()).unwrap_or(0);
+    tracing::info!(
+        target: "shrimpk::audit",
+        endpoint = %url,
+        data_bytes = data_bytes,
+        direction = "outbound",
+        component = "proxy-stream",
+        "External data transmission"
+    );
+
     let resp = state
         .http_client
         .post(url)
@@ -354,6 +374,15 @@ pub async fn models(
         let url = format!(
             "{}/v1/models",
             state.config.proxy_target.trim_end_matches('/')
+        );
+
+        tracing::info!(
+            target: "shrimpk::audit",
+            endpoint = %url,
+            data_bytes = 0_usize,
+            direction = "outbound",
+            component = "proxy-models",
+            "External data transmission"
         );
 
         let resp = state

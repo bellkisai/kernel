@@ -8,6 +8,7 @@
 
 mod detect;
 mod proxy;
+mod rate_limit;
 mod routes;
 mod state;
 
@@ -197,6 +198,11 @@ async fn main() -> anyhow::Result<()> {
     let engine_for_shutdown = state.engine.clone();
     let proxy_target_display = state.config.proxy_target.clone();
 
+    // Rate limiter (default 100 req/s, configurable via daemon_rate_limit)
+    let rate_limit = state.config.daemon_rate_limit;
+    let limiter = rate_limit::RateLimiter::new(rate_limit);
+    eprintln!("[shrimpk] Rate limit: {rate_limit} req/s.");
+
     // Build router
     let app = Router::new()
         .route("/health", get(routes::health))
@@ -213,6 +219,8 @@ async fn main() -> anyhow::Result<()> {
         // OpenAI-compatible proxy routes
         .route("/v1/chat/completions", post(proxy::chat_completions))
         .route("/v1/models", get(proxy::models))
+        .layer(middleware::from_fn(rate_limit::rate_limit_middleware))
+        .layer(axum::Extension(limiter))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

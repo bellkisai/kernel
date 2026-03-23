@@ -110,6 +110,13 @@ pub struct EchoConfig {
     /// Context window size (in tokens) for proxy token budgeting.
     #[serde(default = "default_proxy_context_window")]
     pub proxy_context_window: usize,
+    /// Rate limit for the daemon API in requests per second.
+    #[serde(default = "default_daemon_rate_limit")]
+    pub daemon_rate_limit: u64,
+    /// Whether the user has given explicit consent for external consolidation.
+    /// Required when `consolidation_provider = "http"`. Default: false.
+    #[serde(default)]
+    pub consolidation_consent_given: bool,
 }
 
 fn default_proxy_target() -> String {
@@ -123,6 +130,10 @@ fn default_proxy_max_echo_results() -> usize {
 }
 fn default_proxy_context_window() -> usize {
     8000
+}
+
+fn default_daemon_rate_limit() -> u64 {
+    100
 }
 
 fn default_max_disk_bytes() -> u64 {
@@ -166,6 +177,8 @@ impl Default for EchoConfig {
             proxy_enabled: default_proxy_enabled(),
             proxy_max_echo_results: default_proxy_max_echo_results(),
             proxy_context_window: default_proxy_context_window(),
+            daemon_rate_limit: default_daemon_rate_limit(),
+            consolidation_consent_given: false,
         }
     }
 }
@@ -252,6 +265,8 @@ pub struct FileConfig {
     pub proxy_enabled: Option<bool>,
     pub proxy_max_echo_results: Option<usize>,
     pub proxy_context_window: Option<usize>,
+    pub daemon_rate_limit: Option<u64>,
+    pub consolidation_consent_given: Option<bool>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -402,6 +417,12 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Some(v) = fc.proxy_context_window {
             config.proxy_context_window = v;
         }
+        if let Some(v) = fc.daemon_rate_limit {
+            config.daemon_rate_limit = v;
+        }
+        if let Some(v) = fc.consolidation_consent_given {
+            config.consolidation_consent_given = v;
+        }
     }
 
     // Layer 3: env var overrides (highest priority)
@@ -437,6 +458,12 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
     if let Some(v) = env_usize("SHRIMPK_PROXY_CONTEXT_WINDOW")? {
         config.proxy_context_window = v;
+    }
+    if let Some(v) = env_u64("SHRIMPK_DAEMON_RATE_LIMIT")? {
+        config.daemon_rate_limit = v;
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_CONSOLIDATION_CONSENT") {
+        config.consolidation_consent_given = v.parse().unwrap_or(false);
     }
 
     Ok(config)

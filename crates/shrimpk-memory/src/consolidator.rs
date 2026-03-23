@@ -84,9 +84,21 @@ impl Consolidator for OllamaConsolidator {
             "options": {"temperature": 0.0, "num_predict": 256}
         });
 
+        let endpoint = format!("{}/api/chat", self.url.trim_end_matches('/'));
+
+        let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+        tracing::info!(
+            target: "shrimpk::audit",
+            endpoint = %endpoint,
+            data_bytes = body_bytes.len(),
+            direction = "outbound",
+            component = "consolidator",
+            "External data transmission"
+        );
+
         let resp = match self
             .client
-            .post(format!("{}/api/chat", self.url.trim_end_matches('/')))
+            .post(&endpoint)
             .json(&body)
             .send()
         {
@@ -154,12 +166,24 @@ impl Consolidator for HttpConsolidator {
             "temperature": 0.0
         });
 
+        let endpoint = format!(
+            "{}/v1/chat/completions",
+            self.url.trim_end_matches('/')
+        );
+
+        let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+        tracing::info!(
+            target: "shrimpk::audit",
+            endpoint = %endpoint,
+            data_bytes = body_bytes.len(),
+            direction = "outbound",
+            component = "consolidator",
+            "External data transmission"
+        );
+
         let mut req = self
             .client
-            .post(format!(
-                "{}/v1/chat/completions",
-                self.url.trim_end_matches('/')
-            ))
+            .post(&endpoint)
             .json(&body);
 
         if let Some(key) = &self.api_key {
@@ -217,6 +241,13 @@ pub fn from_config(config: &EchoConfig) -> Box<dyn Consolidator> {
             ))
         }
         "http" | "openai" => {
+            if !config.consolidation_consent_given {
+                tracing::warn!(
+                    "External consolidation endpoint configured but consent not given. \
+                     Set consolidation_consent_given = true in config.toml to enable."
+                );
+                return Box::new(NoopConsolidator);
+            }
             let api_key = std::env::var("SHRIMPK_CONSOLIDATION_API_KEY").ok();
             tracing::info!(
                 url = %config.ollama_url,
@@ -311,11 +342,30 @@ mod tests {
     }
 
     #[test]
-    fn from_config_http() {
+    fn from_config_http_with_consent() {
         let mut config = EchoConfig::default();
         config.consolidation_provider = "http".to_string();
+        config.consolidation_consent_given = true;
         let c = from_config(&config);
         assert_eq!(c.name(), "http");
+    }
+
+    #[test]
+    fn from_config_http_without_consent_falls_back_to_noop() {
+        let mut config = EchoConfig::default();
+        config.consolidation_provider = "http".to_string();
+        config.consolidation_consent_given = false;
+        let c = from_config(&config);
+        assert_eq!(c.name(), "noop");
+    }
+
+    #[test]
+    fn from_config_openai_without_consent_falls_back_to_noop() {
+        let mut config = EchoConfig::default();
+        config.consolidation_provider = "openai".to_string();
+        config.consolidation_consent_given = false;
+        let c = from_config(&config);
+        assert_eq!(c.name(), "noop");
     }
 
     #[test]
