@@ -44,3 +44,5 @@ coverage/
 # Committed separately or bundled in release
 .fastembed_cache/
 **/.fastembed_cache/
+benchmarks/LongMemEval/
+benchmarks/hindsight-benchmarks/

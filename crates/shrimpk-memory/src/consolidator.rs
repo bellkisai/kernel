@@ -59,16 +59,17 @@ impl Consolidator for NoopConsolidator {
 pub struct OllamaConsolidator {
     url: String,
     model: String,
-    client: reqwest::blocking::Client,
+    agent: ureq::Agent,
 }
 
 impl OllamaConsolidator {
     pub fn new(url: String, model: String) -> Self {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .unwrap_or_else(|_| reqwest::blocking::Client::new());
-        Self { url, model, client }
+        let agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_global(Some(std::time::Duration::from_secs(60)))
+                .build(),
+        );
+        Self { url, model, agent }
     }
 }
 
@@ -96,12 +97,7 @@ impl Consolidator for OllamaConsolidator {
             "External data transmission"
         );
 
-        let resp = match self
-            .client
-            .post(&endpoint)
-            .json(&body)
-            .send()
-        {
+        let mut resp = match self.agent.post(&endpoint).send_json(&body) {
             Ok(r) => r,
             Err(e) => {
                 tracing::debug!(provider = "ollama", error = %e, "Consolidator: Ollama unreachable");
@@ -109,7 +105,7 @@ impl Consolidator for OllamaConsolidator {
             }
         };
 
-        let json: serde_json::Value = match resp.json() {
+        let json: serde_json::Value = match resp.body_mut().read_json() {
             Ok(j) => j,
             Err(e) => {
                 tracing::debug!(provider = "ollama", error = %e, "Consolidator: parse error");
@@ -136,20 +132,21 @@ pub struct HttpConsolidator {
     url: String,
     model: String,
     api_key: Option<String>,
-    client: reqwest::blocking::Client,
+    agent: ureq::Agent,
 }
 
 impl HttpConsolidator {
     pub fn new(url: String, model: String, api_key: Option<String>) -> Self {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+        let agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_global(Some(std::time::Duration::from_secs(60)))
+                .build(),
+        );
         Self {
             url,
             model,
             api_key,
-            client,
+            agent,
         }
     }
 }
@@ -181,16 +178,13 @@ impl Consolidator for HttpConsolidator {
             "External data transmission"
         );
 
-        let mut req = self
-            .client
-            .post(&endpoint)
-            .json(&body);
+        let mut req = self.agent.post(&endpoint);
 
         if let Some(key) = &self.api_key {
-            req = req.bearer_auth(key);
+            req = req.header("Authorization", &format!("Bearer {key}"));
         }
 
-        let resp = match req.send() {
+        let mut resp = match req.send_json(&body) {
             Ok(r) => r,
             Err(e) => {
                 tracing::debug!(provider = "http", error = %e, "Consolidator: API unreachable");
@@ -198,7 +192,7 @@ impl Consolidator for HttpConsolidator {
             }
         };
 
-        let json: serde_json::Value = match resp.json() {
+        let json: serde_json::Value = match resp.body_mut().read_json() {
             Ok(j) => j,
             Err(e) => {
                 tracing::debug!(provider = "http", error = %e, "Consolidator: parse error");

@@ -458,6 +458,8 @@ impl EchoEngine {
                 .map(|&(idx, _)| {
                     let idx = idx as u32;
                     let mut boost: f64 = 0.0;
+                    // Track demotion separately so it bypasses the positive cap
+                    let mut demotion: f64 = 0.0;
 
                     for &other in top_indices.iter().filter(|&&o| o != idx) {
                         let weight = hebbian.get_weight(idx, other);
@@ -466,17 +468,20 @@ impl EchoEngine {
                         }
                         boost += weight;
 
-                        // Typed relationship bonus
+                        // Typed relationship bonus (KS18) + Supersedes demotion (KS20)
                         if let Some(rel) = hebbian.get_relationship(idx, other) {
                             match rel {
-                                // Supersedes: the node with the HIGHER index is newer
-                                // (added later to the store). Give it an extra boost.
+                                // Supersedes: newer memory gets +0.1 boost,
+                                // older (superseded) memory gets -0.15 demotion.
+                                // Net 0.25 score gap pushes updated info above stale.
                                 crate::hebbian::RelationshipType::Supersedes => {
                                     if idx > other {
                                         // This node is the newer memory — boost it
                                         boost += 0.1;
+                                    } else {
+                                        // This node is the OLDER (superseded) memory — demote it
+                                        demotion -= 0.15;
                                     }
-                                    // If idx < other, the OTHER node is newer — no boost for us
                                 }
                                 // Any typed (non-CoActivation) relationship gets a small
                                 // relevance bonus — these edges carry semantic meaning
@@ -489,9 +494,8 @@ impl EchoEngine {
                         }
                     }
 
-                    // Cap Hebbian boost at 0.4 (raised from 0.3 to accommodate
-                    // relationship bonuses without squeezing co-activation boost)
-                    boost.min(0.4)
+                    // Cap positive Hebbian boost at 0.4. Demotions bypass the cap.
+                    boost.min(0.4) + demotion
                 })
                 .collect()
         };
