@@ -284,13 +284,26 @@ impl EchoEngine {
     pub async fn echo(&self, query: &str, max_results: usize) -> Result<Vec<EchoResult>> {
         let start = std::time::Instant::now();
 
-        // 1. Embed the query
+        // 0. HyDE query expansion: ask LLM for a hypothetical answer, embed that instead
+        let effective_query = if self.config.query_expansion_enabled {
+            match expand_query(&self.config, query) {
+                Some(expanded) => {
+                    tracing::debug!(original = query, expanded = %expanded, "HyDE expansion");
+                    expanded
+                }
+                None => query.to_string(), // fallback to original
+            }
+        } else {
+            query.to_string()
+        };
+
+        // 1. Embed the (possibly expanded) query
         let query_embedding = {
             let mut embedder = self
                 .embedder
                 .lock()
                 .map_err(|e| ShrimPKError::Embedding(format!("Embedder lock poisoned: {e}")))?;
-            embedder.embed(query)?
+            embedder.embed(&effective_query)?
         };
 
         // 2. Bloom filter pre-check — skip everything if no fingerprints match.
@@ -550,6 +563,19 @@ impl EchoEngine {
                 .partial_cmp(&a.final_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+
+        // 7e. Optional LLM reranker: ask LLM to reorder top-N by true relevance (KS23 Track 3)
+        if self.config.reranker_enabled && !results.is_empty() {
+            if let Some(reranked) = crate::reranker::rerank_with_llm(&self.config, query, &results) {
+                tracing::debug!(
+                    target: "shrimpk::audit",
+                    original_top1 = %results.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
+                    reranked_top1 = %reranked.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
+                    "Reranker applied"
+                );
+                results = reranked;
+            }
+        }
 
         // Release read lock before acquiring write lock
         let matched_ids: Vec<(MemoryId, usize)> = top
@@ -883,6 +909,52 @@ impl EchoEngine {
             stats.query_count += 1;
             stats.total_latency_us += latency_us;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HyDE (Hypothetical Document Embeddings) query expansion
+// ---------------------------------------------------------------------------
+
+/// Ask a local LLM for a hypothetical first-person answer to the query,
+/// then return `"<original query> <hypothetical answer>"` for embedding.
+///
+/// This shifts the embedding vector from "question space" toward "answer space",
+/// which is where stored memories live. Silently returns `None` on any failure
+/// (Ollama down, timeout, bad response) so the caller falls back to raw query.
+fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(std::time::Duration::from_secs(10)))
+            .build(),
+    );
+
+    let body = serde_json::json!({
+        "model": config.enrichment_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Given this question about a user, write a short first-person answer as if you are that user. Keep it under 30 words. Be specific with names and details."
+            },
+            {
+                "role": "user",
+                "content": query
+            }
+        ],
+        "stream": false,
+        "options": { "temperature": 0.0, "num_predict": 64 }
+    });
+
+    let endpoint = format!("{}/api/chat", config.ollama_url.trim_end_matches('/'));
+    let mut resp = agent.post(&endpoint).send_json(&body).ok()?;
+    let json: serde_json::Value = resp.body_mut().read_json().ok()?;
+    let content = json["message"]["content"].as_str()?;
+
+    if content.len() > 10 {
+        // Combine original query + expansion for better embedding coverage
+        Some(format!("{} {}", query, content))
+    } else {
+        None
     }
 }
 

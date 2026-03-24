@@ -23,6 +23,7 @@ pub mod lsh;
 pub mod persistence;
 pub mod pii;
 pub mod reformulator;
+pub mod reranker;
 pub mod similarity;
 pub mod store;
 

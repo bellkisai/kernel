@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn ollama_handles_unreachable() {
-        let c = OllamaConsolidator::new("http://127.0.0.1:99999".into(), "test".into());
+        let c = OllamaConsolidator::new("http://127.0.0.1:99999".into(), "test".into(), None);
         let facts = c.extract_facts("test text", 5);
         assert!(facts.is_empty());
     }

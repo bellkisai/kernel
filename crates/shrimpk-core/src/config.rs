@@ -140,6 +140,19 @@ pub struct EchoConfig {
     /// Default: built-in prompt. Set via config.toml or SHRIMPK_FACT_PROMPT env var.
     #[serde(default)]
     pub fact_extraction_prompt: Option<String>,
+    /// HyDE query expansion: ask an LLM for a hypothetical answer before embedding.
+    /// Improves recall for preference-tracking and indirect queries at the cost of
+    /// ~100-500ms latency per echo call (Ollama round-trip).
+    /// Default: false (raw query embedding only).
+    #[serde(default)]
+    pub query_expansion_enabled: bool,
+    /// LLM-based reranking of top-N echo results.
+    /// When enabled, the top-10 results from cosine+Hebbian scoring are sent to
+    /// a local LLM (via Ollama) which reorders them by true semantic relevance.
+    /// This helps cases like PT-1 where keyword overlap misleads cosine ranking.
+    /// Default: false (reranker is opt-in).
+    #[serde(default)]
+    pub reranker_enabled: bool,
 }
 
 fn default_proxy_target() -> String {
@@ -214,6 +227,8 @@ impl Default for EchoConfig {
             child_memory_penalty: 0.0,
             supersedes_demotion: 0.0,
             fact_extraction_prompt: None,
+            query_expansion_enabled: false,
+            reranker_enabled: false,
         }
     }
 }
@@ -306,6 +321,8 @@ pub struct FileConfig {
     pub child_rescue_only: Option<bool>,
     pub child_memory_penalty: Option<f32>,
     pub supersedes_demotion: Option<f32>,
+    pub query_expansion_enabled: Option<bool>,
+    pub reranker_enabled: Option<bool>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -474,6 +491,12 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Some(v) = fc.supersedes_demotion {
             config.supersedes_demotion = v;
         }
+        if let Some(v) = fc.query_expansion_enabled {
+            config.query_expansion_enabled = v;
+        }
+        if let Some(v) = fc.reranker_enabled {
+            config.reranker_enabled = v;
+        }
     }
 
     // Layer 3: env var overrides (highest priority)
@@ -518,6 +541,12 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
     if let Some(v) = env_f32("SHRIMPK_RECENCY_WEIGHT")? {
         config.recency_weight = v;
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_QUERY_EXPANSION") {
+        config.query_expansion_enabled = v.parse().unwrap_or(false);
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_RERANKER") {
+        config.reranker_enabled = v.parse().unwrap_or(false);
     }
 
     Ok(config)
