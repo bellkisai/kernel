@@ -55,7 +55,7 @@ const ECHO_DECAY_DAYS: i64 = 30;
 /// Perform a full consolidation pass on the Echo Memory engine components.
 ///
 /// This is the core cleanup routine. It acquires mutable references to
-/// all engine internals and performs four maintenance steps in sequence.
+/// all engine internals and performs five maintenance steps in sequence.
 ///
 /// # Arguments
 /// * `store` - The in-memory vector store (may have entries removed/merged)

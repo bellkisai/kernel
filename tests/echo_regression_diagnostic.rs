@@ -1,11 +1,13 @@
 //! Regression diagnostic for the 6 failing LongMemEval tests.
-//! Runs each test with 4 pipeline configs to isolate HyDE vs reranker issues.
+//! Runs each test with 6 pipeline configs to isolate HyDE vs reranker issues.
+//! Configs A-D use LLM reranker (Ollama), E-F use fastembed cross-encoder.
 //!
 //!     cargo test --test echo_regression_diagnostic -- --ignored --nocapture --test-threads=1
 
-use shrimpk_core::EchoConfig;
+use shrimpk_core::{EchoConfig, RerankerBackend};
 use shrimpk_memory::EchoEngine;
 use std::path::PathBuf;
+use std::time::Instant;
 use tempfile::tempdir;
 
 fn top_n_contains(results: &[shrimpk_core::EchoResult], n: usize, needle: &str) -> bool {
@@ -17,7 +19,7 @@ fn any_needle_in_top_n(results: &[shrimpk_core::EchoResult], n: usize, needles: 
     needles.iter().any(|needle| top_n_contains(results, n, needle))
 }
 
-fn make_config(data_dir: PathBuf, hyde: bool, reranker: bool) -> EchoConfig {
+fn make_config(data_dir: PathBuf, hyde: bool, reranker: bool, backend: RerankerBackend) -> EchoConfig {
     EchoConfig {
         max_memories: 10_000,
         similarity_threshold: 0.15,
@@ -31,6 +33,7 @@ fn make_config(data_dir: PathBuf, hyde: bool, reranker: bool) -> EchoConfig {
         consolidation_consent_given: true,
         query_expansion_enabled: hyde,
         reranker_enabled: reranker,
+        reranker_backend: backend,
         ..Default::default()
     }
 }
@@ -143,20 +146,24 @@ fn test_cases() -> Vec<TestCase> {
     ]
 }
 
+const NUM_CONFIGS: usize = 6;
+
 #[test]
 #[ignore = "requires Ollama with llama3.2:3b"]
 fn regression_diagnostic() {
-    let configs = [
-        ("A: Baseline", false, false),
-        ("B: HyDE only", true, false),
-        ("C: Reranker only", false, true),
-        ("D: Combined", true, true),
+    let configs: Vec<(&str, bool, bool, RerankerBackend)> = vec![
+        ("A: Baseline",       false, false, RerankerBackend::None),
+        ("B: HyDE only",      true,  false, RerankerBackend::None),
+        ("C: Reranker (LLM)", false, true,  RerankerBackend::Llm),
+        ("D: Combined (LLM)", true,  true,  RerankerBackend::Llm),
+        ("E: CrossEncoder",   false, true,  RerankerBackend::CrossEncoder),
+        ("F: CE + HyDE",      true,  true,  RerankerBackend::CrossEncoder),
     ];
 
     let cases = test_cases();
 
-    // Summary table
-    let mut summary: Vec<(String, [bool; 4])> = Vec::new();
+    // Summary table: name, [pass/fail per config], [latency_ms per config]
+    let mut summary: Vec<(String, [bool; NUM_CONFIGS], [u128; NUM_CONFIGS])> = Vec::new();
 
     for case in &cases {
         println!("\n============================================================");
@@ -168,11 +175,12 @@ fn regression_diagnostic() {
         }
         println!();
 
-        let mut row = [false; 4];
+        let mut row = [false; NUM_CONFIGS];
+        let mut latencies = [0u128; NUM_CONFIGS];
 
-        for (ci, (label, hyde, reranker)) in configs.iter().enumerate() {
+        for (ci, (label, hyde, reranker, backend)) in configs.iter().enumerate() {
             let dir = tempdir().expect("temp dir");
-            let config = make_config(dir.path().to_path_buf(), *hyde, *reranker);
+            let config = make_config(dir.path().to_path_buf(), *hyde, *reranker, *backend);
             let engine = EchoEngine::new(config).expect("engine init");
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -188,45 +196,82 @@ fn regression_diagnostic() {
             println!("  [{label}] consolidating...");
             run_consolidation(&engine);
 
-            // Query
+            // Query with latency measurement
+            let start = Instant::now();
             let results = rt.block_on(async {
                 engine.echo(case.query, 5).await.expect("echo")
             });
+            let latency_ms = start.elapsed().as_millis();
             drop(rt);
 
             let hit3 = any_needle_in_top_n(&results, 3, &case.needles);
             row[ci] = hit3;
-            print_results(&results, label, &case.needles);
+            latencies[ci] = latency_ms;
+            print_results(&results, &format!("{label} ({latency_ms}ms)"), &case.needles);
 
             // Explicitly drop engine to free fastembed memory before next config
             drop(engine);
             drop(dir);
         }
 
-        summary.push((case.name.to_string(), row));
+        summary.push((case.name.to_string(), row, latencies));
     }
 
     // Print summary matrix
     println!("\n============================================================");
-    println!("=== DIAGNOSTIC SUMMARY ===\n");
-    println!("{:<25} | Baseline | HyDE | Reranker | Combined", "Test");
-    println!("-------------------------+----------+------+----------+---------");
-    for (name, results) in &summary {
-        println!("{:<25} | {:^8} | {:^4} | {:^8} | {:^8}",
+    println!("=== DIAGNOSTIC SUMMARY (6 configs) ===\n");
+    println!(
+        "{:<20} | {:^8} | {:^6} | {:^10} | {:^10} | {:^8} | {:^8}",
+        "Test", "Baseline", "HyDE", "Rerank(LLM)", "Comb(LLM)", "CE only", "CE+HyDE"
+    );
+    println!("{}", "-".repeat(90));
+    for (name, results, _latencies) in &summary {
+        println!(
+            "{:<20} | {:^8} | {:^6} | {:^10} | {:^10} | {:^8} | {:^8}",
             name,
             if results[0] {"PASS"} else {"MISS"},
             if results[1] {"PASS"} else {"MISS"},
             if results[2] {"PASS"} else {"MISS"},
             if results[3] {"PASS"} else {"MISS"},
+            if results[4] {"PASS"} else {"MISS"},
+            if results[5] {"PASS"} else {"MISS"},
         );
     }
-    let totals: Vec<usize> = (0..4).map(|i| summary.iter().filter(|(_, r)| r[i]).count()).collect();
-    println!("-------------------------+----------+------+----------+---------");
-    println!("{:<25} | {:^8} | {:^4} | {:^8} | {:^8}",
-        format!("TOTAL ({}/6)", totals[3]),
+    let totals: Vec<usize> = (0..NUM_CONFIGS).map(|i| summary.iter().filter(|(_, r, _)| r[i]).count()).collect();
+    println!("{}", "-".repeat(90));
+    println!(
+        "{:<20} | {:^8} | {:^6} | {:^10} | {:^10} | {:^8} | {:^8}",
+        format!("TOTAL ({}/6)", totals.iter().max().unwrap_or(&0)),
         format!("{}/6", totals[0]),
         format!("{}/6", totals[1]),
         format!("{}/6", totals[2]),
         format!("{}/6", totals[3]),
+        format!("{}/6", totals[4]),
+        format!("{}/6", totals[5]),
+    );
+
+    // Latency comparison
+    println!("\n=== LATENCY COMPARISON (ms) ===\n");
+    println!(
+        "{:<20} | {:>8} | {:>6} | {:>10} | {:>10} | {:>8} | {:>8}",
+        "Test", "Baseline", "HyDE", "Rerank(LLM)", "Comb(LLM)", "CE only", "CE+HyDE"
+    );
+    println!("{}", "-".repeat(90));
+    for (name, _results, latencies) in &summary {
+        println!(
+            "{:<20} | {:>6}ms | {:>4}ms | {:>8}ms | {:>8}ms | {:>6}ms | {:>6}ms",
+            name,
+            latencies[0], latencies[1], latencies[2], latencies[3], latencies[4], latencies[5],
+        );
+    }
+    let avg_latencies: Vec<u128> = (0..NUM_CONFIGS).map(|i| {
+        let sum: u128 = summary.iter().map(|(_, _, l)| l[i]).sum();
+        sum / summary.len().max(1) as u128
+    }).collect();
+    println!("{}", "-".repeat(90));
+    println!(
+        "{:<20} | {:>6}ms | {:>4}ms | {:>8}ms | {:>8}ms | {:>6}ms | {:>6}ms",
+        "AVERAGE",
+        avg_latencies[0], avg_latencies[1], avg_latencies[2], avg_latencies[3], avg_latencies[4], avg_latencies[5],
     );
 }

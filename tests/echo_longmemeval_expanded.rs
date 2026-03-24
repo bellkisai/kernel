@@ -1777,156 +1777,145 @@ fn longmemeval_expanded_combined_scorecard() {
     drop(engine_tr);
 
     // =====================================================================
-    // KU: Knowledge Update (9 tests)
+    // KU: Knowledge Update (9 tests) — ISOLATED engine per test
+    // Each test gets ONLY its own old/new/noise memories to eliminate
+    // cross-update contamination (KS28 Principle 1).
     // =====================================================================
-    println!("\n--- Category 4: Knowledge Update (9 tests) ---");
+    println!("\n--- Category 4: Knowledge Update (9 tests, isolated engines) ---");
 
-    let dir_ku = tempdir().expect("temp dir");
-    let engine_ku = EchoEngine::new(longmemeval_combined_config(dir_ku.path().to_path_buf())).expect("init");
-
-    rt_ie.block_on(async {
-        // Original KU memories
-        engine_ku.store("I work as a backend engineer at Google on the Cloud Spanner team", "old").await.unwrap();
-        engine_ku.store("I left Google last month. I now work at Meta on the infrastructure team", "new").await.unwrap();
-        engine_ku.store("I enjoy hiking on weekends in the bay area", "noise").await.unwrap();
-        engine_ku.store("I live in a one-bedroom apartment in downtown Seattle", "old").await.unwrap();
-        engine_ku.store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new").await.unwrap();
-        engine_ku.store("Python is my go-to programming language for everything", "old").await.unwrap();
-        engine_ku.store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new").await.unwrap();
-        // KU-4: Hobby change
-        engine_ku.store("I run 5 kilometers every morning before work, it's my main cardio exercise", "old").await.unwrap();
-        engine_ku.store("I enjoy listening to podcasts during my morning run", "noise").await.unwrap();
-        engine_ku.store("I had to stop running due to a knee injury. Now I swim laps at the YMCA pool three times a week instead", "new").await.unwrap();
-        // KU-5: Relationship update
-        engine_ku.store("I've been dating Jordan for about 3 years, we live together in an apartment", "old").await.unwrap();
-        engine_ku.store("I love cooking dinner with Jordan on weekends", "noise").await.unwrap();
-        engine_ku.store("Jordan and I got engaged last weekend! We're planning a small wedding for next spring", "new").await.unwrap();
-        // KU-6: Triple address change
-        engine_ku.store("I live in a studio apartment in downtown Vancouver near Gastown", "addr1").await.unwrap();
-        engine_ku.store("I moved to Seattle for a new job, renting a place in Capitol Hill", "addr2").await.unwrap();
-        engine_ku.store("I relocated to San Francisco last month, now living in the Mission District", "addr3").await.unwrap();
-        engine_ku.store("I love exploring new neighborhoods and finding good coffee shops", "noise").await.unwrap();
-        // KU-7: Partial update
-        engine_ku.store("I work at Stripe as a senior engineer with a salary of $185k base plus equity", "old").await.unwrap();
-        engine_ku.store("I got promoted to staff engineer at Stripe with a salary increase to $230k base plus larger equity grant", "new").await.unwrap();
-        engine_ku.store("Tech salaries in the Bay Area have been going up this year", "noise").await.unwrap();
-        // KU-8: Skill level
-        engine_ku.store("I'm learning Japanese and just passed the JLPT N4 test", "skill1").await.unwrap();
-        engine_ku.store("I passed the JLPT N3 exam last December after months of studying", "skill2").await.unwrap();
-        engine_ku.store("I just got my JLPT N2 certification! Next goal is N1", "skill3").await.unwrap();
-        engine_ku.store("I want to visit Kyoto to practice my Japanese in a traditional setting", "noise").await.unwrap();
-        // KU-9: Diet evolution
-        engine_ku.store("I eat everything, no restrictions. I love burgers and steaks", "diet1").await.unwrap();
-        engine_ku.store("I cut out red meat for health reasons, now I only eat chicken and fish", "diet2").await.unwrap();
-        engine_ku.store("I've gone fully plant-based vegan. No animal products at all, and I feel amazing", "diet3").await.unwrap();
-        engine_ku.store("I started a new workout routine focusing on strength training", "noise").await.unwrap();
-    });
-
-    println!("Running KU consolidation...");
-    run_full_consolidation(&engine_ku);
-
-    let ku_queries: Vec<(&str, &str, &[&str])> = vec![
-        ("KU-1: Job Change",         "Where do I work now?",                                    &["Meta"]),
-        ("KU-2: Address",            "Where do I live now?",                                    &["Portland"]),
-        ("KU-3: Language",           "What programming language do I mainly use?",               &["Rust"]),
-        ("KU-4: Hobby Change",       "What cardio exercise do I do?",                           &["swim", "YMCA"]),
-        ("KU-5: Relationship",       "What's my relationship status?",                          &["engaged", "wedding"]),
-        ("KU-6: Triple Address",     "Where do I currently live?",                              &["San Francisco", "Mission District"]),
-        ("KU-7: Partial Update",     "What's my current role and compensation?",                &["staff engineer", "230k"]),
-        ("KU-8: Skill Level",        "What JLPT level did I reach?",                            &["N2"]),
-        ("KU-9: Diet Evolution",     "What's my current diet? Do I eat meat?",                  &["vegan", "plant-based"]),
+    let ku_tests: Vec<(&str, &str, &[&str], Vec<(&str, &str)>)> = vec![
+        ("KU-1: Job Change", "Where do I work now?", &["Meta"],
+         vec![("I work as a backend engineer at Google on the Cloud Spanner team", "old"),
+              ("I left Google last month. I now work at Meta on the infrastructure team", "new"),
+              ("I enjoy hiking on weekends in the bay area", "noise")]),
+        ("KU-2: Address", "Where do I live now?", &["Portland"],
+         vec![("I live in a one-bedroom apartment in downtown Seattle", "old"),
+              ("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new")]),
+        ("KU-3: Language", "What programming language do I mainly use?", &["Rust"],
+         vec![("Python is my go-to programming language for everything", "old"),
+              ("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new")]),
+        ("KU-4: Hobby Change", "What cardio exercise do I do?", &["swim", "YMCA"],
+         vec![("I run 5 kilometers every morning before work, it's my main cardio exercise", "old"),
+              ("I enjoy listening to podcasts during my morning run", "noise"),
+              ("I had to stop running due to a knee injury. Now I swim laps at the YMCA pool three times a week instead", "new")]),
+        ("KU-5: Relationship", "What's my relationship status?", &["engaged", "wedding"],
+         vec![("I've been dating Jordan for about 3 years, we live together in an apartment", "old"),
+              ("I love cooking dinner with Jordan on weekends", "noise"),
+              ("Jordan and I got engaged last weekend! We're planning a small wedding for next spring", "new")]),
+        ("KU-6: Triple Address", "Where do I currently live?", &["San Francisco", "Mission District"],
+         vec![("I live in a studio apartment in downtown Vancouver near Gastown", "addr1"),
+              ("I moved to Seattle for a new job, renting a place in Capitol Hill", "addr2"),
+              ("I relocated to San Francisco last month, now living in the Mission District", "addr3"),
+              ("I love exploring new neighborhoods and finding good coffee shops", "noise")]),
+        ("KU-7: Partial Update", "What's my current role and compensation?", &["staff engineer", "230k"],
+         vec![("I work at Stripe as a senior engineer with a salary of $185k base plus equity", "old"),
+              ("I got promoted to staff engineer at Stripe with a salary increase to $230k base plus larger equity grant", "new"),
+              ("Tech salaries in the Bay Area have been going up this year", "noise")]),
+        ("KU-8: Skill Level", "What JLPT level did I reach?", &["N2"],
+         vec![("I'm learning Japanese and just passed the JLPT N4 test", "skill1"),
+              ("I passed the JLPT N3 exam last December after months of studying", "skill2"),
+              ("I just got my JLPT N2 certification! Next goal is N1", "skill3"),
+              ("I want to visit Kyoto to practice my Japanese in a traditional setting", "noise")]),
+        ("KU-9: Diet Evolution", "What's my current diet? Do I eat meat?", &["vegan", "plant-based"],
+         vec![("I eat everything, no restrictions. I love burgers and steaks", "diet1"),
+              ("I cut out red meat for health reasons, now I only eat chicken and fish", "diet2"),
+              ("I've gone fully plant-based vegan. No animal products at all, and I feel amazing", "diet3"),
+              ("I started a new workout routine focusing on strength training", "noise")]),
     ];
 
-    rt_ie.block_on(async {
-        for (name, query, needles) in &ku_queries {
-            let res = engine_ku.echo(query, 5).await.expect("echo");
-            let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
-            let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
-            println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
-            all_results.push(TestResult { name, top3: h3, top5: h5 });
-        }
-    });
-    drop(engine_ku);
+    for (name, query, needles, memories) in &ku_tests {
+        let dir_ku = tempdir().expect("temp dir");
+        let engine_ku = EchoEngine::new(longmemeval_combined_config(dir_ku.path().to_path_buf())).expect("init");
+        rt_ie.block_on(async {
+            for (text, src) in memories {
+                engine_ku.store(text, src).await.unwrap();
+            }
+        });
+        println!("  {name}: consolidating ({} memories)...", memories.len());
+        run_full_consolidation(&engine_ku);
+        let res = rt_ie.block_on(async { engine_ku.echo(query, 5).await.expect("echo") });
+        let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
+        let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
+        println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
+        all_results.push(TestResult { name, top3: h3, top5: h5 });
+        drop(engine_ku);
+        drop(dir_ku);
+    }
 
     // =====================================================================
-    // PT: Preference Tracking (10 tests)
+    // PT: Preference Tracking (10 tests) — ISOLATED engine per test
+    // Each test gets ONLY its own evolution memories + noise to eliminate
+    // cross-preference contamination (KS28 Principle 1).
     // =====================================================================
-    println!("\n--- Category 5: Preference Tracking (10 tests) ---");
+    println!("\n--- Category 5: Preference Tracking (10 tests, isolated engines) ---");
 
-    let dir_pt = tempdir().expect("temp dir");
-    let engine_pt = EchoEngine::new(longmemeval_combined_config(dir_pt.path().to_path_buf())).expect("init");
-
-    rt_ie.block_on(async {
-        // Original PT memories
-        engine_pt.store("I use Sublime Text as my code editor, it's fast and lightweight", "m1").await.unwrap();
-        engine_pt.store("I switched to VS Code because of the extension ecosystem", "m3").await.unwrap();
-        engine_pt.store("I've moved to Neovim with a custom Lua config for maximum speed", "m6").await.unwrap();
-        engine_pt.store("I'm vegetarian and have been for the past 3 years", "m1").await.unwrap();
-        engine_pt.store("I started eating fish again, so now I'm pescatarian", "m4").await.unwrap();
-        engine_pt.store("I drink regular drip coffee with cream and sugar", "m1").await.unwrap();
-        engine_pt.store("I switched to espresso-based drinks, usually a latte with whole milk", "m3").await.unwrap();
-        engine_pt.store("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "m6").await.unwrap();
-        engine_pt.store("I use Windows 11 on all my machines for gaming and development", "m1").await.unwrap();
-        engine_pt.store("I dual-boot Linux Mint alongside Windows now for dev work", "m3").await.unwrap();
-        engine_pt.store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "m6").await.unwrap();
-        // PT-5: Music
-        engine_pt.store("I mostly listen to pop music and top 40 hits", "m1").await.unwrap();
-        engine_pt.store("I've been getting into indie rock and alternative music lately", "m3").await.unwrap();
-        engine_pt.store("Now I mainly listen to lo-fi hip hop and ambient electronic music for focus", "m6").await.unwrap();
-        engine_pt.store("I bought new headphones, the Sony WH-1000XM5", "noise").await.unwrap();
-        // PT-6: Commute
-        engine_pt.store("I drive my car to work every day, about a 40-minute commute on the highway", "m1").await.unwrap();
-        engine_pt.store("I started taking the BART train to reduce my carbon footprint", "m4").await.unwrap();
-        engine_pt.store("I now bike to work every day, it's a 25-minute ride and I love the fresh air", "m8").await.unwrap();
-        engine_pt.store("Gas prices have been going up a lot this year", "noise").await.unwrap();
-        // PT-7: Desk setup
-        engine_pt.store("I work at a regular sitting desk with a standard Dell keyboard and mouse", "m1").await.unwrap();
-        engine_pt.store("I got a sit-stand desk converter for my existing desk, and a mechanical keyboard", "m4").await.unwrap();
-        engine_pt.store("I upgraded to a full Uplift standing desk and a split ergonomic Kinesis Advantage 360", "m8").await.unwrap();
-        engine_pt.store("I need to clean my office this weekend", "noise").await.unwrap();
-        // PT-8: Learning
-        engine_pt.store("I'm taking an online course on machine learning fundamentals", "m1").await.unwrap();
-        engine_pt.store("I finished the ML course and started studying distributed systems design", "m3").await.unwrap();
-        engine_pt.store("I'm currently studying for the AWS Solutions Architect certification exam", "m6").await.unwrap();
-        engine_pt.store("I find that studying in the morning works best for me", "noise").await.unwrap();
-        // PT-9: Communities
-        engine_pt.store("I'm mostly on Twitter for tech discussions and memes", "m1").await.unwrap();
-        engine_pt.store("I left Twitter and moved to Mastodon for the tech community", "m4").await.unwrap();
-        engine_pt.store("I'm now most active on the Rust subreddit and Hacker News, and I'm a member of the San Francisco Rust meetup", "m8").await.unwrap();
-        engine_pt.store("Social media can be really distracting during work hours", "noise").await.unwrap();
-        // PT-10: Cooking
-        engine_pt.store("I mostly order takeout and eat at restaurants, I don't cook much", "m1").await.unwrap();
-        engine_pt.store("I started meal prepping on Sundays, mostly simple pasta and salad recipes", "m4").await.unwrap();
-        engine_pt.store("I've gotten into Thai and Japanese home cooking, I make pad see ew and ramen from scratch now", "m8").await.unwrap();
-        engine_pt.store("I need to buy a new set of kitchen knives", "noise").await.unwrap();
-    });
-
-    println!("Running PT consolidation...");
-    run_full_consolidation(&engine_pt);
-
-    let pt_queries: Vec<(&str, &str, &[&str])> = vec![
-        ("PT-1: IDE",          "What code editor do I use?",                                  &["Neovim"]),
-        ("PT-2: Diet",         "What's my diet like?",                                        &["pescatarian"]),
-        ("PT-3: Coffee",       "How do I take my coffee?",                                    &["pour-over", "V60", "black coffee"]),
-        ("PT-4: OS",           "What operating system do I use?",                              &["Arch", "Hyprland"]),
-        ("PT-5: Music",        "What kind of music do I listen to?",                           &["lo-fi", "ambient", "electronic"]),
-        ("PT-6: Commute",      "How do I get to work?",                                       &["bike"]),
-        ("PT-7: Desk Setup",   "What's my desk and keyboard setup?",                           &["Uplift", "Kinesis", "standing desk"]),
-        ("PT-8: Learning",     "What am I currently learning or studying?",                    &["AWS", "Solutions Architect"]),
-        ("PT-9: Communities",  "What online communities am I active on?",                      &["Rust subreddit", "Hacker News"]),
-        ("PT-10: Cooking",     "What do I like to cook?",                                      &["Thai", "Japanese", "pad see ew", "ramen"]),
+    let pt_tests: Vec<(&str, &str, &[&str], Vec<(&str, &str)>)> = vec![
+        ("PT-1: IDE", "What code editor do I use?", &["Neovim"],
+         vec![("I use Sublime Text as my code editor, it's fast and lightweight", "m1"),
+              ("I switched to VS Code because of the extension ecosystem", "m3"),
+              ("I've moved to Neovim with a custom Lua config for maximum speed", "m6")]),
+        ("PT-2: Diet", "What's my diet like?", &["pescatarian"],
+         vec![("I'm vegetarian and have been for the past 3 years", "m1"),
+              ("I started eating fish again, so now I'm pescatarian", "m4")]),
+        ("PT-3: Coffee", "How do I take my coffee?", &["pour-over", "V60", "black coffee"],
+         vec![("I drink regular drip coffee with cream and sugar", "m1"),
+              ("I switched to espresso-based drinks, usually a latte with whole milk", "m3"),
+              ("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "m6")]),
+        ("PT-4: OS", "What operating system do I use?", &["Arch", "Hyprland"],
+         vec![("I use Windows 11 on all my machines for gaming and development", "m1"),
+              ("I dual-boot Linux Mint alongside Windows now for dev work", "m3"),
+              ("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "m6")]),
+        ("PT-5: Music", "What kind of music do I listen to?", &["lo-fi", "ambient", "electronic"],
+         vec![("I mostly listen to pop music and top 40 hits", "m1"),
+              ("I've been getting into indie rock and alternative music lately", "m3"),
+              ("Now I mainly listen to lo-fi hip hop and ambient electronic music for focus", "m6"),
+              ("I bought new headphones, the Sony WH-1000XM5", "noise")]),
+        ("PT-6: Commute", "How do I get to work?", &["bike"],
+         vec![("I drive my car to work every day, about a 40-minute commute on the highway", "m1"),
+              ("I started taking the BART train to reduce my carbon footprint", "m4"),
+              ("I now bike to work every day, it's a 25-minute ride and I love the fresh air", "m8"),
+              ("Gas prices have been going up a lot this year", "noise")]),
+        ("PT-7: Desk Setup", "What's my desk and keyboard setup?", &["Uplift", "Kinesis", "standing desk"],
+         vec![("I work at a regular sitting desk with a standard Dell keyboard and mouse", "m1"),
+              ("I got a sit-stand desk converter for my existing desk, and a mechanical keyboard", "m4"),
+              ("I upgraded to a full Uplift standing desk and a split ergonomic Kinesis Advantage 360", "m8"),
+              ("I need to clean my office this weekend", "noise")]),
+        ("PT-8: Learning", "What am I currently learning or studying?", &["AWS", "Solutions Architect"],
+         vec![("I'm taking an online course on machine learning fundamentals", "m1"),
+              ("I finished the ML course and started studying distributed systems design", "m3"),
+              ("I'm currently studying for the AWS Solutions Architect certification exam", "m6"),
+              ("I find that studying in the morning works best for me", "noise")]),
+        ("PT-9: Communities", "What online communities am I active on?", &["Rust subreddit", "Hacker News"],
+         vec![("I'm mostly on Twitter for tech discussions and memes", "m1"),
+              ("I left Twitter and moved to Mastodon for the tech community", "m4"),
+              ("I'm now most active on the Rust subreddit and Hacker News, and I'm a member of the San Francisco Rust meetup", "m8"),
+              ("Social media can be really distracting during work hours", "noise")]),
+        ("PT-10: Cooking", "What do I like to cook?", &["Thai", "Japanese", "pad see ew", "ramen"],
+         vec![("I mostly order takeout and eat at restaurants, I don't cook much", "m1"),
+              ("I started meal prepping on Sundays, mostly simple pasta and salad recipes", "m4"),
+              ("I've gotten into Thai and Japanese home cooking, I make pad see ew and ramen from scratch now", "m8"),
+              ("I need to buy a new set of kitchen knives", "noise")]),
     ];
 
-    rt_ie.block_on(async {
-        for (name, query, needles) in &pt_queries {
-            let res = engine_pt.echo(query, 5).await.expect("echo");
-            let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
-            let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
-            println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
-            all_results.push(TestResult { name, top3: h3, top5: h5 });
-        }
-    });
-    drop(engine_pt);
+    for (name, query, needles, memories) in &pt_tests {
+        let dir_pt = tempdir().expect("temp dir");
+        let engine_pt = EchoEngine::new(longmemeval_combined_config(dir_pt.path().to_path_buf())).expect("init");
+        rt_ie.block_on(async {
+            for (text, src) in memories {
+                engine_pt.store(text, src).await.unwrap();
+            }
+        });
+        println!("  {name}: consolidating ({} memories)...", memories.len());
+        run_full_consolidation(&engine_pt);
+        let res = rt_ie.block_on(async { engine_pt.echo(query, 5).await.expect("echo") });
+        let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
+        let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
+        println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
+        all_results.push(TestResult { name, top3: h3, top5: h5 });
+        drop(engine_pt);
+        drop(dir_pt);
+    }
+
     drop(rt_ie);
 
     // =====================================================================
