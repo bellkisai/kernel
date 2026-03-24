@@ -38,7 +38,7 @@ use tempfile::tempdir;
 fn longmemeval_config(data_dir: PathBuf) -> EchoConfig {
     EchoConfig {
         max_memories: 10_000,
-        similarity_threshold: 0.10, // low: we want to measure ranking, not gating
+        similarity_threshold: 0.15, // low: we want to measure ranking, not gating
         max_echo_results: 10,
         ram_budget_bytes: 100_000_000,
         data_dir,

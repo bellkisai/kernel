@@ -169,6 +169,11 @@ pub fn consolidate(
                     );
                     child.parent_id = Some(parent_id.clone());
                     child.enriched = true;
+                    // Propagate parent's temporal era so children inherit
+                    // the correct age for recency scoring (KS21).
+                    if let Some(parent_entry) = store.entry_at(idx) {
+                        child.created_at = parent_entry.created_at;
+                    }
 
                     let child_idx = store.add(child) as u32;
                     lsh.insert(child_idx, &embedding);

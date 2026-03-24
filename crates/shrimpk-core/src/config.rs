@@ -123,6 +123,14 @@ pub struct EchoConfig {
     /// Default: 0.05 (small — cosine similarity should still dominate).
     #[serde(default = "default_recency_weight")]
     pub recency_weight: f32,
+    /// When true, child memories (from consolidation) only participate via Pipe B rescue,
+    /// never in direct Pipe A ranking. Prevents child fragments from displacing parents.
+    #[serde(default = "default_child_rescue_only")]
+    pub child_rescue_only: bool,
+    /// Score penalty applied to child memories when promoted via Pipe B rescue.
+    /// Default: 0.0 (no penalty). Negative values demote children relative to parents.
+    #[serde(default)]
+    pub child_memory_penalty: f32,
 }
 
 fn default_proxy_target() -> String {
@@ -141,9 +149,12 @@ fn default_proxy_context_window() -> usize {
 fn default_daemon_rate_limit() -> u64 {
     100
 }
+fn default_child_rescue_only() -> bool {
+    true
+}
 
 fn default_recency_weight() -> f32 {
-    0.15
+    0.05
 }
 
 fn default_max_disk_bytes() -> u64 {
@@ -190,6 +201,8 @@ impl Default for EchoConfig {
             daemon_rate_limit: default_daemon_rate_limit(),
             consolidation_consent_given: false,
             recency_weight: default_recency_weight(),
+            child_rescue_only: default_child_rescue_only(),
+            child_memory_penalty: 0.0,
         }
     }
 }
@@ -279,6 +292,8 @@ pub struct FileConfig {
     pub daemon_rate_limit: Option<u64>,
     pub consolidation_consent_given: Option<bool>,
     pub recency_weight: Option<f32>,
+    pub child_rescue_only: Option<bool>,
+    pub child_memory_penalty: Option<f32>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -437,6 +452,12 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.recency_weight {
             config.recency_weight = v;
+        }
+        if let Some(v) = fc.child_rescue_only {
+            config.child_rescue_only = v;
+        }
+        if let Some(v) = fc.child_memory_penalty {
+            config.child_memory_penalty = v;
         }
     }
 
@@ -770,6 +791,6 @@ mod tests {
     #[test]
     fn default_config_has_recency_weight() {
         let config = EchoConfig::default();
-        assert!((config.recency_weight - 0.15).abs() < f32::EPSILON);
+        assert!((config.recency_weight - 0.05).abs() < f32::EPSILON);
     }
 }

@@ -371,9 +371,21 @@ impl EchoEngine {
         );
 
         let threshold = self.config.similarity_threshold;
+        let child_rescue_only = self.config.child_rescue_only;
         let (pipe_a, pipe_b): (Vec<(usize, f32)>, Vec<(usize, f32)>) = all_ranked
             .into_iter()
-            .partition(|&(_, score)| score >= threshold);
+            .partition(|&(idx, score)| {
+                if score < threshold {
+                    return false; // below threshold → Pipe B
+                }
+                // When child_rescue_only is true, children go to Pipe B even if above threshold.
+                // They can still rescue parents but never appear in direct ranking.
+                if child_rescue_only {
+                    store.entry_at(idx).map_or(true, |e| e.parent_id.is_none())
+                } else {
+                    true
+                }
+            });
 
         // 6. Pipe B: check if near-miss parents have enriched children that score better
         let promoted: Vec<(usize, f32)> = if store.has_enriched_memories() && !pipe_b.is_empty() {
@@ -479,8 +491,9 @@ impl EchoEngine {
                                         // This node is the newer memory — boost it
                                         boost += 0.1;
                                     } else {
-                                        // This node is the OLDER (superseded) memory — demote it
-                                        demotion -= 0.15;
+                                        // This node is the OLDER (superseded) memory — demote it.
+                                        // Disabled pending parameter sweep (KS21). Was -0.15.
+                                        demotion -= 0.0;
                                     }
                                 }
                                 // Any typed (non-CoActivation) relationship gets a small
@@ -514,12 +527,11 @@ impl EchoEngine {
                 let half_life = entry.category.half_life_secs();
                 let decay = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
 
-                // Recency boost (KS18 Track 3, tuned KS19 Track 2): sqrt-based decay.
-                // Formula: recency_weight / (1.0 + sqrt(days_since_stored))
-                // At 0 days: +0.15. At 1 day: +0.075. At 7 days: +0.050. At 30 days: +0.026.
-                // Stronger differentiation for recent memories while still fading gracefully.
+                // Recency boost (KS18 Track 3): newer memories get a small advantage.
+                // Formula: recency_weight / (1.0 + days_since_stored)
+                // At default 0.05: day 0 = +0.05, day 7 = +0.006, day 30 = +0.002.
                 let days_since_stored = age_secs / 86400.0;
-                let recency_boost = recency_weight / (1.0 + days_since_stored.sqrt());
+                let recency_boost = recency_weight / (1.0 + days_since_stored);
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
