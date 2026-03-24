@@ -2354,3 +2354,234 @@ fn longmemeval_hyde_scorecard() {
     println!();
     println!("=== HYDE BENCHMARK COMPLETE ===");
 }
+
+// ===========================================================================
+// COMBINED: Consolidation + HyDE + Reranker
+// ===========================================================================
+
+fn longmemeval_combined_config(data_dir: PathBuf) -> EchoConfig {
+    EchoConfig {
+        max_memories: 10_000,
+        similarity_threshold: 0.15,
+        max_echo_results: 10,
+        ram_budget_bytes: 100_000_000,
+        data_dir,
+        embedding_dim: 384,
+        consolidation_provider: "ollama".to_string(),
+        ollama_url: "http://127.0.0.1:11434".to_string(),
+        enrichment_model: "llama3.2:3b".to_string(),
+        consolidation_consent_given: true,
+        query_expansion_enabled: true,
+        reranker_enabled: true,
+        fact_extraction_prompt: Some(
+            "Extract personal facts from the text. Rules:\n\
+             1. One fact per line, starting with \"The user\"\n\
+             2. Use ONLY these verbs: works at, works for, joined, lives in, moved to, \
+             based in, uses, prefers, switched to, likes, chose, belongs to, member of, part of\n\
+             3. No colons, labels, or key-value pairs\n\n\
+             Example:\n  The user uses Neovim\n  The user lives in Berlin\n  \
+             The user switched to Python from Java\n\n\
+             Max {max_facts} facts. If none found, output NONE.".to_string()
+        ),
+        ..Default::default()
+    }
+}
+
+#[test]
+#[ignore = "requires Ollama with llama3.2:3b"]
+fn longmemeval_combined_scorecard() {
+    println!("\n=== LongMemEval COMBINED (C1 + HyDE + Reranker) ===\n");
+
+    // IE
+    let dir = tempdir().expect("temp dir");
+    let engine = EchoEngine::new(longmemeval_combined_config(dir.path().to_path_buf())).expect("init");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        for text in &[
+            "My name is Alex Chen and I'm 32 years old",
+            "I work as a senior backend engineer at Stripe in San Francisco",
+            "I have a golden retriever named Pixel who is 4 years old",
+            "My partner's name is Jordan and we've been together for 6 years",
+            "I graduated from the University of British Columbia with a CS degree in 2015",
+            "I was born in Taipei, Taiwan but grew up in Vancouver, Canada",
+            "I'm allergic to shellfish and cats",
+            "My favorite cuisine is Thai food, especially pad see ew and massaman curry",
+            "I practice Brazilian jiu-jitsu three times a week at a Gracie gym",
+            "I want to compete in a jiu-jitsu tournament by the end of the year",
+            "I'm learning Japanese and currently at JLPT N3 level",
+            "I visited Tokyo last November and stayed in Shinjuku for two weeks",
+            "I prefer Rust for systems programming and Go for microservices",
+            "For databases I use PostgreSQL for OLTP and ClickHouse for analytics",
+            "My long-term goal is to start a developer tools company focused on observability",
+            "I'm saving for a house in the Oakland Hills area",
+            "I drive a 2022 Tesla Model 3 but mostly bike to work",
+            "I'm being considered for a staff engineer promotion next quarter",
+            "My IDE is Neovim with LazyVim config and Catppuccin theme",
+            "I enjoy listening to classical music while coding, especially Chopin",
+            "I read about 30 books a year, mostly sci-fi and technical books",
+            "I donate monthly to the EFF and Wikipedia",
+            "I have a standing desk and use a split ergonomic keyboard",
+            "My morning routine is meditation, coffee, then 30 minutes of reading",
+            "I run a small Kubernetes cluster at home for side projects",
+        ] { engine.store(text, "profile").await.expect("store"); }
+        ()
+    });
+    println!("Running consolidation...");
+    run_full_consolidation(&engine);
+    let ie = rt.block_on(async {
+        let q = vec![
+            ("IE-1: Profession", "What is my job? Where do I work?", "Stripe"),
+            ("IE-2: Pet", "Do I have any pets?", "golden retriever"),
+            ("IE-3: Education", "Where did I go to college?", "British Columbia"),
+            ("IE-4: Allergy", "What am I allergic to?", "shellfish"),
+            ("IE-5: Hobby", "What sports or physical activities do I do?", "jiu-jitsu"),
+        ];
+        let mut r = Vec::new();
+        for (name, query, needle) in &q {
+            let res = engine.echo(query, 5).await.expect("echo");
+            let h3 = top_n_contains(&res, 3, needle);
+            let h5 = top_n_contains(&res, 5, needle);
+            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            r.push((h3, h5));
+        }
+        r
+    });
+    drop(rt);
+
+    // MSR
+    let dir2 = tempdir().expect("temp dir");
+    let engine2 = EchoEngine::new(longmemeval_combined_config(dir2.path().to_path_buf())).expect("init");
+    let rt2 = tokio::runtime::Runtime::new().unwrap();
+    rt2.block_on(async {
+        for text in &[
+            "My name is Alex Chen and I'm 32 years old",
+            "I work as a senior backend engineer at Stripe in San Francisco",
+            "I prefer Rust for systems programming and Go for microservices",
+            "For databases I use PostgreSQL for OLTP and ClickHouse for analytics",
+            "I'm learning Japanese and currently at JLPT N3 level",
+            "I visited Tokyo last November and stayed in Shinjuku for two weeks",
+            "I practice Brazilian jiu-jitsu three times a week at a Gracie gym",
+            "I want to compete in a jiu-jitsu tournament by the end of the year",
+            "My long-term goal is to start a developer tools company focused on observability",
+            "I'm saving for a house in the Oakland Hills area",
+        ] { engine2.store(text, "profile").await.expect("store"); }
+        ()
+    });
+    println!("\nRunning MSR consolidation...");
+    run_full_consolidation(&engine2);
+    let msr = rt2.block_on(async {
+        let q = vec![
+            ("MSR-1: Work+Lang", "What programming languages do I use at work?", "Rust"),
+            ("MSR-2: Travel+Lang", "Have I traveled anywhere related to languages I'm learning?", "Tokyo"),
+            ("MSR-3: Hobby+Goal", "What goals do I have related to my hobbies?", "tournament"),
+            ("MSR-4: Career", "Tell me about my career progression", "Stripe"),
+            ("MSR-5: Life Goals", "What are my big life goals? What am I saving up for?", "house"),
+        ];
+        let mut r = Vec::new();
+        for (name, query, needle) in &q {
+            let res = engine2.echo(query, 5).await.expect("echo");
+            let h3 = top_n_contains(&res, 3, needle);
+            let h5 = top_n_contains(&res, 5, needle);
+            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            r.push((h3, h5));
+        }
+        r
+    });
+    drop(rt2);
+
+    // KU
+    let dir3 = tempdir().expect("temp dir");
+    let engine3 = EchoEngine::new(longmemeval_combined_config(dir3.path().to_path_buf())).expect("init");
+    let rt3 = tokio::runtime::Runtime::new().unwrap();
+    rt3.block_on(async {
+        engine3.store("I work as a backend engineer at Google on the Cloud Spanner team", "old").await.unwrap();
+        engine3.store("I left Google last month. I now work at Meta on the infrastructure team", "new").await.unwrap();
+        engine3.store("I enjoy hiking on weekends in the bay area", "noise").await.unwrap();
+        engine3.store("I live in a one-bedroom apartment in downtown Seattle", "old").await.unwrap();
+        engine3.store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new").await.unwrap();
+        engine3.store("Python is my go-to programming language for everything", "old").await.unwrap();
+        engine3.store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new").await.unwrap();
+        ()
+    });
+    println!("\nRunning KU consolidation...");
+    run_full_consolidation(&engine3);
+    let ku = rt3.block_on(async {
+        let q = vec![
+            ("KU-1: Job Change", "Where do I work now?", "Meta"),
+            ("KU-2: Address", "Where do I live now?", "Portland"),
+            ("KU-3: Language", "What programming language do I mainly use?", "Rust"),
+        ];
+        let mut r = Vec::new();
+        for (name, query, needle) in &q {
+            let res = engine3.echo(query, 5).await.expect("echo");
+            let h3 = top_n_contains(&res, 3, needle);
+            let h5 = top_n_contains(&res, 5, needle);
+            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            r.push((h3, h5));
+        }
+        r
+    });
+    drop(rt3);
+
+    // PT
+    let dir4 = tempdir().expect("temp dir");
+    let engine4 = EchoEngine::new(longmemeval_combined_config(dir4.path().to_path_buf())).expect("init");
+    let rt4 = tokio::runtime::Runtime::new().unwrap();
+    rt4.block_on(async {
+        engine4.store("I use Sublime Text as my code editor, it's fast and lightweight", "m1").await.unwrap();
+        engine4.store("I switched to VS Code because of the extension ecosystem", "m3").await.unwrap();
+        engine4.store("I've moved to Neovim with a custom Lua config for maximum speed", "m6").await.unwrap();
+        engine4.store("I'm vegetarian and have been for the past 3 years", "m1").await.unwrap();
+        engine4.store("I started eating fish again, so now I'm pescatarian", "m4").await.unwrap();
+        engine4.store("I drink regular drip coffee with cream and sugar", "m1").await.unwrap();
+        engine4.store("I switched to espresso-based drinks, usually a latte with whole milk", "m3").await.unwrap();
+        engine4.store("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "m6").await.unwrap();
+        engine4.store("I use Windows 11 on all my machines for gaming and development", "m1").await.unwrap();
+        engine4.store("I dual-boot Linux Mint alongside Windows now for dev work", "m3").await.unwrap();
+        engine4.store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "m6").await.unwrap();
+        ()
+    });
+    println!("\nRunning PT consolidation...");
+    run_full_consolidation(&engine4);
+    let pt = rt4.block_on(async {
+        let q = vec![
+            ("PT-1: IDE", "What code editor do I use?", "Neovim"),
+            ("PT-2: Diet", "What's my diet like?", "pescatarian"),
+            ("PT-3: Coffee", "How do I take my coffee?", "pour-over"),
+            ("PT-4: OS", "What operating system do I use?", "Arch"),
+        ];
+        let mut r = Vec::new();
+        for (name, query, needle) in &q {
+            let res = engine4.echo(query, 5).await.expect("echo");
+            let h3 = top_n_contains(&res, 3, needle);
+            let h5 = top_n_contains(&res, 5, needle);
+            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            for (i, r) in res.iter().take(3).enumerate() {
+                println!("  #{}: sim={:.3} score={:.3} {}", i+1, r.similarity, r.final_score, &r.content[..r.content.len().min(70)]);
+            }
+            r.push((h3, h5));
+        }
+        r
+    });
+    drop(rt4);
+
+    let all: Vec<(bool, bool)> = ie.into_iter().chain(msr).chain(ku).chain(pt).collect();
+    let total = all.len();
+    let strict = all.iter().filter(|(h3, _)| *h3).count();
+    let relaxed = all.iter().filter(|(_, h5)| *h5).count();
+    let strict_pct = (strict as f64 / total as f64) * 100.0;
+    let relaxed_pct = (relaxed as f64 / total as f64) * 100.0;
+
+    println!("\n=== COMBINED LONGMEMEVAL SCORECARD ===");
+    println!("Total tests:      {total}");
+    println!("Top-3 accuracy:   {strict}/{total} ({strict_pct:.1}%)");
+    println!("Top-5 accuracy:   {relaxed}/{total} ({relaxed_pct:.1}%)");
+    println!();
+    println!("Baseline:             90.0% top-3, 100.0% top-5");
+    println!("Consolidated (C1):    88.2% top-3, 100.0% top-5");
+    println!("HyDE only:            88.2% top-3, 100.0% top-5");
+    println!("Reranker only:        94.1% top-3, 94.1% top-5");
+    println!("COMBINED:             {strict_pct:.1}% top-3, {relaxed_pct:.1}% top-5");
+    println!();
+    println!("=== COMBINED BENCHMARK COMPLETE ===");
+}
