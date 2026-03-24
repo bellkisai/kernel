@@ -1524,7 +1524,7 @@ fn longmemeval_full_scorecard() {
 fn longmemeval_consolidated_config(data_dir: PathBuf) -> EchoConfig {
     EchoConfig {
         max_memories: 10_000,
-        similarity_threshold: 0.10,
+        similarity_threshold: 0.15, // match baseline
         max_echo_results: 10,
         ram_budget_bytes: 100_000_000,
         data_dir,
@@ -1533,6 +1533,20 @@ fn longmemeval_consolidated_config(data_dir: PathBuf) -> EchoConfig {
         ollama_url: "http://127.0.0.1:11434".to_string(),
         enrichment_model: "llama3.2:3b".to_string(),
         consolidation_consent_given: true,
+        // child_rescue_only: true (default)
+        // KS22 prompt sweep — testing C1 (verb whitelist)
+        fact_extraction_prompt: Some(
+            "Extract personal facts from the text. Rules:\n\
+             1. One fact per line, starting with \"The user\"\n\
+             2. Use ONLY these verbs: works at, works for, joined, lives in, moved to, based in, uses, prefers, switched to, likes, chose, belongs to, member of, part of\n\
+             3. No colons, labels, or key-value pairs\n\n\
+             Example:\n\
+               The user uses Neovim\n\
+               The user lives in Berlin\n\
+               The user switched to Python from Java\n\n\
+             Max {max_facts} facts. If none found, output NONE.".to_string()
+        ),
+        supersedes_demotion: 0.10,
         ..Default::default()
     }
 }

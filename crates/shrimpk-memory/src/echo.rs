@@ -492,8 +492,8 @@ impl EchoEngine {
                                         boost += 0.1;
                                     } else {
                                         // This node is the OLDER (superseded) memory — demote it.
-                                        // Disabled pending parameter sweep (KS21). Was -0.15.
-                                        demotion -= 0.0;
+                                        // Value configurable via config.supersedes_demotion (KS22).
+                                        demotion -= self.config.supersedes_demotion as f64;
                                     }
                                 }
                                 // Any typed (non-CoActivation) relationship gets a small

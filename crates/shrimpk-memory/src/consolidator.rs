@@ -14,13 +14,28 @@ use shrimpk_core::{Consolidator, EchoConfig};
 
 // ---- Shared prompt + parser ----
 
-fn fact_extraction_prompt(max_facts: usize) -> String {
+/// Default fact extraction prompt (C1 verb whitelist — KS22 winner).
+/// Forces "The user [verb] [object]" format for regex-compatible Supersedes detection.
+/// Produces ~26 clean facts vs ~73 noisy label:value pairs with the original prompt.
+fn default_fact_prompt(max_facts: usize) -> String {
     format!(
-        "You are extracting personal facts from a conversation snippet. \
-         Output ONLY the facts, one per line. Be specific \
-         - include names, dates, places, numbers, preferences. \
-         Max {max_facts} facts. If no personal facts found, output NONE."
+        "Extract personal facts from the text. Rules:\n\
+         1. One fact per line, starting with \"The user\"\n\
+         2. Use ONLY these verbs: works at, works for, joined, lives in, moved to, \
+         based in, uses, prefers, switched to, likes, chose, belongs to, member of, part of\n\
+         3. No colons, labels, or key-value pairs\n\n\
+         Example:\n  The user uses Neovim\n  The user lives in Berlin\n  \
+         The user switched to Python from Java\n\n\
+         Max {max_facts} facts. If none found, output NONE."
     )
+}
+
+/// Resolve the fact extraction prompt: use custom if configured, else default.
+pub fn fact_extraction_prompt(config: &shrimpk_core::EchoConfig, max_facts: usize) -> String {
+    match &config.fact_extraction_prompt {
+        Some(custom) => custom.replace("{max_facts}", &max_facts.to_string()),
+        None => default_fact_prompt(max_facts),
+    }
 }
 
 /// Parse facts from LLM response. One fact per line, skip empties and "NONE".
@@ -60,25 +75,30 @@ pub struct OllamaConsolidator {
     url: String,
     model: String,
     agent: ureq::Agent,
+    system_prompt: Option<String>,
 }
 
 impl OllamaConsolidator {
-    pub fn new(url: String, model: String) -> Self {
+    pub fn new(url: String, model: String, system_prompt: Option<String>) -> Self {
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
                 .timeout_global(Some(std::time::Duration::from_secs(60)))
                 .build(),
         );
-        Self { url, model, agent }
+        Self { url, model, agent, system_prompt }
     }
 }
 
 impl Consolidator for OllamaConsolidator {
     fn extract_facts(&self, text: &str, max_facts: usize) -> Vec<String> {
+        let prompt = match &self.system_prompt {
+            Some(p) => p.replace("{max_facts}", &max_facts.to_string()),
+            None => default_fact_prompt(max_facts),
+        };
         let body = serde_json::json!({
             "model": self.model,
             "messages": [
-                {"role": "system", "content": fact_extraction_prompt(max_facts)},
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": text}
             ],
             "stream": false,
@@ -133,10 +153,11 @@ pub struct HttpConsolidator {
     model: String,
     api_key: Option<String>,
     agent: ureq::Agent,
+    system_prompt: Option<String>,
 }
 
 impl HttpConsolidator {
-    pub fn new(url: String, model: String, api_key: Option<String>) -> Self {
+    pub fn new(url: String, model: String, api_key: Option<String>, system_prompt: Option<String>) -> Self {
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
                 .timeout_global(Some(std::time::Duration::from_secs(60)))
@@ -147,16 +168,21 @@ impl HttpConsolidator {
             model,
             api_key,
             agent,
+            system_prompt,
         }
     }
 }
 
 impl Consolidator for HttpConsolidator {
     fn extract_facts(&self, text: &str, max_facts: usize) -> Vec<String> {
+        let prompt = match &self.system_prompt {
+            Some(p) => p.replace("{max_facts}", &max_facts.to_string()),
+            None => default_fact_prompt(max_facts),
+        };
         let body = serde_json::json!({
             "model": self.model,
             "messages": [
-                {"role": "system", "content": fact_extraction_prompt(max_facts)},
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": text}
             ],
             "max_tokens": 512,
@@ -232,6 +258,7 @@ pub fn from_config(config: &EchoConfig) -> Box<dyn Consolidator> {
             Box::new(OllamaConsolidator::new(
                 config.ollama_url.clone(),
                 config.enrichment_model.clone(),
+                config.fact_extraction_prompt.clone(),
             ))
         }
         "http" | "openai" => {
@@ -253,6 +280,7 @@ pub fn from_config(config: &EchoConfig) -> Box<dyn Consolidator> {
                 config.ollama_url.clone(),
                 config.enrichment_model.clone(),
                 api_key,
+                config.fact_extraction_prompt.clone(),
             ))
         }
         "none" | "noop" => {

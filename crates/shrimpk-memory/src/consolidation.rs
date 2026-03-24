@@ -176,8 +176,14 @@ pub fn consolidate(
                     }
 
                     let child_idx = store.add(child) as u32;
-                    lsh.insert(child_idx, &embedding);
-                    bloom.insert_memory(fact);
+                    // Only index children in LSH/Bloom when they participate in direct ranking.
+                    // When child_rescue_only is true, children are only accessed via Pipe B
+                    // (parent→child lookup), so they don't need to be in the search indices.
+                    // This prevents child facts from polluting candidate retrieval.
+                    if !config.child_rescue_only {
+                        lsh.insert(child_idx, &embedding);
+                        bloom.insert_memory(fact);
+                    }
 
                     // Detect typed relationship from fact text and create
                     // a Hebbian edge between parent and child.
@@ -196,12 +202,34 @@ pub fn consolidate(
                 // contradicts an older fact about the same entity.
                 let supersedes_pairs = detect_supersedes_pairs(store, &facts, idx);
                 for (old_idx, new_fact_text) in &supersedes_pairs {
+                    // Edge between old child and new parent
                     hebbian.co_activate_with_relationship(
                         *old_idx as u32,
                         idx as u32,
-                        0.3, // lighter weight — recency boost handles the rest
+                        0.3,
                         RelationshipType::Supersedes,
                     );
+                    // ALSO create edge between OLD PARENT and NEW PARENT (KS22).
+                    // This ensures the Supersedes demotion fires in Pipe A ranking
+                    // (where only parents appear when child_rescue_only is true).
+                    if let Some(old_entry) = store.entry_at(*old_idx) {
+                        if let Some(ref old_parent_id) = old_entry.parent_id {
+                            // Find the old parent's store index
+                            for i in 0..store.len() {
+                                if let Some(e) = store.entry_at(i) {
+                                    if e.id == *old_parent_id {
+                                        hebbian.co_activate_with_relationship(
+                                            i as u32,
+                                            idx as u32,
+                                            0.3,
+                                            RelationshipType::Supersedes,
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     result.supersedes_created += 1;
                     tracing::debug!(
                         old_idx,

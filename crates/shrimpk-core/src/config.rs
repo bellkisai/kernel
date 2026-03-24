@@ -131,6 +131,15 @@ pub struct EchoConfig {
     /// Default: 0.0 (no penalty). Negative values demote children relative to parents.
     #[serde(default)]
     pub child_memory_penalty: f32,
+    /// Demotion applied to older (superseded) memories when a Supersedes edge exists.
+    /// Default: 0.0 (disabled). Positive values penalize stale facts.
+    #[serde(default)]
+    pub supersedes_demotion: f32,
+    /// Custom system prompt for the consolidator LLM fact extraction.
+    /// Use `{max_facts}` placeholder for the max facts count.
+    /// Default: built-in prompt. Set via config.toml or SHRIMPK_FACT_PROMPT env var.
+    #[serde(default)]
+    pub fact_extraction_prompt: Option<String>,
 }
 
 fn default_proxy_target() -> String {
@@ -203,6 +212,8 @@ impl Default for EchoConfig {
             recency_weight: default_recency_weight(),
             child_rescue_only: default_child_rescue_only(),
             child_memory_penalty: 0.0,
+            supersedes_demotion: 0.0,
+            fact_extraction_prompt: None,
         }
     }
 }
@@ -294,6 +305,7 @@ pub struct FileConfig {
     pub recency_weight: Option<f32>,
     pub child_rescue_only: Option<bool>,
     pub child_memory_penalty: Option<f32>,
+    pub supersedes_demotion: Option<f32>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -458,6 +470,9 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.child_memory_penalty {
             config.child_memory_penalty = v;
+        }
+        if let Some(v) = fc.supersedes_demotion {
+            config.supersedes_demotion = v;
         }
     }
 
