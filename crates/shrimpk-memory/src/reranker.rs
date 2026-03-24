@@ -216,7 +216,7 @@ pub fn rerank_with_llm(
         .iter()
         .enumerate()
         .take(rerank_count)
-        .map(|(i, r)| format!("{}. {}", i + 1, &r.content[..r.content.len().min(100)]))
+        .map(|(i, r)| format!("{}. {}", i + 1, &r.content[..r.content.len().min(200)]))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -232,8 +232,9 @@ pub fn rerank_with_llm(
             {
                 "role": "system",
                 "content": "You are a relevance ranker. Output ONLY comma-separated numbers, \
-                    most relevant first. Consider recency — if multiple memories describe the \
-                    same topic, the MOST RECENT one should rank highest."
+                    most relevant first. Judge by semantic relevance to the query only. \
+                    For questions about history, progression, or timelines, maximize coverage \
+                    of different time periods rather than clustering on one event."
             },
             {"role": "user", "content": prompt}
         ],
