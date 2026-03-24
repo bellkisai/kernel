@@ -9,6 +9,42 @@ use std::path::PathBuf;
 /// Default maximum disk usage: 2 GB.
 const DEFAULT_MAX_DISK_BYTES: u64 = 2_147_483_648;
 
+/// Reranker backend for echo result reranking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RerankerBackend {
+    /// No reranking (disabled).
+    #[default]
+    None,
+    /// LLM-based reranking via Ollama (~2s latency). Original KS23 implementation.
+    Llm,
+    /// Cross-encoder reranking via fastembed ONNX (~5-15ms latency). KS24 Track 3.
+    CrossEncoder,
+}
+
+impl std::fmt::Display for RerankerBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::Llm => write!(f, "llm"),
+            Self::CrossEncoder => write!(f, "cross_encoder"),
+        }
+    }
+}
+
+impl std::str::FromStr for RerankerBackend {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "none" | "disabled" | "off" => Ok(Self::None),
+            "llm" | "ollama" => Ok(Self::Llm),
+            "cross_encoder" | "crossencoder" | "ce" | "fastembed" => Ok(Self::CrossEncoder),
+            _ => Err(format!(
+                "invalid reranker backend '{s}': expected none, llm, or cross_encoder"
+            )),
+        }
+    }
+}
+
 /// Quantization mode for embedding vectors in the echo index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum QuantizationMode {
@@ -151,8 +187,18 @@ pub struct EchoConfig {
     /// a local LLM (via Ollama) which reorders them by true semantic relevance.
     /// This helps cases like PT-1 where keyword overlap misleads cosine ranking.
     /// Default: false (reranker is opt-in).
+    /// DEPRECATED: Use `reranker_backend` instead. Kept for backward compatibility.
     #[serde(default)]
     pub reranker_enabled: bool,
+    /// Reranker backend selection (KS24 Track 3).
+    /// - `None`: disabled (default)
+    /// - `Llm`: Ollama-based LLM reranking (~2s latency, original KS23)
+    /// - `CrossEncoder`: fastembed ONNX cross-encoder (~5-15ms latency)
+    ///
+    /// When `reranker_enabled = true` and `reranker_backend = None`, falls back
+    /// to `Llm` for backward compatibility.
+    #[serde(default)]
+    pub reranker_backend: RerankerBackend,
 }
 
 fn default_proxy_target() -> String {
@@ -229,11 +275,24 @@ impl Default for EchoConfig {
             fact_extraction_prompt: None,
             query_expansion_enabled: false,
             reranker_enabled: false,
+            reranker_backend: RerankerBackend::None,
         }
     }
 }
 
 impl EchoConfig {
+    /// Resolve the effective reranker backend, handling backward compatibility.
+    ///
+    /// If `reranker_backend` is explicitly set to a non-None value, use it.
+    /// If `reranker_enabled = true` but `reranker_backend = None`, fall back to `Llm`
+    /// for backward compatibility with KS23 configs.
+    pub fn effective_reranker_backend(&self) -> RerankerBackend {
+        match self.reranker_backend {
+            RerankerBackend::None if self.reranker_enabled => RerankerBackend::Llm,
+            other => other,
+        }
+    }
+
     /// Auto-detect optimal configuration based on available system RAM.
     pub fn auto_detect() -> Self {
         let total_ram_bytes = get_total_ram();
@@ -323,6 +382,7 @@ pub struct FileConfig {
     pub supersedes_demotion: Option<f32>,
     pub query_expansion_enabled: Option<bool>,
     pub reranker_enabled: Option<bool>,
+    pub reranker_backend: Option<RerankerBackend>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -497,6 +557,9 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Some(v) = fc.reranker_enabled {
             config.reranker_enabled = v;
         }
+        if let Some(v) = fc.reranker_backend {
+            config.reranker_backend = v;
+        }
     }
 
     // Layer 3: env var overrides (highest priority)
@@ -547,6 +610,16 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
     if let Ok(v) = std::env::var("SHRIMPK_RERANKER") {
         config.reranker_enabled = v.parse().unwrap_or(false);
+    }
+    if let Ok(v) = std::env::var("SHRIMPK_RERANKER_BACKEND") {
+        if let Ok(backend) = v.parse::<RerankerBackend>() {
+            config.reranker_backend = backend;
+        }
+    }
+
+    // Backward compatibility: if reranker_enabled=true but backend=None, default to Llm
+    if config.reranker_enabled && config.reranker_backend == RerankerBackend::None {
+        config.reranker_backend = RerankerBackend::Llm;
     }
 
     Ok(config)
@@ -836,5 +909,136 @@ mod tests {
     fn default_config_has_recency_weight() {
         let config = EchoConfig::default();
         assert!((config.recency_weight - 0.05).abs() < f32::EPSILON);
+    }
+
+    // --- RerankerBackend tests ---
+
+    #[test]
+    fn reranker_backend_default_is_none() {
+        let config = EchoConfig::default();
+        assert_eq!(config.reranker_backend, RerankerBackend::None);
+    }
+
+    #[test]
+    fn reranker_backend_roundtrip() {
+        for backend in [
+            RerankerBackend::None,
+            RerankerBackend::Llm,
+            RerankerBackend::CrossEncoder,
+        ] {
+            let s = backend.to_string();
+            let parsed: RerankerBackend = s.parse().unwrap();
+            assert_eq!(backend, parsed);
+        }
+    }
+
+    #[test]
+    fn reranker_backend_parse_aliases() {
+        // Llm aliases
+        assert_eq!(
+            "ollama".parse::<RerankerBackend>().unwrap(),
+            RerankerBackend::Llm
+        );
+        assert_eq!(
+            "LLM".parse::<RerankerBackend>().unwrap(),
+            RerankerBackend::Llm
+        );
+
+        // CrossEncoder aliases
+        assert_eq!(
+            "ce".parse::<RerankerBackend>().unwrap(),
+            RerankerBackend::CrossEncoder
+        );
+        assert_eq!(
+            "fastembed".parse::<RerankerBackend>().unwrap(),
+            RerankerBackend::CrossEncoder
+        );
+        assert_eq!(
+            "crossencoder".parse::<RerankerBackend>().unwrap(),
+            RerankerBackend::CrossEncoder
+        );
+
+        // None aliases
+        assert_eq!(
+            "disabled".parse::<RerankerBackend>().unwrap(),
+            RerankerBackend::None
+        );
+        assert_eq!(
+            "off".parse::<RerankerBackend>().unwrap(),
+            RerankerBackend::None
+        );
+    }
+
+    #[test]
+    fn reranker_backend_parse_invalid() {
+        assert!("unknown".parse::<RerankerBackend>().is_err());
+        assert!("".parse::<RerankerBackend>().is_err());
+    }
+
+    #[test]
+    fn reranker_backend_serde_roundtrip() {
+        let fc = FileConfig {
+            reranker_backend: Some(RerankerBackend::CrossEncoder),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string_pretty(&fc).unwrap();
+        let parsed: FileConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.reranker_backend, Some(RerankerBackend::CrossEncoder));
+    }
+
+    #[test]
+    fn effective_backend_respects_explicit_setting() {
+        let config = EchoConfig {
+            reranker_enabled: false,
+            reranker_backend: RerankerBackend::CrossEncoder,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.effective_reranker_backend(),
+            RerankerBackend::CrossEncoder
+        );
+    }
+
+    #[test]
+    fn effective_backend_backward_compat_reranker_enabled() {
+        // Legacy: reranker_enabled=true, no explicit backend
+        let config = EchoConfig {
+            reranker_enabled: true,
+            reranker_backend: RerankerBackend::None,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.effective_reranker_backend(),
+            RerankerBackend::Llm,
+            "reranker_enabled=true should fall back to Llm"
+        );
+    }
+
+    #[test]
+    fn effective_backend_none_when_both_disabled() {
+        let config = EchoConfig {
+            reranker_enabled: false,
+            reranker_backend: RerankerBackend::None,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.effective_reranker_backend(),
+            RerankerBackend::None
+        );
+    }
+
+    #[test]
+    fn effective_backend_explicit_overrides_legacy() {
+        // Explicit cross_encoder set, even with reranker_enabled=false
+        let config = EchoConfig {
+            reranker_enabled: false,
+            reranker_backend: RerankerBackend::CrossEncoder,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.effective_reranker_backend(),
+            RerankerBackend::CrossEncoder,
+            "Explicit backend should override legacy reranker_enabled"
+        );
     }
 }

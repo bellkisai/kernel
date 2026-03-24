@@ -564,11 +564,13 @@ impl EchoEngine {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // 7e. Optional LLM reranker: ask LLM to reorder top-N by true relevance (KS23 Track 3)
-        if self.config.reranker_enabled && !results.is_empty() {
-            if let Some(reranked) = crate::reranker::rerank_with_llm(&self.config, query, &results) {
+        // 7e. Optional reranker: reorder top-N by true relevance (KS23 LLM / KS24 cross-encoder)
+        let effective_backend = self.config.effective_reranker_backend();
+        if effective_backend != shrimpk_core::RerankerBackend::None && !results.is_empty() {
+            if let Some(reranked) = crate::reranker::rerank(&self.config, query, &results) {
                 tracing::debug!(
                     target: "shrimpk::audit",
+                    backend = %effective_backend,
                     original_top1 = %results.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
                     reranked_top1 = %reranked.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
                     "Reranker applied"
