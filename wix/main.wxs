@@ -263,11 +263,11 @@
             Execute='immediate'
             Return='ignore'/>
 
-        <!-- Uninstall: remove shrimpk MCP server from Claude Code (hidden) -->
+        <!-- Uninstall: remove shrimpk MCP server from Claude Code (hidden, retries 3x) -->
         <CustomAction
             Id='UnregisterMCP'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { Stop-Process -Name shrimpk-mcp -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { &amp; claude mcp remove shrimpk --scope user } } catch { exit 0 }; exit 0"'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { $c = Get-Command claude.exe -ErrorAction SilentlyContinue; if ($c) { for ($i = 0; $i -lt 3; $i++) { &amp; claude mcp remove shrimpk --scope user 2&gt;&amp;1 | Out-Null; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 } } } catch { exit 0 }; exit 0"'
             Execute='immediate'
             Return='ignore'/>
 
@@ -287,11 +287,11 @@
             Execute='immediate'
             Return='asyncNoWait'/>
 
-        <!-- Pre-uninstall: stop ALL ShrimPK processes, then wait for file handles to release -->
+        <!-- Pre-uninstall: stop ALL ShrimPK processes, wait for handles to release -->
         <CustomAction
             Id='StopProcesses'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Stop-Process -Name shrimpk-daemon,shrimpk-app,shrimpk-mcp,shrimpk -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3"'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "Stop-Process -Name shrimpk-daemon,shrimpk-app,shrimpk-mcp,shrimpk -Force -ErrorAction SilentlyContinue; Get-Process shrimpk-daemon,shrimpk-app,shrimpk-mcp,shrimpk -ErrorAction SilentlyContinue | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2"'
             Execute='immediate'
             Return='ignore'/>
 
@@ -299,7 +299,7 @@
         <CustomAction
             Id='RemoveCache'
             Property='POWERSHELLEXE'
-            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "try { Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\bin\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:USERPROFILE &apos;.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue } catch { exit 0 }; exit 0"'
+            ExeCommand='-WindowStyle Hidden -NoProfile -NonInteractive -Command "try { Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\bin\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:LOCALAPPDATA &apos;ShrimPK\.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:USERPROFILE &apos;.fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:USERPROFILE &apos;.cache\fastembed&apos;) -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path (Join-Path $env:TEMP &apos;fastembed_cache&apos;) -Recurse -Force -ErrorAction SilentlyContinue } catch { exit 0 }; exit 0"'
             Execute='immediate'
             Return='ignore'/>
 
