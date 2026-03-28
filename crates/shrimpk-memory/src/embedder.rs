@@ -18,7 +18,7 @@ use tracing::instrument;
 ///
 /// Text channel (always available): all-MiniLM-L6-v2, 384-dim.
 /// Vision channel (feature = "vision"): CLIP ViT-B-32, 512-dim.
-/// Speech channel (feature = "speech"): audio encoder, 579-dim — KS36.
+/// Speech channel (feature = "speech"): ECAPA-TDNN + Wav2Small + Whisper-tiny, 579-dim.
 ///
 /// Thread-safe: `TextEmbedding` and `ImageEmbedding` are `Send` (but not `Sync`),
 /// so share via `Mutex` or create per-thread instances.
@@ -31,6 +31,10 @@ pub struct MultiEmbedder {
     /// Separate from `text` (MiniLM 384-dim) because the embedding spaces are incompatible.
     #[cfg(feature = "vision")]
     vision_text: Option<TextEmbedding>,
+    /// Speech embedder — 3 ONNX models producing a 579-dim paralinguistic embedding.
+    /// Present even when models aren't loaded (`is_ready() == false`).
+    #[cfg(feature = "speech")]
+    speech: Option<crate::speech::SpeechEmbedder>,
 }
 
 impl MultiEmbedder {
@@ -106,12 +110,21 @@ impl MultiEmbedder {
             (vision, vision_text)
         };
 
+        #[cfg(feature = "speech")]
+        let speech = {
+            let embedder = crate::speech::SpeechEmbedder::new();
+            // Keep it even when not ready — structure is correct, KS37+ loads real models
+            Some(embedder)
+        };
+
         Ok(Self {
             text,
             #[cfg(feature = "vision")]
             vision,
             #[cfg(feature = "vision")]
             vision_text,
+            #[cfg(feature = "speech")]
+            speech,
         })
     }
 
@@ -273,10 +286,36 @@ impl MultiEmbedder {
     /// Embed raw PCM audio into a 579-dimensional speech vector.
     ///
     /// Captures paralinguistic features (tone, pace, emotion), NOT speech-to-text.
-    /// Phase 3 (KS36) — speech model not loaded yet. Returns `Ok(None)`.
+    /// Uses ECAPA-TDNN (192) + Wav2Small (3) + Whisper-tiny (384) = 579-dim.
+    ///
+    /// Returns `Ok(Some(embedding))` when models are loaded and inference succeeds.
+    /// Returns `Ok(None)` when the speech embedder exists but models aren't ready yet.
+    ///
+    /// # Arguments
+    /// * `pcm` - Mono f32 PCM audio samples at any sample rate
+    /// * `sample_rate` - Sample rate of the input audio (resampled to 16kHz internally)
+    ///
+    /// # Errors
+    /// Returns `ShrimPKError::Embedding` if inference fails with loaded models.
     #[cfg(feature = "speech")]
-    pub fn embed_audio(&mut self, _pcm: &[f32], _sample_rate: u32) -> Result<Option<Vec<f32>>> {
-        Ok(None)
+    pub fn embed_audio(&mut self, pcm: &[f32], sample_rate: u32) -> Result<Option<Vec<f32>>> {
+        match &self.speech {
+            Some(s) if s.is_ready() => s.embed(pcm, sample_rate).map(Some),
+            Some(_) => Ok(None), // Models not loaded yet — graceful degradation
+            None => Ok(None),
+        }
+    }
+
+    /// Whether the speech channel (3-model ONNX stack) is available and ready.
+    #[cfg(feature = "speech")]
+    pub fn has_speech(&self) -> bool {
+        self.speech.as_ref().map_or(false, |s| s.is_ready())
+    }
+
+    /// Get the speech embedding dimension (579 for ECAPA-TDNN + Wav2Small + Whisper-tiny).
+    #[cfg(feature = "speech")]
+    pub fn speech_dimension(&self) -> usize {
+        crate::speech::SPEECH_DIM
     }
 }
 

@@ -25,6 +25,8 @@ pub mod pii;
 pub mod reformulator;
 pub mod reranker;
 pub mod similarity;
+#[cfg(feature = "speech")]
+pub mod speech;
 pub mod store;
 
 // Re-export the main types

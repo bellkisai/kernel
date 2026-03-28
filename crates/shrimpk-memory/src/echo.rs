@@ -11,7 +11,7 @@ use shrimpk_core::{
     EchoConfig, EchoResult, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats, QueryMode,
     Result, SensitivityLevel, ShrimPKError,
 };
-#[cfg(feature = "vision")]
+#[cfg(any(feature = "vision", feature = "speech"))]
 use shrimpk_core::Modality;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -370,6 +370,236 @@ impl EchoEngine {
             modality = "vision",
             dim = vision_embedding.len(),
             "Image memory stored"
+        );
+
+        Ok(id)
+    }
+
+    /// Store audio as a speech memory.
+    ///
+    /// Pipeline:
+    /// 1. Embed PCM audio with the 3-model speech stack -> 579-dim vector
+    /// 2. Create MemoryEntry with modality: Speech, speech_embedding: Some(embedding)
+    ///    - content is set to "[audio]" (no text content)
+    ///    - text embedding is empty (not indexed in text channel)
+    /// 3. Insert into speech_lsh (NOT text_lsh, NOT bloom)
+    /// 4. Add to store
+    /// 5. Return memory ID
+    ///
+    /// # Arguments
+    /// * `pcm_f32` - Raw mono f32 PCM audio samples
+    /// * `sample_rate` - Sample rate of the input audio (resampled to 16kHz internally)
+    /// * `source` - Where this audio came from (e.g., "microphone", "file")
+    ///
+    /// # Errors
+    /// Returns `ShrimPKError::Embedding` if speech embedding fails or speech models are not loaded.
+    /// Returns `ShrimPKError::Memory` if the store is at capacity.
+    #[cfg(feature = "speech")]
+    #[instrument(skip(self, pcm_f32), fields(sample_count = pcm_f32.len(), sample_rate, source = source))]
+    pub async fn store_audio(
+        &self,
+        pcm_f32: &[f32],
+        sample_rate: u32,
+        source: &str,
+    ) -> Result<MemoryId> {
+        // Check capacity
+        {
+            let store = self.store.read().await;
+            if store.len() >= self.config.max_memories {
+                return Err(ShrimPKError::Memory(format!(
+                    "Store at capacity ({} memories). Remove memories or increase max_memories.",
+                    self.config.max_memories
+                )));
+            }
+        }
+
+        // 1. Embed audio with speech stack
+        let speech_embedding = {
+            let mut embedder = self
+                .embedder
+                .lock()
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            embedder.embed_audio(pcm_f32, sample_rate)?
+        };
+
+        let speech_embedding = speech_embedding.ok_or_else(|| {
+            ShrimPKError::Embedding(
+                "Speech models not available — cannot embed audio".into(),
+            )
+        })?;
+
+        // 2. Build entry: speech modality, empty text embedding, speech_embedding populated
+        let mut entry = MemoryEntry::new_with_modality(
+            "[audio]".to_string(),
+            Vec::new(), // no text embedding
+            source.to_string(),
+            Modality::Speech,
+        );
+        entry.speech_embedding = Some(speech_embedding.clone());
+        let id = entry.id.clone();
+
+        // 3. Add to store + speech LSH (skip text LSH and Bloom)
+        {
+            let mut store = self.store.write().await;
+            let index = store.add(entry);
+
+            // Insert into speech LSH (NOT text LSH — different dimensionality)
+            if let Some(ref slsh) = self.speech_lsh
+                && let Ok(mut lsh) = slsh.lock()
+            {
+                lsh.insert(index as u32, &speech_embedding);
+            }
+            // Intentionally skip Bloom filter — Bloom works on text fingerprints
+        }
+
+        tracing::info!(
+            memory_id = %id,
+            modality = "speech",
+            dim = speech_embedding.len(),
+            "Audio memory stored"
+        );
+
+        Ok(id)
+    }
+
+    /// Store a multimodal memory with text + optional image + optional audio.
+    ///
+    /// Creates a single `MemoryEntry` with up to 3 embeddings, all indexed in
+    /// their respective LSH channels. The Hebbian graph links them via a single
+    /// memory index.
+    ///
+    /// # Arguments
+    /// * `text` - The text content of this memory (always embedded)
+    /// * `image_data` - Optional raw image bytes (PNG, JPEG, etc.) — requires `vision` feature
+    /// * `audio_pcm` - Optional (pcm_f32, sample_rate) tuple — requires `speech` feature
+    /// * `source` - Where this memory came from
+    ///
+    /// # Errors
+    /// Returns `ShrimPKError::Embedding` if any embedding fails.
+    /// Returns `ShrimPKError::Memory` if the store is at capacity.
+    #[allow(unused_variables)] // image_data / audio_pcm unused when vision/speech features are off
+    #[instrument(skip(self, text, image_data, audio_pcm), fields(text_len = text.len(), source = source))]
+    pub async fn store_multimodal(
+        &self,
+        text: &str,
+        image_data: Option<&[u8]>,
+        audio_pcm: Option<(&[f32], u32)>,
+        source: &str,
+    ) -> Result<MemoryId> {
+        // Check capacity
+        {
+            let store = self.store.read().await;
+            if store.len() >= self.config.max_memories {
+                return Err(ShrimPKError::Memory(format!(
+                    "Store at capacity ({} memories). Remove memories or increase max_memories.",
+                    self.config.max_memories
+                )));
+            }
+        }
+
+        // 1. Always embed text (MiniLM 384-dim)
+        let (masked_text, pii_matches) = self.pii_filter.mask(text);
+        let sensitivity = self.pii_filter.classify(text);
+        if sensitivity == SensitivityLevel::Blocked {
+            return Err(ShrimPKError::Memory(
+                "Content classified as Blocked — not stored".into(),
+            ));
+        }
+        let text_for_reformulation = if !pii_matches.is_empty() {
+            &masked_text
+        } else {
+            text
+        };
+        let reformulated = self.reformulator.reformulate(text_for_reformulation);
+        let embed_text = reformulated.as_deref().unwrap_or(text);
+
+        let (text_embedding, vision_embedding, speech_embedding) = {
+            let mut embedder = self
+                .embedder
+                .lock()
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+
+            let text_emb = embedder.embed_text(embed_text)?;
+
+            // 2. Optional vision embedding
+            #[cfg(feature = "vision")]
+            let vis_emb = if let Some(img) = image_data {
+                embedder.embed_image(img)?
+            } else {
+                None
+            };
+            #[cfg(not(feature = "vision"))]
+            let vis_emb: Option<Vec<f32>> = None;
+
+            // 3. Optional speech embedding
+            #[cfg(feature = "speech")]
+            let speech_emb = if let Some((pcm, sr)) = audio_pcm {
+                embedder.embed_audio(pcm, sr)?
+            } else {
+                None
+            };
+            #[cfg(not(feature = "speech"))]
+            let speech_emb: Option<Vec<f32>> = None;
+
+            (text_emb, vis_emb, speech_emb)
+        };
+
+        // 4. Build entry with all embeddings
+        let category = self.reformulator.categorize(text);
+        let mut entry =
+            MemoryEntry::new(text.to_string(), text_embedding.clone(), source.to_string());
+        entry.sensitivity = sensitivity;
+        entry.category = category;
+        if !pii_matches.is_empty() {
+            entry.masked_content = Some(masked_text);
+        }
+        entry.reformulated = reformulated;
+        entry.vision_embedding = vision_embedding.clone();
+        entry.speech_embedding = speech_embedding.clone();
+        let id = entry.id.clone();
+
+        // 5. Add to store + all applicable LSH indices
+        {
+            let mut store = self.store.write().await;
+            let index = store.add(entry);
+
+            // Text LSH
+            if self.config.use_lsh
+                && let Ok(mut lsh) = self.text_lsh.lock()
+            {
+                lsh.insert(index as u32, &text_embedding);
+            }
+
+            // Vision LSH
+            #[cfg(feature = "vision")]
+            if let Some(ref ve) = vision_embedding
+                && let Some(ref vlsh) = self.vision_lsh
+                && let Ok(mut lsh) = vlsh.lock()
+            {
+                lsh.insert(index as u32, ve);
+            }
+
+            // Speech LSH
+            #[cfg(feature = "speech")]
+            if let Some(ref se) = speech_embedding
+                && let Some(ref slsh) = self.speech_lsh
+                && let Ok(mut lsh) = slsh.lock()
+            {
+                lsh.insert(index as u32, se);
+            }
+
+            // Bloom filter for text
+            if self.config.use_bloom {
+                let mut bloom = self.bloom.write().await;
+                bloom.insert_memory(text);
+            }
+        }
+
+        tracing::info!(
+            memory_id = %id,
+            has_vision = vision_embedding.is_some(),
+            has_speech = speech_embedding.is_some(),
+            "Multimodal memory stored"
         );
 
         Ok(id)
