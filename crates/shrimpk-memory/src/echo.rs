@@ -8,9 +8,11 @@
 
 use chrono::Utc;
 use shrimpk_core::{
-    EchoConfig, EchoResult, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats, Result,
-    SensitivityLevel, ShrimPKError,
+    EchoConfig, EchoResult, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats, QueryMode,
+    Result, SensitivityLevel, ShrimPKError,
 };
+#[cfg(feature = "vision")]
+use shrimpk_core::Modality;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -51,9 +53,7 @@ pub struct EchoEngine {
     /// Text LSH index for sub-linear candidate retrieval (behind Mutex for mut access).
     text_lsh: Mutex<CosineHash>,
     /// Vision LSH index (CLIP 512-dim). Initialized when vision feature is enabled.
-    /// Used in KS35 when cross-modal echo queries are implemented.
     #[cfg(feature = "vision")]
-    #[allow(dead_code)]
     vision_lsh: Option<Mutex<CosineHash>>,
     /// Speech LSH index (579-dim). Initialized when speech feature is enabled.
     /// Used in KS36 when audio echo queries are implemented.
@@ -296,19 +296,89 @@ impl EchoEngine {
         Ok(id)
     }
 
-    /// Perform an echo query — find memories that resonate with the query.
+    /// Store an image as a vision memory.
     ///
     /// Pipeline:
-    /// 1. Embed the query text
-    /// 2. Bloom pre-check — if no fingerprints match, return empty immediately (O(1))
-    /// 3. Read-lock the store
-    /// 4. Handle empty store
-    /// 5. Use LSH for sub-linear candidate retrieval (if enabled and sufficient candidates)
-    ///    Falls back to brute-force if LSH returns < 10 candidates
-    /// 6. Filter by threshold, sort by score, take top `max_results`
-    /// 7. Build EchoResult vec
-    /// 8. Update echo_count and last_echoed on matched entries
-    /// 9. Record latency
+    /// 1. Embed image with CLIP vision encoder -> 512-dim vector
+    /// 2. Create MemoryEntry with modality: Vision, vision_embedding: Some(embedding)
+    ///    - content is set to "[image]" (no text content)
+    ///    - text embedding is empty (not indexed in text channel)
+    /// 3. Insert into vision_lsh (NOT text_lsh, NOT bloom)
+    /// 4. Add to store
+    /// 5. Return memory ID
+    ///
+    /// # Arguments
+    /// * `image_data` - Raw image bytes (PNG, JPEG, BMP, etc.)
+    /// * `source` - Where this image came from (e.g., "screenshot", "upload")
+    ///
+    /// # Errors
+    /// Returns `ShrimPKError::Embedding` if CLIP embedding fails or vision is not available.
+    /// Returns `ShrimPKError::Memory` if the store is at capacity.
+    #[cfg(feature = "vision")]
+    #[instrument(skip(self, image_data), fields(data_len = image_data.len(), source = source))]
+    pub async fn store_image(&self, image_data: &[u8], source: &str) -> Result<MemoryId> {
+        // Check capacity
+        {
+            let store = self.store.read().await;
+            if store.len() >= self.config.max_memories {
+                return Err(ShrimPKError::Memory(format!(
+                    "Store at capacity ({} memories). Remove memories or increase max_memories.",
+                    self.config.max_memories
+                )));
+            }
+        }
+
+        // 1. Embed image with CLIP
+        let vision_embedding = {
+            let mut embedder = self
+                .embedder
+                .lock()
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            embedder.embed_image(image_data)?
+        };
+
+        let vision_embedding = vision_embedding.ok_or_else(|| {
+            ShrimPKError::Embedding("Vision model not available — cannot embed image".into())
+        })?;
+
+        // 2. Build entry: vision modality, empty text embedding, vision_embedding populated
+        let mut entry = MemoryEntry::new_with_modality(
+            "[image]".to_string(),
+            Vec::new(), // no text embedding
+            source.to_string(),
+            Modality::Vision,
+        );
+        entry.vision_embedding = Some(vision_embedding.clone());
+        let id = entry.id.clone();
+
+        // 3. Add to store + vision LSH (skip text LSH and Bloom)
+        {
+            let mut store = self.store.write().await;
+            let index = store.add(entry);
+
+            // Insert into vision LSH (NOT text LSH — different dimensionality)
+            if let Some(ref vlsh) = self.vision_lsh
+                && let Ok(mut lsh) = vlsh.lock()
+            {
+                lsh.insert(index as u32, &vision_embedding);
+            }
+            // Intentionally skip Bloom filter — Bloom works on text fingerprints
+        }
+
+        tracing::info!(
+            memory_id = %id,
+            modality = "vision",
+            dim = vision_embedding.len(),
+            "Image memory stored"
+        );
+
+        Ok(id)
+    }
+
+    /// Perform an echo query — find memories that resonate with the query.
+    ///
+    /// Uses `QueryMode::Text` (backward compatible). For cross-modal or multi-channel
+    /// queries, use `echo_with_mode()`.
     ///
     /// # Arguments
     /// * `query` - The text to find resonating memories for
@@ -318,6 +388,80 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Embedding` if query embedding fails.
     #[instrument(skip(self, query), fields(query_len = query.len(), max_results))]
     pub async fn echo(&self, query: &str, max_results: usize) -> Result<Vec<EchoResult>> {
+        self.echo_with_mode(query, max_results, QueryMode::Text)
+            .await
+    }
+
+    /// Perform an echo query with explicit channel selection.
+    ///
+    /// - `QueryMode::Text` — text-only search (same as `echo()`).
+    /// - `QueryMode::Vision` — cross-modal: embed query with CLIP text encoder,
+    ///   search vision_embedding on all entries with modality=Vision.
+    /// - `QueryMode::Auto` — run both Text and Vision (if enabled), merge by final_score.
+    ///
+    /// # Arguments
+    /// * `query` - The text to find resonating memories for
+    /// * `max_results` - Maximum number of results to return
+    /// * `mode` - Which channels to search
+    ///
+    /// # Errors
+    /// Returns `ShrimPKError::Embedding` if query embedding fails.
+    #[instrument(skip(self, query), fields(query_len = query.len(), max_results, mode = %mode))]
+    pub async fn echo_with_mode(
+        &self,
+        query: &str,
+        max_results: usize,
+        mode: QueryMode,
+    ) -> Result<Vec<EchoResult>> {
+        match mode {
+            QueryMode::Text => self.echo_text(query, max_results).await,
+            #[cfg(feature = "vision")]
+            QueryMode::Vision => self.echo_vision(query, max_results).await,
+            #[cfg(not(feature = "vision"))]
+            QueryMode::Vision => {
+                tracing::warn!("Vision mode requested but vision feature not enabled");
+                Ok(Vec::new())
+            }
+            QueryMode::Auto => {
+                // Run text channel (mut needed when vision feature merges results)
+                #[allow(unused_mut)]
+                let mut results = self.echo_text(query, max_results).await?;
+
+                // Run vision channel if available
+                #[cfg(feature = "vision")]
+                {
+                    if self.vision_lsh.is_some() {
+                        let vision_results = self.echo_vision(query, max_results).await?;
+                        // Merge: deduplicate by memory_id, keep higher final_score
+                        let existing_ids: std::collections::HashSet<_> =
+                            results.iter().map(|r| r.memory_id.clone()).collect();
+                        for vr in vision_results {
+                            if !existing_ids.contains(&vr.memory_id) {
+                                results.push(vr);
+                            }
+                        }
+                        // Re-sort by final_score
+                        results.sort_by(|a, b| {
+                            b.final_score
+                                .partial_cmp(&a.final_score)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        results.truncate(max_results);
+                    }
+                }
+
+                Ok(results)
+            }
+        }
+    }
+
+    /// Text-channel echo — the original pipeline, unchanged.
+    ///
+    /// Pipeline:
+    /// 1. Embed the query text (MiniLM 384-dim)
+    /// 2. Bloom pre-check
+    /// 3. LSH/brute-force, rank, Hebbian, recency, rerank
+    async fn echo_text(&self, query: &str, max_results: usize) -> Result<Vec<EchoResult>> {
         let start = std::time::Instant::now();
 
         // 0. HyDE query expansion: ask LLM for a hypothetical answer, embed that instead
@@ -648,6 +792,200 @@ impl EchoEngine {
         Ok(results)
     }
 
+    /// Vision-channel echo — cross-modal text-to-image retrieval via CLIP.
+    ///
+    /// Pipeline:
+    /// 1. Embed query text with CLIP text encoder (512-dim)
+    /// 2. Scan all entries with vision_embedding, compute cosine similarity
+    /// 3. Use vision_lsh for sub-linear candidate retrieval if available
+    /// 4. Apply Hebbian boost (shared graph)
+    /// 5. Return top-N results with modality: Vision
+    #[cfg(feature = "vision")]
+    async fn echo_vision(&self, query: &str, max_results: usize) -> Result<Vec<EchoResult>> {
+        let start = std::time::Instant::now();
+
+        // 1. Embed query with CLIP text encoder
+        let query_embedding = {
+            let mut embedder = self
+                .embedder
+                .lock()
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            embedder.embed_text_for_vision(query)?
+        };
+
+        let query_embedding = match query_embedding {
+            Some(emb) => emb,
+            None => {
+                tracing::warn!("CLIP text encoder not available for vision query");
+                return Ok(Vec::new());
+            }
+        };
+
+        // 2. Read-lock the store
+        let store = self.store.read().await;
+
+        if store.is_empty() {
+            self.record_latency(start.elapsed().as_micros() as u64);
+            return Ok(Vec::new());
+        }
+
+        // 3. Collect vision candidates: entries with vision_embedding set
+        //    Use vision_lsh for candidate retrieval if available, else brute-force
+        let entries = store.all_entries();
+        let threshold = self.config.similarity_threshold;
+
+        let mut scored: Vec<(usize, f32)> = Vec::new();
+
+        if let Some(ref vlsh) = self.vision_lsh {
+            // Try LSH candidate retrieval
+            let lsh_candidates = vlsh
+                .lock()
+                .map_err(|e| ShrimPKError::Memory(format!("Vision LSH lock poisoned: {e}")))?
+                .query(&query_embedding);
+
+            if lsh_candidates.len() >= 5 {
+                // LSH returned enough candidates
+                tracing::debug!(
+                    lsh_candidates = lsh_candidates.len(),
+                    "Vision LSH candidate retrieval"
+                );
+                for &idx in &lsh_candidates {
+                    let i = idx as usize;
+                    if let Some(entry) = entries.get(i)
+                        && let Some(ref ve) = entry.vision_embedding
+                    {
+                        let sim = similarity::cosine_similarity(&query_embedding, ve);
+                        if sim >= threshold {
+                            scored.push((i, sim));
+                        }
+                    }
+                }
+            } else {
+                // Fall back to brute-force
+                Self::brute_force_vision(&query_embedding, entries, threshold, &mut scored);
+            }
+        } else {
+            // No vision LSH — brute-force
+            Self::brute_force_vision(&query_embedding, entries, threshold, &mut scored);
+        }
+
+        // Sort by similarity descending
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(max_results);
+
+        // 4. Hebbian boost (shared graph with text channel)
+        let top_indices: Vec<u32> = scored.iter().map(|&(idx, _)| idx as u32).collect();
+        {
+            let mut hebbian = self.hebbian.write().await;
+            for i in 0..top_indices.len() {
+                for j in (i + 1)..top_indices.len() {
+                    let sim_i = scored[i].1 as f64;
+                    let sim_j = scored[j].1 as f64;
+                    let strength = (sim_i * sim_j).sqrt() * 0.1;
+                    hebbian.co_activate(top_indices[i], top_indices[j], strength);
+                }
+            }
+        }
+
+        let hebbian_boosts: Vec<f64> = {
+            let hebbian = self.hebbian.read().await;
+            scored
+                .iter()
+                .map(|&(idx, _)| {
+                    let idx = idx as u32;
+                    let mut boost: f64 = 0.0;
+                    for &other in top_indices.iter().filter(|&&o| o != idx) {
+                        let weight = hebbian.get_weight(idx, other);
+                        if weight > 0.0 {
+                            boost += weight;
+                        }
+                    }
+                    boost.min(0.4)
+                })
+                .collect()
+        };
+
+        // 5. Build EchoResult vec
+        let now = Utc::now();
+        let recency_weight = self.config.recency_weight as f64;
+        let mut results: Vec<EchoResult> = scored
+            .iter()
+            .zip(hebbian_boosts.iter())
+            .filter_map(|(&(idx, score), &boost)| {
+                let entry = store.entry_at(idx)?;
+                let age_secs = (now - entry.created_at).num_seconds().max(0) as f64;
+                let half_life = entry.category.half_life_secs();
+                let decay = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
+                let days_since_stored = age_secs / 86400.0;
+                let recency_boost = recency_weight / (1.0 + days_since_stored);
+
+                Some(EchoResult {
+                    memory_id: entry.id.clone(),
+                    content: entry.display_content().to_string(),
+                    similarity: score,
+                    final_score: (score as f64 + boost + recency_boost) * decay,
+                    source: entry.source.clone(),
+                    echoed_at: now,
+                    modality: Modality::Vision,
+                })
+            })
+            .collect();
+
+        results.sort_by(|a, b| {
+            b.final_score
+                .partial_cmp(&a.final_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Update echo_count on matched entries
+        let matched_ids: Vec<(MemoryId, usize)> = scored
+            .iter()
+            .filter_map(|&(idx, _)| store.entry_at(idx).map(|e| (e.id.clone(), idx)))
+            .collect();
+        drop(store);
+
+        if !matched_ids.is_empty() {
+            let mut store = self.store.write().await;
+            let now = Utc::now();
+            for (_, idx) in &matched_ids {
+                if let Some(entry) = store.entry_at_mut(*idx) {
+                    entry.echo_count += 1;
+                    entry.last_echoed = Some(now);
+                }
+            }
+        }
+
+        let elapsed = start.elapsed();
+        self.record_latency(elapsed.as_micros() as u64);
+
+        tracing::info!(
+            results = results.len(),
+            elapsed_ms = elapsed.as_millis(),
+            mode = "vision",
+            "Vision echo query complete"
+        );
+
+        Ok(results)
+    }
+
+    /// Brute-force scan all entries for vision embeddings above threshold.
+    #[cfg(feature = "vision")]
+    fn brute_force_vision(
+        query_embedding: &[f32],
+        entries: &[MemoryEntry],
+        threshold: f32,
+        scored: &mut Vec<(usize, f32)>,
+    ) {
+        for (i, entry) in entries.iter().enumerate() {
+            if let Some(ref ve) = entry.vision_embedding {
+                let sim = similarity::cosine_similarity(query_embedding, ve);
+                if sim >= threshold {
+                    scored.push((i, sim));
+                }
+            }
+        }
+    }
+
     /// Forget (remove) a memory by its ID.
     ///
     /// # Errors
@@ -848,6 +1186,31 @@ impl EchoEngine {
             HebbianGraph::new(604_800.0, 0.01)
         });
 
+        // Rebuild vision LSH from loaded entries' vision_embedding fields
+        #[cfg(feature = "vision")]
+        let vision_lsh_rebuilt = if config
+            .enabled_modalities
+            .contains(&shrimpk_core::Modality::Vision)
+        {
+            let mut vlsh = CosineHash::new(config.vision_embedding_dim, 16, 10);
+            let mut vision_count = 0usize;
+            for (i, entry) in loaded_store.all_entries().iter().enumerate() {
+                if let Some(ref ve) = entry.vision_embedding {
+                    vlsh.insert(i as u32, ve);
+                    vision_count += 1;
+                }
+            }
+            if vision_count > 0 {
+                tracing::info!(
+                    vision_entries = vision_count,
+                    "Vision LSH rebuilt from loaded entries"
+                );
+            }
+            Some(Mutex::new(vlsh))
+        } else {
+            None
+        };
+
         tracing::info!(
             entries = loaded_store.len(),
             lsh_entries = text_lsh.len(),
@@ -866,18 +1229,7 @@ impl EchoEngine {
             store: RwLock::new(loaded_store),
             text_lsh: Mutex::new(text_lsh),
             #[cfg(feature = "vision")]
-            vision_lsh: if config
-                .enabled_modalities
-                .contains(&shrimpk_core::Modality::Vision)
-            {
-                Some(Mutex::new(CosineHash::new(
-                    config.vision_embedding_dim,
-                    16,
-                    10,
-                )))
-            } else {
-                None
-            },
+            vision_lsh: vision_lsh_rebuilt,
             #[cfg(feature = "speech")]
             speech_lsh: if config
                 .enabled_modalities
@@ -1260,5 +1612,229 @@ mod tests {
         // Just verify it doesn't crash and returns a sane score
         assert!(result.final_score > 0.0);
         assert!(result.final_score <= 2.0, "Score should be reasonable");
+    }
+
+    // --- QueryMode tests (KS35) ---
+
+    #[tokio::test]
+    #[ignore = "requires fastembed model download"]
+    async fn echo_with_mode_text_matches_echo() {
+        // echo_with_mode(Text) should produce identical results to echo()
+        let engine = EchoEngine::new(test_config()).expect("Should init");
+        engine
+            .store("Rust is a systems programming language", "test")
+            .await
+            .expect("Should store");
+
+        let results_echo = engine.echo("systems programming", 5).await.unwrap();
+        let results_mode = engine
+            .echo_with_mode("systems programming", 5, shrimpk_core::QueryMode::Text)
+            .await
+            .unwrap();
+
+        assert_eq!(results_echo.len(), results_mode.len());
+        if !results_echo.is_empty() {
+            assert_eq!(results_echo[0].memory_id, results_mode[0].memory_id);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires fastembed model download"]
+    async fn echo_with_mode_vision_returns_empty_when_no_vision_entries() {
+        // Without vision feature or without vision entries, Vision mode returns empty
+        let engine = EchoEngine::new(test_config()).expect("Should init");
+        engine
+            .store("text only memory", "test")
+            .await
+            .expect("Should store");
+
+        let results = engine
+            .echo_with_mode("any query", 5, shrimpk_core::QueryMode::Vision)
+            .await
+            .unwrap();
+
+        // Without vision feature compiled in, this returns empty.
+        // With vision feature but no vision entries, also returns empty.
+        assert!(
+            results.is_empty(),
+            "Vision echo with no vision entries should be empty"
+        );
+    }
+
+    // --- Vision integration tests (KS35, require CLIP model) ---
+
+    #[cfg(feature = "vision")]
+    #[tokio::test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    async fn store_image_and_echo_vision() {
+        use shrimpk_core::QueryMode;
+
+        let mut config = test_config();
+        config.enabled_modalities = vec![
+            shrimpk_core::Modality::Text,
+            shrimpk_core::Modality::Vision,
+        ];
+        config.similarity_threshold = 0.05; // low threshold for cross-modal
+
+        let engine = EchoEngine::new(config).expect("Should init");
+
+        // Store an image
+        let png_data = create_test_png(32, 32, [255, 0, 0]);
+        let image_id = engine
+            .store_image(&png_data, "test")
+            .await
+            .expect("Should store image");
+
+        // Echo with Vision mode — should find the image
+        let results = engine
+            .echo_with_mode("a red image", 5, QueryMode::Vision)
+            .await
+            .expect("Vision echo should work");
+
+        assert!(
+            !results.is_empty(),
+            "Vision echo should find the stored image"
+        );
+        assert_eq!(results[0].memory_id, image_id);
+        assert_eq!(results[0].modality, shrimpk_core::Modality::Vision);
+    }
+
+    #[cfg(feature = "vision")]
+    #[tokio::test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    async fn store_image_skips_bloom() {
+        use shrimpk_core::QueryMode;
+
+        let mut config = test_config();
+        config.use_bloom = true;
+        config.enabled_modalities = vec![
+            shrimpk_core::Modality::Text,
+            shrimpk_core::Modality::Vision,
+        ];
+
+        let engine = EchoEngine::new(config).expect("Should init");
+
+        // Store an image — should NOT insert into Bloom
+        let png_data = create_test_png(16, 16, [0, 0, 255]);
+        engine
+            .store_image(&png_data, "test")
+            .await
+            .expect("Should store image");
+
+        // Store a text memory — this DOES insert into Bloom
+        engine
+            .store("blue sky photograph", "test")
+            .await
+            .expect("Should store text");
+
+        // Stats should show 2 total memories
+        let stats = engine.stats().await;
+        assert_eq!(stats.total_memories, 2);
+
+        // Text echo should still work (Bloom doesn't block)
+        let text_results = engine
+            .echo_with_mode("blue sky", 5, QueryMode::Text)
+            .await
+            .unwrap();
+        assert!(
+            !text_results.is_empty(),
+            "Text echo should find text memories"
+        );
+    }
+
+    #[cfg(feature = "vision")]
+    #[tokio::test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    async fn auto_mode_merges_text_and_vision() {
+        use shrimpk_core::QueryMode;
+
+        let mut config = test_config();
+        config.enabled_modalities = vec![
+            shrimpk_core::Modality::Text,
+            shrimpk_core::Modality::Vision,
+        ];
+        config.similarity_threshold = 0.05;
+
+        let engine = EchoEngine::new(config).expect("Should init");
+
+        // Store a text memory
+        engine
+            .store("The sunset was beautiful with red and orange colors", "test")
+            .await
+            .expect("Should store text");
+
+        // Store an image
+        let png_data = create_test_png(32, 32, [255, 128, 0]); // orange
+        engine
+            .store_image(&png_data, "test")
+            .await
+            .expect("Should store image");
+
+        // Auto mode should search both channels
+        let results = engine
+            .echo_with_mode("sunset colors", 10, QueryMode::Auto)
+            .await
+            .expect("Auto echo should work");
+
+        assert!(!results.is_empty(), "Auto mode should find results");
+    }
+
+    #[cfg(feature = "vision")]
+    #[tokio::test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    async fn text_echo_unchanged_with_vision_entries() {
+        // Storing vision entries should not affect text-only echo
+        let mut config = test_config();
+        config.enabled_modalities = vec![
+            shrimpk_core::Modality::Text,
+            shrimpk_core::Modality::Vision,
+        ];
+
+        let engine = EchoEngine::new(config).expect("Should init");
+
+        // Store text memories
+        engine
+            .store("Rust is a systems programming language", "test")
+            .await
+            .unwrap();
+        engine
+            .store("Python is great for data science", "test")
+            .await
+            .unwrap();
+
+        // Store an image (should not interfere with text search)
+        let png_data = create_test_png(8, 8, [0, 255, 0]);
+        engine.store_image(&png_data, "test").await.unwrap();
+
+        // Text echo should find text memories as before
+        let results = engine.echo("programming language", 5).await.unwrap();
+        assert!(
+            !results.is_empty(),
+            "Text echo should still work with vision entries present"
+        );
+        // Results should be text modality
+        assert_eq!(results[0].modality, shrimpk_core::Modality::Text);
+    }
+
+    /// Create a minimal PNG image with a solid color (for tests).
+    #[cfg(feature = "vision")]
+    fn create_test_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
+        use image::ImageEncoder;
+        use std::io::Cursor;
+        let mut buf = Cursor::new(Vec::new());
+
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for _ in 0..(width * height) {
+            pixels.push(rgb[0]);
+            pixels.push(rgb[1]);
+            pixels.push(rgb[2]);
+            pixels.push(255);
+        }
+
+        image::codecs::png::PngEncoder::new(&mut buf)
+            .write_image(&pixels, width, height, image::ExtendedColorType::Rgba8)
+            .expect("PNG encode should succeed");
+
+        buf.into_inner()
     }
 }

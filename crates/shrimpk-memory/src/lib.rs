@@ -34,6 +34,7 @@ pub use hebbian::{HebbianGraph, RelationshipType};
 pub use pii::PiiFilter;
 pub use reformulator::MemoryReformulator;
 pub use shrimpk_core::{
-    EchoConfig, EchoResult, MemoryCategory, MemoryEntry, MemoryId, MemoryStats, SensitivityLevel,
+    EchoConfig, EchoResult, MemoryCategory, MemoryEntry, MemoryId, MemoryStats, QueryMode,
+    SensitivityLevel,
 };
 pub use store::EchoStore;

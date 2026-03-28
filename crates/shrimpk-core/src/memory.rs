@@ -96,6 +96,35 @@ impl fmt::Display for Modality {
     }
 }
 
+/// Query mode for echo — which channels to search.
+///
+/// Controls how `echo_with_mode` routes a query through the embedding pipeline.
+/// `Text` (default) preserves backward compatibility. `Vision` enables cross-modal
+/// text-to-image retrieval via CLIP. `Auto` merges results from all enabled channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum QueryMode {
+    /// Search text channel only (default, backward compatible).
+    /// Uses all-MiniLM-L6-v2 384-dim embeddings.
+    #[default]
+    Text,
+    /// Search vision channel only (CLIP text-to-image cross-modal).
+    /// Embeds query with CLIP text encoder, matches against CLIP image embeddings.
+    Vision,
+    /// Search all enabled channels, merge results by final_score.
+    /// Deduplicates by memory_id, returns top-N across all channels.
+    Auto,
+}
+
+impl fmt::Display for QueryMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text => write!(f, "text"),
+            Self::Vision => write!(f, "vision"),
+            Self::Auto => write!(f, "auto"),
+        }
+    }
+}
+
 /// Sensitivity classification for stored memories.
 ///
 /// Controls where a memory can be pushed during echo activation.
@@ -412,5 +441,51 @@ mod tests {
         }"#;
         let entry: MemoryEntry = serde_json::from_str(json).unwrap();
         assert_eq!(entry.category, MemoryCategory::Default);
+    }
+
+    // --- QueryMode tests (KS35) ---
+
+    #[test]
+    fn query_mode_default_is_text() {
+        assert_eq!(QueryMode::default(), QueryMode::Text);
+    }
+
+    #[test]
+    fn query_mode_serde_roundtrip() {
+        let modes = [QueryMode::Text, QueryMode::Vision, QueryMode::Auto];
+        for mode in &modes {
+            let json = serde_json::to_string(mode).unwrap();
+            let deserialized: QueryMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(*mode, deserialized, "Roundtrip failed for {mode:?}");
+        }
+    }
+
+    #[test]
+    fn query_mode_display() {
+        assert_eq!(QueryMode::Text.to_string(), "text");
+        assert_eq!(QueryMode::Vision.to_string(), "vision");
+        assert_eq!(QueryMode::Auto.to_string(), "auto");
+    }
+
+    #[test]
+    fn memory_entry_with_vision_embedding_roundtrip() {
+        let mut entry = MemoryEntry::new_with_modality(
+            "[image]".into(),
+            Vec::new(),
+            "test".into(),
+            Modality::Vision,
+        );
+        entry.vision_embedding = Some(vec![0.1, 0.2, 0.3, 0.4]);
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.modality, Modality::Vision);
+        assert_eq!(deserialized.content, "[image]");
+        assert!(deserialized.embedding.is_empty());
+        assert_eq!(
+            deserialized.vision_embedding,
+            Some(vec![0.1, 0.2, 0.3, 0.4])
+        );
     }
 }

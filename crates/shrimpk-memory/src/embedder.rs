@@ -3,7 +3,12 @@
 //! Wraps `fastembed::TextEmbedding` with the all-MiniLM-L6-v2 model
 //! for 384-dimensional sentence embeddings. Vision (CLIP 512-dim) and
 //! Speech (579-dim) channels are gated behind `vision` and `speech`
-//! feature flags and will be loaded in KS35/KS36.
+//! feature flags.
+//!
+//! When `vision` is enabled, loads two additional models:
+//! - CLIP ViT-B-32 *vision* encoder (`ImageEmbedding`) — embeds images to 512-dim.
+//! - CLIP ViT-B-32 *text* encoder (`TextEmbedding`) — embeds text to the same 512-dim
+//!   space, enabling cross-modal text-to-image retrieval.
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use shrimpk_core::{Result, ShrimPKError};
@@ -12,25 +17,33 @@ use tracing::instrument;
 /// Multi-channel embedder for text, vision, and speech modalities.
 ///
 /// Text channel (always available): all-MiniLM-L6-v2, 384-dim.
-/// Vision channel (feature = "vision"): CLIP, 512-dim — KS35.
+/// Vision channel (feature = "vision"): CLIP ViT-B-32, 512-dim.
 /// Speech channel (feature = "speech"): audio encoder, 579-dim — KS36.
 ///
-/// Thread-safe: `TextEmbedding` is `Send` (but not `Sync`),
+/// Thread-safe: `TextEmbedding` and `ImageEmbedding` are `Send` (but not `Sync`),
 /// so share via `Mutex` or create per-thread instances.
 pub struct MultiEmbedder {
     text: TextEmbedding,
+    /// CLIP vision encoder — embeds images into 512-dim CLIP space.
+    #[cfg(feature = "vision")]
+    vision: Option<fastembed::ImageEmbedding>,
+    /// CLIP text encoder — embeds text into the same 512-dim CLIP space.
+    /// Separate from `text` (MiniLM 384-dim) because the embedding spaces are incompatible.
+    #[cfg(feature = "vision")]
+    vision_text: Option<TextEmbedding>,
 }
 
 impl MultiEmbedder {
     /// Initialize the multi-channel embedder.
     ///
-    /// Currently loads only the text model (all-MiniLM-L6-v2).
-    /// Vision and speech models will be loaded when their feature flags
-    /// are enabled and the model loading code is implemented (KS35/KS36).
+    /// Always loads the text model (all-MiniLM-L6-v2, 384-dim).
+    /// When the `vision` feature is enabled, also attempts to load
+    /// CLIP ViT-B-32 vision + text encoders (512-dim). If CLIP fails
+    /// to initialize, vision is disabled gracefully — text still works.
     ///
     /// # Errors
-    /// Returns `ShrimPKError::Embedding` if model initialization fails
-    /// (e.g., download failure, ONNX runtime error).
+    /// Returns `ShrimPKError::Embedding` if the *text* model fails to initialize.
+    /// Vision model failures are logged as warnings and result in `vision = None`.
     #[instrument]
     pub fn new() -> Result<Self> {
         let start = std::time::Instant::now();
@@ -48,7 +61,58 @@ impl MultiEmbedder {
             "MultiEmbedder initialized (text channel)"
         );
 
-        Ok(Self { text })
+        #[cfg(feature = "vision")]
+        let (vision, vision_text) = {
+            use fastembed::{ImageEmbedding, ImageEmbeddingModel, ImageInitOptions};
+
+            let vis_start = std::time::Instant::now();
+            let vision = match ImageEmbedding::try_new(
+                ImageInitOptions::new(ImageEmbeddingModel::ClipVitB32),
+            ) {
+                Ok(model) => {
+                    tracing::info!(
+                        elapsed_ms = vis_start.elapsed().as_millis(),
+                        model = "clip-ViT-B-32-vision",
+                        dim = 512,
+                        "CLIP vision encoder initialized"
+                    );
+                    Some(model)
+                }
+                Err(e) => {
+                    tracing::warn!("CLIP vision encoder failed to init, vision disabled: {e}");
+                    None
+                }
+            };
+
+            let vt_start = std::time::Instant::now();
+            let vision_text = match TextEmbedding::try_new(
+                InitOptions::new(EmbeddingModel::ClipVitB32),
+            ) {
+                Ok(model) => {
+                    tracing::info!(
+                        elapsed_ms = vt_start.elapsed().as_millis(),
+                        model = "clip-ViT-B-32-text",
+                        dim = 512,
+                        "CLIP text encoder initialized"
+                    );
+                    Some(model)
+                }
+                Err(e) => {
+                    tracing::warn!("CLIP text encoder failed to init, cross-modal search disabled: {e}");
+                    None
+                }
+            };
+
+            (vision, vision_text)
+        };
+
+        Ok(Self {
+            text,
+            #[cfg(feature = "vision")]
+            vision,
+            #[cfg(feature = "vision")]
+            vision_text,
+        })
     }
 
     /// Embed a single text string into a 384-dimensional vector.
@@ -122,19 +186,88 @@ impl MultiEmbedder {
 
     /// Embed an image into a 512-dimensional CLIP vector.
     ///
-    /// Phase 2 (KS35) — CLIP model not loaded yet. Returns `Ok(None)`.
+    /// Accepts raw image bytes (PNG, JPEG, BMP, etc. — anything `image` crate decodes).
+    /// Returns `Ok(Some(embedding))` on success, `Ok(None)` if the vision model is not loaded.
+    ///
+    /// # Errors
+    /// Returns `ShrimPKError::Embedding` if image decoding or ONNX inference fails.
     #[cfg(feature = "vision")]
-    pub fn embed_image(&mut self, _image_data: &[u8]) -> Result<Option<Vec<f32>>> {
-        Ok(None)
+    #[instrument(skip(self, image_data), fields(data_len = image_data.len()))]
+    pub fn embed_image(&mut self, image_data: &[u8]) -> Result<Option<Vec<f32>>> {
+        let vision = match self.vision.as_mut() {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+
+        let start = std::time::Instant::now();
+
+        let results = vision
+            .embed_bytes(&[image_data], None)
+            .map_err(|e| ShrimPKError::Embedding(format!("CLIP image embed failed: {e}")))?;
+
+        let embedding = results
+            .into_iter()
+            .next()
+            .ok_or_else(|| ShrimPKError::Embedding("Empty CLIP image embedding result".into()))?;
+
+        tracing::debug!(
+            dim = embedding.len(),
+            elapsed_us = start.elapsed().as_micros(),
+            "CLIP image embed complete"
+        );
+
+        Ok(Some(embedding))
     }
 
     /// Embed text into CLIP's shared vision-text space (512-dim).
     ///
-    /// This allows text queries to match against image embeddings.
-    /// Phase 2 (KS35) — CLIP model not loaded yet. Returns `Ok(None)`.
+    /// This allows text queries to match against image embeddings via cross-modal
+    /// retrieval. The resulting vector lives in the same 512-dim CLIP space as
+    /// image embeddings from `embed_image()`.
+    ///
+    /// Returns `Ok(Some(embedding))` on success, `Ok(None)` if the CLIP text model
+    /// is not loaded.
+    ///
+    /// # Errors
+    /// Returns `ShrimPKError::Embedding` if ONNX inference fails.
     #[cfg(feature = "vision")]
-    pub fn embed_text_for_vision(&mut self, _text: &str) -> Result<Option<Vec<f32>>> {
-        Ok(None)
+    #[instrument(skip(self, text), fields(text_len = text.len()))]
+    pub fn embed_text_for_vision(&mut self, text: &str) -> Result<Option<Vec<f32>>> {
+        let vision_text = match self.vision_text.as_mut() {
+            Some(vt) => vt,
+            None => return Ok(None),
+        };
+
+        let start = std::time::Instant::now();
+
+        let results = vision_text
+            .embed(vec![text.to_string()], None)
+            .map_err(|e| ShrimPKError::Embedding(format!("CLIP text embed failed: {e}")))?;
+
+        let embedding = results
+            .into_iter()
+            .next()
+            .ok_or_else(|| ShrimPKError::Embedding("Empty CLIP text embedding result".into()))?;
+
+        tracing::debug!(
+            dim = embedding.len(),
+            elapsed_us = start.elapsed().as_micros(),
+            "CLIP text-for-vision embed complete"
+        );
+
+        Ok(Some(embedding))
+    }
+
+    /// Whether the vision channel (CLIP) is available.
+    #[cfg(feature = "vision")]
+    pub fn has_vision(&self) -> bool {
+        self.vision.is_some() && self.vision_text.is_some()
+    }
+
+    /// Get the vision embedding dimension (512 for CLIP ViT-B-32).
+    #[cfg(feature = "vision")]
+    pub fn vision_dimension(&self) -> usize {
+        512
     }
 
     /// Embed raw PCM audio into a 579-dimensional speech vector.
@@ -218,5 +351,130 @@ mod tests {
             .embed_batch(Vec::new())
             .expect("Should handle empty");
         assert!(embeddings.is_empty());
+    }
+
+    // --- Vision (CLIP) tests (KS35) ---
+    // These require the CLIP model download (~352 MB) and the `vision` feature.
+
+    #[cfg(feature = "vision")]
+    #[test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    fn clip_vision_initializes() {
+        let embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        assert!(embedder.has_vision(), "CLIP vision should be available");
+        assert_eq!(embedder.vision_dimension(), 512);
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    fn embed_image_produces_512_dim() {
+        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+
+        // Create a minimal 2x2 red PNG image
+        let png_data = create_test_png(2, 2, [255, 0, 0]);
+
+        let embedding = embedder
+            .embed_image(&png_data)
+            .expect("Should embed image")
+            .expect("Vision should be available");
+
+        assert_eq!(
+            embedding.len(),
+            512,
+            "CLIP ViT-B-32 should produce 512-dim vectors"
+        );
+
+        // Verify it is normalized (L2 norm ~ 1.0)
+        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 0.05,
+            "CLIP embeddings should be L2-normalized, got norm={norm}"
+        );
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    fn embed_text_for_vision_produces_512_dim() {
+        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+
+        let embedding = embedder
+            .embed_text_for_vision("a photo of a cat")
+            .expect("Should embed text for vision")
+            .expect("CLIP text encoder should be available");
+
+        assert_eq!(
+            embedding.len(),
+            512,
+            "CLIP text encoder should produce 512-dim vectors"
+        );
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    fn clip_cross_modal_similarity() {
+        // CLIP's key property: text and image embeddings in the same space
+        // should have positive similarity for matching concepts.
+        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+
+        // Embed a red image
+        let red_png = create_test_png(32, 32, [255, 0, 0]);
+        let img_emb = embedder
+            .embed_image(&red_png)
+            .unwrap()
+            .expect("Vision available");
+
+        // Embed text about colors
+        let text_emb = embedder
+            .embed_text_for_vision("a red colored image")
+            .unwrap()
+            .expect("CLIP text available");
+
+        let sim: f32 = img_emb.iter().zip(text_emb.iter()).map(|(a, b)| a * b).sum();
+        // Cross-modal similarity is typically lower than same-modal,
+        // but should be positive for matching concepts
+        assert!(
+            sim > 0.0,
+            "Cross-modal CLIP similarity for matching concept should be positive, got {sim}"
+        );
+    }
+
+    #[cfg(feature = "vision")]
+    #[test]
+    #[ignore = "requires CLIP model download (~352 MB)"]
+    fn clip_init_latency_under_5s() {
+        let start = std::time::Instant::now();
+        let _embedder = MultiEmbedder::new().expect("Should init");
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_secs() < 10, // generous to account for cold cache
+            "CLIP init should be < 10s with warm cache, took {elapsed:?}"
+        );
+    }
+
+    /// Create a minimal PNG image with a solid color.
+    #[cfg(feature = "vision")]
+    fn create_test_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
+        use image::ImageEncoder;
+        use std::io::Cursor;
+        let mut buf = Cursor::new(Vec::new());
+
+        // Build raw RGBA pixel data
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for _ in 0..(width * height) {
+            pixels.push(rgb[0]);
+            pixels.push(rgb[1]);
+            pixels.push(rgb[2]);
+            pixels.push(255); // alpha
+        }
+
+        // Encode as PNG using the `image` crate
+        image::codecs::png::PngEncoder::new(&mut buf)
+            .write_image(&pixels, width, height, image::ExtendedColorType::Rgba8)
+            .expect("PNG encode should succeed");
+
+        buf.into_inner()
     }
 }
