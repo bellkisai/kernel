@@ -69,6 +69,33 @@ impl MemoryCategory {
     }
 }
 
+/// Modality of a stored memory — which sensory channel produced it.
+///
+/// Text is the default and original modality. Vision (CLIP) and Speech
+/// (audio embeddings preserving paralinguistic features) are added for
+/// multimodal robotics and social AI use cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum Modality {
+    /// Text content embedded with all-MiniLM-L6-v2 (384-dim).
+    #[default]
+    Text,
+    /// Visual content embedded with CLIP (512-dim). Images and text share the same space.
+    Vision,
+    /// Audio content embedded with a speech encoder (preserves tone, volume, emotion, pace).
+    /// NOT speech-to-text — captures paralinguistic features for social AI.
+    Speech,
+}
+
+impl fmt::Display for Modality {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text => write!(f, "text"),
+            Self::Vision => write!(f, "vision"),
+            Self::Speech => write!(f, "speech"),
+        }
+    }
+}
+
 /// Sensitivity classification for stored memories.
 ///
 /// Controls where a memory can be pushed during echo activation.
@@ -101,8 +128,12 @@ pub struct MemoryEntry {
     /// Echo returns the original content to the user (natural text).
     #[serde(default)]
     pub reformulated: Option<String>,
-    /// 384-dimensional embedding vector capturing semantic meaning.
+    /// Embedding vector capturing semantic meaning.
+    /// Dimension depends on modality: Text=384, Vision=512, Speech=TBD.
     pub embedding: Vec<f32>,
+    /// Which sensory channel produced this memory.
+    #[serde(default)]
+    pub modality: Modality,
     /// Where this memory came from (e.g., "conversation", "document", "manual").
     pub source: String,
     /// Sensitivity classification controlling push behavior.
@@ -135,6 +166,7 @@ impl MemoryEntry {
             masked_content: None,
             reformulated: None,
             embedding,
+            modality: Modality::Text,
             source,
             sensitivity: SensitivityLevel::Public,
             category: MemoryCategory::Default,
@@ -144,6 +176,18 @@ impl MemoryEntry {
             enriched: false,
             parent_id: None,
         }
+    }
+
+    /// Create a new memory entry with a specific modality.
+    pub fn new_with_modality(
+        content: String,
+        embedding: Vec<f32>,
+        source: String,
+        modality: Modality,
+    ) -> Self {
+        let mut entry = Self::new(content, embedding, source);
+        entry.modality = modality;
+        entry
     }
 
     /// Get the content to display — masked if available, original otherwise.
@@ -177,6 +221,9 @@ pub struct EchoResult {
     pub source: String,
     /// When this echo activation happened.
     pub echoed_at: DateTime<Utc>,
+    /// Which sensory channel matched this result.
+    #[serde(default)]
+    pub modality: Modality,
 }
 
 /// Statistics about the Echo Memory system.

@@ -95,6 +95,7 @@ impl MemoryMeta {
             masked_content: self.masked_content,
             reformulated: self.reformulated,
             embedding,
+            modality: shrimpk_core::Modality::Text,
             source: self.source,
             sensitivity: self.sensitivity,
             category: self.category,

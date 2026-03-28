@@ -553,6 +553,7 @@ impl EchoEngine {
                     final_score: (score as f64 + boost + recency_boost) * decay,
                     source: entry.source.clone(),
                     echoed_at: now,
+                    modality: entry.modality,
                 })
             })
             .collect();

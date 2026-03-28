@@ -199,6 +199,29 @@ pub struct EchoConfig {
     /// to `Llm` for backward compatibility.
     #[serde(default)]
     pub reranker_backend: RerankerBackend,
+
+    // --- Multimodal (KS31) ---
+
+    /// Enabled modalities. Default: `[Text]`.
+    /// Add `Vision` to enable CLIP image embedding, `Speech` for audio embedding.
+    #[serde(default = "default_modalities")]
+    pub enabled_modalities: Vec<crate::Modality>,
+    /// Embedding dimension for vision channel (CLIP). Default: 512.
+    #[serde(default = "default_vision_dim")]
+    pub vision_embedding_dim: usize,
+    /// Embedding dimension for speech channel. Default: 768 (HuBERT).
+    #[serde(default = "default_speech_dim")]
+    pub speech_embedding_dim: usize,
+}
+
+fn default_modalities() -> Vec<crate::Modality> {
+    vec![crate::Modality::Text]
+}
+fn default_vision_dim() -> usize {
+    512
+}
+fn default_speech_dim() -> usize {
+    768
 }
 
 fn default_proxy_target() -> String {
@@ -276,6 +299,9 @@ impl Default for EchoConfig {
             query_expansion_enabled: false,
             reranker_enabled: false,
             reranker_backend: RerankerBackend::None,
+            enabled_modalities: default_modalities(),
+            vision_embedding_dim: default_vision_dim(),
+            speech_embedding_dim: default_speech_dim(),
         }
     }
 }
