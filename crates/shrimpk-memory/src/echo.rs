@@ -20,7 +20,7 @@ use tracing::instrument;
 use crate::bloom::TopicFilter;
 use crate::consolidation::{self, ConsolidationResult};
 use crate::consolidator;
-use crate::embedder::Embedder;
+use crate::embedder::MultiEmbedder;
 use crate::hebbian::HebbianGraph;
 use crate::lsh::CosineHash;
 use crate::pii::PiiFilter;
@@ -44,12 +44,22 @@ struct EchoStats {
 /// and exclusive writes during store operations.
 /// The embedder is behind a `Mutex` because fastembed requires `&mut self`.
 pub struct EchoEngine {
-    /// Sentence embedder (fastembed all-MiniLM-L6-v2), behind Mutex for mut access.
-    embedder: Mutex<Embedder>,
+    /// Multi-channel embedder (text + optional vision/speech), behind Mutex for mut access.
+    embedder: Mutex<MultiEmbedder>,
     /// The in-memory vector store (behind RwLock for concurrent access).
     store: RwLock<EchoStore>,
-    /// LSH index for sub-linear candidate retrieval (behind Mutex for mut access).
-    lsh: Mutex<CosineHash>,
+    /// Text LSH index for sub-linear candidate retrieval (behind Mutex for mut access).
+    text_lsh: Mutex<CosineHash>,
+    /// Vision LSH index (CLIP 512-dim). Initialized when vision feature is enabled.
+    /// Used in KS35 when cross-modal echo queries are implemented.
+    #[cfg(feature = "vision")]
+    #[allow(dead_code)]
+    vision_lsh: Option<Mutex<CosineHash>>,
+    /// Speech LSH index (579-dim). Initialized when speech feature is enabled.
+    /// Used in KS36 when audio echo queries are implemented.
+    #[cfg(feature = "speech")]
+    #[allow(dead_code)]
+    speech_lsh: Option<Mutex<CosineHash>>,
     /// Bloom filter for O(1) topic pre-screening (behind RwLock for concurrent reads).
     bloom: RwLock<TopicFilter>,
     /// Whether the Bloom filter needs rebuilding (set after deletions).
@@ -79,11 +89,11 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Embedding` if the model fails to initialize.
     #[instrument(skip(config), fields(max_memories = config.max_memories, threshold = config.similarity_threshold))]
     pub fn new(config: EchoConfig) -> Result<Self> {
-        let embedder = Embedder::new()?;
+        let embedder = MultiEmbedder::new()?;
         let pii_filter = PiiFilter::new();
         let reformulator = MemoryReformulator::new();
         let store = RwLock::new(EchoStore::new());
-        let lsh = CosineHash::new(config.embedding_dim, 16, 10);
+        let text_lsh = CosineHash::new(config.embedding_dim, 16, 10);
         let bloom = TopicFilter::new(config.max_memories, 0.01);
 
         tracing::info!(
@@ -100,7 +110,33 @@ impl EchoEngine {
         Ok(Self {
             embedder: Mutex::new(embedder),
             store,
-            lsh: Mutex::new(lsh),
+            text_lsh: Mutex::new(text_lsh),
+            #[cfg(feature = "vision")]
+            vision_lsh: if config
+                .enabled_modalities
+                .contains(&shrimpk_core::Modality::Vision)
+            {
+                Some(Mutex::new(CosineHash::new(
+                    config.vision_embedding_dim,
+                    16,
+                    10,
+                )))
+            } else {
+                None
+            },
+            #[cfg(feature = "speech")]
+            speech_lsh: if config
+                .enabled_modalities
+                .contains(&shrimpk_core::Modality::Speech)
+            {
+                Some(Mutex::new(CosineHash::new(
+                    config.speech_embedding_dim,
+                    16,
+                    10,
+                )))
+            } else {
+                None
+            },
             bloom: RwLock::new(bloom),
             bloom_dirty: Mutex::new(false),
             pii_filter,
@@ -209,8 +245,8 @@ impl EchoEngine {
             let mut embedder = self
                 .embedder
                 .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("Embedder lock poisoned: {e}")))?;
-            embedder.embed(embed_text)?
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            embedder.embed_text(embed_text)?
         };
 
         // 4. Build entry with auto-categorization for adaptive decay
@@ -235,9 +271,9 @@ impl EchoEngine {
             let mut store = self.store.write().await;
             let index = store.add(entry);
 
-            // Insert into LSH index for sub-linear retrieval
+            // Insert into text LSH index for sub-linear retrieval
             if self.config.use_lsh
-                && let Ok(mut lsh) = self.lsh.lock()
+                && let Ok(mut lsh) = self.text_lsh.lock()
             {
                 lsh.insert(index as u32, &embedding);
             }
@@ -302,8 +338,8 @@ impl EchoEngine {
             let mut embedder = self
                 .embedder
                 .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("Embedder lock poisoned: {e}")))?;
-            embedder.embed(&effective_query)?
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            embedder.embed_text(&effective_query)?
         };
 
         // 2. Bloom filter pre-check — skip everything if no fingerprints match.
@@ -333,7 +369,7 @@ impl EchoEngine {
         let candidates: Vec<(usize, &[f32])> = if self.config.use_lsh {
             // Query LSH for candidate indices
             let lsh_candidates = self
-                .lsh
+                .text_lsh
                 .lock()
                 .map_err(|e| ShrimPKError::Memory(format!("LSH lock poisoned: {e}")))?
                 .query(&query_embedding);
@@ -632,9 +668,9 @@ impl EchoEngine {
                     hebbian.remove_node(removed_idx as u32);
                 }
 
-                // Update LSH index to reflect the swap-remove
+                // Update text LSH index to reflect the swap-remove
                 if self.config.use_lsh
-                    && let Ok(mut lsh) = self.lsh.lock()
+                    && let Ok(mut lsh) = self.text_lsh.lock()
                     && let Some(removed_idx) = removed_index
                 {
                     // Remove the deleted entry from LSH
@@ -782,18 +818,18 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Persistence` if store file is corrupted.
     #[instrument(skip(config), fields(data_dir = %config.data_dir.display()))]
     pub fn load(config: EchoConfig) -> Result<Self> {
-        let embedder = Embedder::new()?;
+        let embedder = MultiEmbedder::new()?;
         let pii_filter = PiiFilter::new();
         let reformulator = MemoryReformulator::new();
 
         let store_path = config.data_dir.join("echo_store.shrm");
         let loaded_store = EchoStore::load(&store_path)?;
 
-        // Rebuild LSH index from loaded embeddings
-        let mut lsh = CosineHash::new(config.embedding_dim, 16, 10);
+        // Rebuild text LSH index from loaded embeddings
+        let mut text_lsh = CosineHash::new(config.embedding_dim, 16, 10);
         if config.use_lsh {
             for (i, embedding) in loaded_store.all_embeddings().iter().enumerate() {
-                lsh.insert(i as u32, embedding);
+                text_lsh.insert(i as u32, embedding);
             }
         }
 
@@ -814,7 +850,7 @@ impl EchoEngine {
 
         tracing::info!(
             entries = loaded_store.len(),
-            lsh_entries = lsh.len(),
+            lsh_entries = text_lsh.len(),
             bloom_entries = bloom.len(),
             bloom_size_bytes = bloom.size_bytes(),
             hebbian_edges = hebbian.len(),
@@ -828,7 +864,33 @@ impl EchoEngine {
         Ok(Self {
             embedder: Mutex::new(embedder),
             store: RwLock::new(loaded_store),
-            lsh: Mutex::new(lsh),
+            text_lsh: Mutex::new(text_lsh),
+            #[cfg(feature = "vision")]
+            vision_lsh: if config
+                .enabled_modalities
+                .contains(&shrimpk_core::Modality::Vision)
+            {
+                Some(Mutex::new(CosineHash::new(
+                    config.vision_embedding_dim,
+                    16,
+                    10,
+                )))
+            } else {
+                None
+            },
+            #[cfg(feature = "speech")]
+            speech_lsh: if config
+                .enabled_modalities
+                .contains(&shrimpk_core::Modality::Speech)
+            {
+                Some(Mutex::new(CosineHash::new(
+                    config.speech_embedding_dim,
+                    16,
+                    10,
+                )))
+            } else {
+                None
+            },
             bloom: RwLock::new(bloom),
             bloom_dirty: Mutex::new(false),
             pii_filter,
@@ -851,7 +913,7 @@ impl EchoEngine {
         let mut hebbian = self.hebbian.write().await;
         let mut bloom = self.bloom.write().await;
         let mut bloom_dirty = self.bloom_dirty.lock().unwrap_or_else(|e| e.into_inner());
-        let mut lsh = self.lsh.lock().unwrap_or_else(|e| e.into_inner());
+        let mut lsh = self.text_lsh.lock().unwrap_or_else(|e| e.into_inner());
 
         consolidation::consolidate(
             &mut store,

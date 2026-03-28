@@ -1,26 +1,32 @@
-//! Sentence embedding via fastembed.
+//! Multi-channel embedding via fastembed.
 //!
 //! Wraps `fastembed::TextEmbedding` with the all-MiniLM-L6-v2 model
-//! for 384-dimensional sentence embeddings.
+//! for 384-dimensional sentence embeddings. Vision (CLIP 512-dim) and
+//! Speech (579-dim) channels are gated behind `vision` and `speech`
+//! feature flags and will be loaded in KS35/KS36.
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use shrimpk_core::{Result, ShrimPKError};
 use tracing::instrument;
 
-/// Sentence embedder wrapping fastembed.
+/// Multi-channel embedder for text, vision, and speech modalities.
 ///
-/// Initializes the all-MiniLM-L6-v2 model on construction.
+/// Text channel (always available): all-MiniLM-L6-v2, 384-dim.
+/// Vision channel (feature = "vision"): CLIP, 512-dim — KS35.
+/// Speech channel (feature = "speech"): audio encoder, 579-dim — KS36.
+///
 /// Thread-safe: `TextEmbedding` is `Send` (but not `Sync`),
 /// so share via `Mutex` or create per-thread instances.
-pub struct Embedder {
-    model: TextEmbedding,
+pub struct MultiEmbedder {
+    text: TextEmbedding,
 }
 
-impl Embedder {
-    /// Initialize the embedder with the all-MiniLM-L6-v2 model.
+impl MultiEmbedder {
+    /// Initialize the multi-channel embedder.
     ///
-    /// This downloads the model on first run (~23MB ONNX) and caches it.
-    /// Subsequent calls load from cache.
+    /// Currently loads only the text model (all-MiniLM-L6-v2).
+    /// Vision and speech models will be loaded when their feature flags
+    /// are enabled and the model loading code is implemented (KS35/KS36).
     ///
     /// # Errors
     /// Returns `ShrimPKError::Embedding` if model initialization fails
@@ -29,7 +35,7 @@ impl Embedder {
     pub fn new() -> Result<Self> {
         let start = std::time::Instant::now();
 
-        let model = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2))
+        let text = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2))
             .map_err(|e| {
                 ShrimPKError::Embedding(format!("Failed to init all-MiniLM-L6-v2: {e}"))
             })?;
@@ -39,10 +45,10 @@ impl Embedder {
             elapsed_ms = elapsed.as_millis(),
             model = "all-MiniLM-L6-v2",
             dim = 384,
-            "Embedder initialized"
+            "MultiEmbedder initialized (text channel)"
         );
 
-        Ok(Self { model })
+        Ok(Self { text })
     }
 
     /// Embed a single text string into a 384-dimensional vector.
@@ -50,11 +56,11 @@ impl Embedder {
     /// # Errors
     /// Returns `ShrimPKError::Embedding` if embedding generation fails.
     #[instrument(skip(self, text), fields(text_len = text.len()))]
-    pub fn embed(&mut self, text: &str) -> Result<Vec<f32>> {
+    pub fn embed_text(&mut self, text: &str) -> Result<Vec<f32>> {
         let start = std::time::Instant::now();
 
         let results = self
-            .model
+            .text
             .embed(vec![text.to_string()], None)
             .map_err(|e| ShrimPKError::Embedding(format!("Embed failed: {e}")))?;
 
@@ -67,7 +73,7 @@ impl Embedder {
         tracing::debug!(
             dim = embedding.len(),
             elapsed_us = elapsed.as_micros(),
-            "Single embed complete"
+            "Single text embed complete"
         );
 
         Ok(embedding)
@@ -75,7 +81,7 @@ impl Embedder {
 
     /// Batch-embed multiple texts.
     ///
-    /// More efficient than calling `embed()` in a loop because
+    /// More efficient than calling `embed_text()` in a loop because
     /// fastembed batches the ONNX inference.
     ///
     /// # Errors
@@ -90,7 +96,7 @@ impl Embedder {
         let count = texts.len();
 
         let results = self
-            .model
+            .text
             .embed(texts, None)
             .map_err(|e| ShrimPKError::Embedding(format!("Batch embed failed: {e}")))?;
 
@@ -103,15 +109,41 @@ impl Embedder {
             } else {
                 0
             },
-            "Batch embed complete"
+            "Batch text embed complete"
         );
 
         Ok(results)
     }
 
-    /// Get the embedding dimension (384 for all-MiniLM-L6-v2).
-    pub fn dimension(&self) -> usize {
+    /// Get the text embedding dimension (384 for all-MiniLM-L6-v2).
+    pub fn text_dimension(&self) -> usize {
         384
+    }
+
+    /// Embed an image into a 512-dimensional CLIP vector.
+    ///
+    /// Phase 2 (KS35) — CLIP model not loaded yet. Returns `Ok(None)`.
+    #[cfg(feature = "vision")]
+    pub fn embed_image(&mut self, _image_data: &[u8]) -> Result<Option<Vec<f32>>> {
+        Ok(None)
+    }
+
+    /// Embed text into CLIP's shared vision-text space (512-dim).
+    ///
+    /// This allows text queries to match against image embeddings.
+    /// Phase 2 (KS35) — CLIP model not loaded yet. Returns `Ok(None)`.
+    #[cfg(feature = "vision")]
+    pub fn embed_text_for_vision(&mut self, _text: &str) -> Result<Option<Vec<f32>>> {
+        Ok(None)
+    }
+
+    /// Embed raw PCM audio into a 579-dimensional speech vector.
+    ///
+    /// Captures paralinguistic features (tone, pace, emotion), NOT speech-to-text.
+    /// Phase 3 (KS36) — speech model not loaded yet. Returns `Ok(None)`.
+    #[cfg(feature = "speech")]
+    pub fn embed_audio(&mut self, _pcm: &[f32], _sample_rate: u32) -> Result<Option<Vec<f32>>> {
+        Ok(None)
     }
 }
 
@@ -126,15 +158,15 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embedder_initializes() {
-        let embedder = Embedder::new().expect("Embedder should init");
-        assert_eq!(embedder.dimension(), 384);
+        let embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        assert_eq!(embedder.text_dimension(), 384);
     }
 
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embed_single_text() {
-        let mut embedder = Embedder::new().expect("Embedder should init");
-        let embedding = embedder.embed("Hello world").expect("Should embed");
+        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let embedding = embedder.embed_text("Hello world").expect("Should embed");
         assert_eq!(
             embedding.len(),
             384,
@@ -145,7 +177,7 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embed_batch_texts() {
-        let mut embedder = Embedder::new().expect("Embedder should init");
+        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
         let texts = vec![
             "The cat sat on the mat".to_string(),
             "Dogs are loyal companions".to_string(),
@@ -161,11 +193,11 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn similar_texts_have_higher_similarity() {
-        let mut embedder = Embedder::new().expect("Embedder should init");
-        let cat = embedder.embed("The cat sat on the mat").unwrap();
-        let kitten = embedder.embed("A kitten rests on a rug").unwrap();
+        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let cat = embedder.embed_text("The cat sat on the mat").unwrap();
+        let kitten = embedder.embed_text("A kitten rests on a rug").unwrap();
         let code = embedder
-            .embed("fn main() { println!(\"hello\"); }")
+            .embed_text("fn main() { println!(\"hello\"); }")
             .unwrap();
 
         // cat and kitten should be more similar than cat and code
@@ -181,7 +213,7 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embed_batch_empty_returns_empty() {
-        let mut embedder = Embedder::new().expect("Embedder should init");
+        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
         let embeddings = embedder
             .embed_batch(Vec::new())
             .expect("Should handle empty");

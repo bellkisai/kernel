@@ -134,6 +134,12 @@ pub struct MemoryEntry {
     /// Which sensory channel produced this memory.
     #[serde(default)]
     pub modality: Modality,
+    /// CLIP vision embedding (512-dim). Present when image data was stored.
+    #[serde(default)]
+    pub vision_embedding: Option<Vec<f32>>,
+    /// Speech audio embedding (579-dim). Present when audio data was stored.
+    #[serde(default)]
+    pub speech_embedding: Option<Vec<f32>>,
     /// Where this memory came from (e.g., "conversation", "document", "manual").
     pub source: String,
     /// Sensitivity classification controlling push behavior.
@@ -167,6 +173,8 @@ impl MemoryEntry {
             reformulated: None,
             embedding,
             modality: Modality::Text,
+            vision_embedding: None,
+            speech_embedding: None,
             source,
             sensitivity: SensitivityLevel::Public,
             category: MemoryCategory::Default,

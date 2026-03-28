@@ -19,7 +19,7 @@
 //!
 //!     cargo test --test echo_token_efficiency -- --ignored --nocapture
 
-use shrimpk_memory::embedder::Embedder;
+use shrimpk_memory::embedder::MultiEmbedder;
 use shrimpk_memory::similarity::cosine_similarity;
 
 // ===========================================================================
@@ -919,7 +919,7 @@ async fn vllm_throughput_projection() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn context_quality_comparison() {
-    let mut embedder = Embedder::new().expect("embedder should initialize");
+    let mut embedder = MultiEmbedder::new().expect("embedder should initialize");
     let scenarios = scenarios();
 
     println!("\n{}", "=".repeat(90));
@@ -950,9 +950,9 @@ async fn context_quality_comparison() {
             .join(". ");
 
         // Embed all three: manual context, echo context, ideal context
-        let emb_manual = embedder.embed(manual_context).expect("embed manual");
-        let emb_echo = embedder.embed(&echo_context).expect("embed echo");
-        let emb_ideal = embedder.embed(scenario.ideal_context).expect("embed ideal");
+        let emb_manual = embedder.embed_text(manual_context).expect("embed manual");
+        let emb_echo = embedder.embed_text(&echo_context).expect("embed echo");
+        let emb_ideal = embedder.embed_text(scenario.ideal_context).expect("embed ideal");
 
         // Cosine similarity: manual vs ideal, echo vs ideal
         let sim_manual_ideal = cosine_similarity(&emb_manual, &emb_ideal);

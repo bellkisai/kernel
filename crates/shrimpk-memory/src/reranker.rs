@@ -350,6 +350,7 @@ mod tests {
             final_score: score,
             source: "test".to_string(),
             echoed_at: Utc::now(),
+            modality: shrimpk_core::Modality::Text,
         }
     }
 

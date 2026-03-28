@@ -5,7 +5,7 @@
 //!
 //! ## Architecture
 //! - **Store**: In-memory vector store with disk persistence
-//! - **Embedder**: Sentence embedding via fastembed (all-MiniLM-L6-v2)
+//! - **MultiEmbedder**: Multi-channel embedding via fastembed (text: all-MiniLM-L6-v2)
 //! - **Similarity**: SIMD-accelerated cosine similarity via simsimd
 //! - **Echo**: The activation cycle — embed query -> search -> rank -> return
 //! - **PII Filter**: Regex-based secret/PII detection and masking

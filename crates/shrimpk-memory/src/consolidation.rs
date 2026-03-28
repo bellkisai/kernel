@@ -71,7 +71,7 @@ pub fn consolidate(
     bloom_dirty: &mut bool,
     config: &EchoConfig,
     consolidator: &dyn Consolidator,
-    embedder: Option<&std::sync::Mutex<crate::embedder::Embedder>>,
+    embedder: Option<&std::sync::Mutex<crate::embedder::MultiEmbedder>>,
     lsh: &mut crate::lsh::CosineHash,
 ) -> ConsolidationResult {
     let start = std::time::Instant::now();
@@ -112,7 +112,7 @@ pub fn consolidate(
     // to extract atomic facts. The parent is marked enriched=true to prevent
     // re-extraction on the next cycle. Batch limit: max 10 per cycle.
     //
-    // Note: child memory creation with embeddings requires the Embedder,
+    // Note: child memory creation with embeddings requires the MultiEmbedder,
     // which is not available here. Facts are extracted and logged; child
     // creation happens in EchoEngine::consolidate_now() which has embedder access.
     if consolidator.name() != "noop" {
@@ -152,7 +152,7 @@ pub fn consolidate(
 
                 for fact in &facts {
                     let embedding = match embedder.lock() {
-                        Ok(mut e) => match e.embed(fact) {
+                        Ok(mut e) => match e.embed_text(fact) {
                             Ok(emb) => emb,
                             Err(err) => {
                                 tracing::debug!(error = %err, "Failed to embed fact, skipping");

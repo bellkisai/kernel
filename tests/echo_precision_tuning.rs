@@ -22,7 +22,7 @@
 
 use shrimpk_core::EchoConfig;
 use shrimpk_memory::EchoEngine;
-use shrimpk_memory::embedder::Embedder;
+use shrimpk_memory::embedder::MultiEmbedder;
 use shrimpk_memory::similarity::cosine_similarity;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -588,19 +588,19 @@ async fn threshold_range_sweep() {
     println!();
 
     // Collect similarity scores for all pairs using raw embeddings
-    let mut embedder = Embedder::new().expect("embedder init");
+    let mut embedder = MultiEmbedder::new().expect("embedder init");
 
     // Build memory embeddings map
     let mut mem_embeddings: Vec<(&str, Vec<f32>)> = Vec::new();
     for &text in &unique_memories {
-        let emb = embedder.embed(text).expect("embed memory");
+        let emb = embedder.embed_text(text).expect("embed memory");
         mem_embeddings.push((text, emb));
     }
 
     // Score all positive pairs
     let mut positive_scores: Vec<(&str, &str, &str, f32)> = Vec::new();
     for &(mem_text, query_text, label) in &positives {
-        let query_emb = embedder.embed(query_text).expect("embed query");
+        let query_emb = embedder.embed_text(query_text).expect("embed query");
         let mem_emb = mem_embeddings
             .iter()
             .find(|(t, _)| *t == mem_text)
@@ -613,7 +613,7 @@ async fn threshold_range_sweep() {
     // Score all negative pairs
     let mut negative_scores: Vec<(&str, &str, &str, f32)> = Vec::new();
     for &(mem_text, query_text, label) in &negatives {
-        let query_emb = embedder.embed(query_text).expect("embed query");
+        let query_emb = embedder.embed_text(query_text).expect("embed query");
         let mem_emb = mem_embeddings
             .iter()
             .find(|(t, _)| *t == mem_text)
@@ -730,7 +730,7 @@ async fn threshold_range_sweep() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn query_formulation_analysis() {
-    let mut embedder = Embedder::new().expect("embedder init");
+    let mut embedder = MultiEmbedder::new().expect("embedder init");
 
     let positives = positive_pairs();
 
@@ -745,8 +745,8 @@ async fn query_formulation_analysis() {
     let mut current_memory: Option<&str> = None;
 
     for &(mem_text, query_text, label) in &positives {
-        let query_emb = embedder.embed(query_text).expect("embed query");
-        let mem_emb = embedder.embed(mem_text).expect("embed memory");
+        let query_emb = embedder.embed_text(query_text).expect("embed query");
+        let mem_emb = embedder.embed_text(mem_text).expect("embed memory");
         let score = cosine_similarity(&query_emb, &mem_emb);
 
         if current_memory != Some(mem_text) {
@@ -848,7 +848,7 @@ async fn query_formulation_analysis() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn memory_formulation_analysis() {
-    let mut embedder = Embedder::new().expect("embedder init");
+    let mut embedder = MultiEmbedder::new().expect("embedder init");
 
     println!();
     println!("====================================================================");
@@ -894,7 +894,7 @@ async fn memory_formulation_analysis() {
 }
 
 fn run_formulation_test(
-    embedder: &mut Embedder,
+    embedder: &mut MultiEmbedder,
     formulations: &[FormulationVariant],
     queries: &[&str],
 ) {
@@ -902,10 +902,10 @@ fn run_formulation_test(
     let mut score_matrix: Vec<Vec<f32>> = Vec::new();
 
     for variant in formulations {
-        let mem_emb = embedder.embed(variant.text).expect("embed memory variant");
+        let mem_emb = embedder.embed_text(variant.text).expect("embed memory variant");
         let mut row: Vec<f32> = Vec::new();
         for &query in queries {
-            let query_emb = embedder.embed(query).expect("embed query");
+            let query_emb = embedder.embed_text(query).expect("embed query");
             let score = cosine_similarity(&query_emb, &mem_emb);
             row.push(score);
         }
@@ -1195,7 +1195,7 @@ async fn context_window_simulation() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn recommended_configuration() {
-    let mut embedder = Embedder::new().expect("embedder init");
+    let mut embedder = MultiEmbedder::new().expect("embedder init");
 
     let positives = positive_pairs();
     let negatives = negative_pairs();
@@ -1219,14 +1219,14 @@ async fn recommended_configuration() {
     // Embed all unique memories
     let mut mem_embeddings: Vec<(&str, Vec<f32>)> = Vec::new();
     for &text in &unique_memories {
-        let emb = embedder.embed(text).expect("embed memory");
+        let emb = embedder.embed_text(text).expect("embed memory");
         mem_embeddings.push((text, emb));
     }
 
     // Score positive pairs
     let mut positive_scores: Vec<f32> = Vec::new();
     for &(mem_text, query_text, _) in &positives {
-        let query_emb = embedder.embed(query_text).expect("embed query");
+        let query_emb = embedder.embed_text(query_text).expect("embed query");
         let mem_emb = mem_embeddings
             .iter()
             .find(|(t, _)| *t == mem_text)
@@ -1239,7 +1239,7 @@ async fn recommended_configuration() {
     // Score negative pairs
     let mut negative_scores: Vec<f32> = Vec::new();
     for &(mem_text, query_text, _) in &negatives {
-        let query_emb = embedder.embed(query_text).expect("embed query");
+        let query_emb = embedder.embed_text(query_text).expect("embed query");
         let mem_emb = mem_embeddings
             .iter()
             .find(|(t, _)| *t == mem_text)
@@ -1530,7 +1530,7 @@ async fn recommended_configuration() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn hardest_pairs_deep_dive() {
-    let mut embedder = Embedder::new().expect("embedder init");
+    let mut embedder = MultiEmbedder::new().expect("embedder init");
 
     println!();
     println!("====================================================================");
@@ -1552,8 +1552,8 @@ async fn hardest_pairs_deep_dive() {
     ];
 
     for (memory, query, historical_score) in &hard_pairs {
-        let mem_emb = embedder.embed(memory).expect("embed memory");
-        let query_emb = embedder.embed(query).expect("embed query");
+        let mem_emb = embedder.embed_text(memory).expect("embed memory");
+        let query_emb = embedder.embed_text(query).expect("embed query");
         let actual_score = cosine_similarity(&query_emb, &mem_emb);
 
         println!("  Memory: {:?}", memory);
@@ -1602,7 +1602,7 @@ async fn hardest_pairs_deep_dive() {
         println!("  Reformulation analysis:");
         let mut scored_reformulations: Vec<(&str, &str, f32)> = Vec::new();
         for (style, alt_query) in &reformulations {
-            let alt_emb = embedder.embed(alt_query).expect("embed reformulation");
+            let alt_emb = embedder.embed_text(alt_query).expect("embed reformulation");
             let score = cosine_similarity(&alt_emb, &mem_emb);
             scored_reformulations.push((style, alt_query, score));
         }
