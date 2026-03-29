@@ -409,6 +409,9 @@ pub struct FileConfig {
     pub query_expansion_enabled: Option<bool>,
     pub reranker_enabled: Option<bool>,
     pub reranker_backend: Option<RerankerBackend>,
+    pub enabled_modalities: Option<Vec<crate::Modality>>,
+    pub vision_embedding_dim: Option<usize>,
+    pub speech_embedding_dim: Option<usize>,
 }
 
 /// Default data directory: `~/.shrimpk-kernel/`
@@ -585,6 +588,15 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.reranker_backend {
             config.reranker_backend = v;
+        }
+        if let Some(v) = fc.enabled_modalities {
+            config.enabled_modalities = v;
+        }
+        if let Some(v) = fc.vision_embedding_dim {
+            config.vision_embedding_dim = v;
+        }
+        if let Some(v) = fc.speech_embedding_dim {
+            config.speech_embedding_dim = v;
         }
     }
 

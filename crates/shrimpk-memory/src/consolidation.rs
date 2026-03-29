@@ -119,9 +119,12 @@ pub fn consolidate(
         const MAX_ENRICHMENTS_PER_CYCLE: usize = 10;
         let unenriched: Vec<usize> = (0..store.len())
             .filter(|&i| {
-                store
-                    .entry_at(i)
-                    .is_some_and(|e| !e.enriched && e.parent_id.is_none())
+                store.entry_at(i).is_some_and(|e| {
+                    !e.enriched
+                        && e.parent_id.is_none()
+                        // Only consolidate text entries — vision/speech need VLM/transcription (KS38+)
+                        && e.modality == shrimpk_core::Modality::Text
+                })
             })
             .take(MAX_ENRICHMENTS_PER_CYCLE)
             .collect();
@@ -475,8 +478,15 @@ fn merge_near_duplicates(store: &mut EchoStore) -> usize {
         if already_removed.contains(&i) {
             continue;
         }
+        // Skip vision-only/speech-only entries with empty text embeddings
+        if embeddings[i].is_empty() {
+            continue;
+        }
         for j in (i + 1)..n {
             if already_removed.contains(&j) {
+                continue;
+            }
+            if embeddings[j].is_empty() {
                 continue;
             }
             let sim = similarity::cosine_similarity(&embeddings[i], &embeddings[j]);

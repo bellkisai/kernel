@@ -317,6 +317,16 @@ impl EchoEngine {
     #[cfg(feature = "vision")]
     #[instrument(skip(self, image_data), fields(data_len = image_data.len(), source = source))]
     pub async fn store_image(&self, image_data: &[u8], source: &str) -> Result<MemoryId> {
+        // Guard: reject oversized images to prevent OOM during ONNX inference
+        const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10MB
+        if image_data.len() > MAX_IMAGE_BYTES {
+            return Err(ShrimPKError::Embedding(format!(
+                "Image too large: {} bytes (max {})",
+                image_data.len(),
+                MAX_IMAGE_BYTES
+            )));
+        }
+
         // Check capacity
         {
             let store = self.store.read().await;
@@ -402,6 +412,16 @@ impl EchoEngine {
         sample_rate: u32,
         source: &str,
     ) -> Result<MemoryId> {
+        // Guard: reject oversized audio to prevent OOM during ONNX inference
+        const MAX_AUDIO_SAMPLES: usize = 16000 * 60; // 60 seconds at 16kHz
+        if pcm_f32.len() > MAX_AUDIO_SAMPLES {
+            return Err(ShrimPKError::Embedding(format!(
+                "Audio too long: {} samples (max {} = 60s at 16kHz)",
+                pcm_f32.len(),
+                MAX_AUDIO_SAMPLES
+            )));
+        }
+
         // Check capacity
         {
             let store = self.store.read().await;
@@ -662,15 +682,24 @@ impl EchoEngine {
                 {
                     if self.vision_lsh.is_some() {
                         let vision_results = self.echo_vision(query, max_results).await?;
-                        // Merge: deduplicate by memory_id, keep higher final_score
-                        let existing_ids: std::collections::HashSet<_> =
-                            results.iter().map(|r| r.memory_id.clone()).collect();
-                        for vr in vision_results {
-                            if !existing_ids.contains(&vr.memory_id) {
-                                results.push(vr);
-                            }
+                        // Merge all results, dedup by memory_id keeping highest final_score
+                        let mut all_results: Vec<EchoResult> = Vec::new();
+                        all_results.extend(results.drain(..));
+                        all_results.extend(vision_results);
+
+                        let mut best: std::collections::HashMap<MemoryId, EchoResult> =
+                            std::collections::HashMap::new();
+                        for result in all_results {
+                            best.entry(result.memory_id.clone())
+                                .and_modify(|existing| {
+                                    if result.final_score > existing.final_score {
+                                        *existing = result.clone();
+                                    }
+                                })
+                                .or_insert(result);
                         }
-                        // Re-sort by final_score
+
+                        results = best.into_values().collect();
                         results.sort_by(|a, b| {
                             b.final_score
                                 .partial_cmp(&a.final_score)
@@ -772,6 +801,7 @@ impl EchoEngine {
                 embeddings
                     .iter()
                     .enumerate()
+                    .filter(|(_, e)| !e.is_empty())
                     .map(|(i, e)| (i, e.as_slice()))
                     .collect()
             }
@@ -780,6 +810,7 @@ impl EchoEngine {
             embeddings
                 .iter()
                 .enumerate()
+                .filter(|(_, e)| !e.is_empty())
                 .map(|(i, e)| (i, e.as_slice()))
                 .collect()
         };
@@ -1441,6 +1472,31 @@ impl EchoEngine {
             None
         };
 
+        // Rebuild speech LSH from loaded entries' speech_embedding fields
+        #[cfg(feature = "speech")]
+        let speech_lsh_rebuilt = if config
+            .enabled_modalities
+            .contains(&shrimpk_core::Modality::Speech)
+        {
+            let mut slsh = CosineHash::new(config.speech_embedding_dim, 16, 10);
+            let mut speech_count = 0usize;
+            for (i, entry) in loaded_store.all_entries().iter().enumerate() {
+                if let Some(ref se) = entry.speech_embedding {
+                    slsh.insert(i as u32, se);
+                    speech_count += 1;
+                }
+            }
+            if speech_count > 0 {
+                tracing::info!(
+                    speech_entries = speech_count,
+                    "Speech LSH rebuilt from loaded entries"
+                );
+            }
+            Some(Mutex::new(slsh))
+        } else {
+            None
+        };
+
         tracing::info!(
             entries = loaded_store.len(),
             lsh_entries = text_lsh.len(),
@@ -1461,18 +1517,7 @@ impl EchoEngine {
             #[cfg(feature = "vision")]
             vision_lsh: vision_lsh_rebuilt,
             #[cfg(feature = "speech")]
-            speech_lsh: if config
-                .enabled_modalities
-                .contains(&shrimpk_core::Modality::Speech)
-            {
-                Some(Mutex::new(CosineHash::new(
-                    config.speech_embedding_dim,
-                    16,
-                    10,
-                )))
-            } else {
-                None
-            },
+            speech_lsh: speech_lsh_rebuilt,
             bloom: RwLock::new(bloom),
             bloom_dirty: Mutex::new(false),
             pii_filter,
