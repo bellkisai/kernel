@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-03-29
+
+### Added
+- **Multimodal Echo Memory:** 3-channel architecture (text, vision, speech)
+- **Vision channel:** CLIP ViT-B-32 via fastembed — store images, cross-modal text->image retrieval
+- **Speech channel:** Architecture ready (ECAPA-TDNN 512 + Wav2Small 3 + Whisper-tiny 384 = 899-dim)
+- **QueryMode:** Text / Vision / Auto for cross-channel echo queries
+- **Per-channel LSH:** Separate indices per modality (384/512/899-dim)
+- **SHRM v2 persistence:** Per-channel bitmap+sparse sections, CRC32 per section, v1 backward compat
+- **API endpoints:** store_image, store_audio (MCP + daemon + CLI), --modality flag on echo
+- **Per-channel stats:** text_count, vision_count, speech_count in stats output
+- **Feature flags:** `vision` and `speech` Cargo features for compile-time gating
+- **Multimodal benchmarks:** echo_multimodal_bench.rs with 7 HARD gate tests
+- **FileConfig multimodal fields:** enabled_modalities, vision/speech_embedding_dim configurable via TOML
+
+### Changed
+- **Text model upgrade:** all-MiniLM-L6-v2 -> BGE-small-EN-v1.5 (MTEB 56.3 -> 62.0, same 384-dim)
+- **Embedder refactor:** Embedder -> MultiEmbedder with per-channel methods
+- **RAM estimation:** stats() now accounts for vision (512-dim) and speech (899-dim) sizes
+- **SPEAKER_DIM:** 192 -> 512 (Wespeaker ECAPA-TDNN official ONNX output)
+
+### Fixed
+- Speech LSH rebuilt on load (was empty after restart)
+- Consolidation skips non-text entries (no more "[image]" sent to LLM)
+- Auto-mode dedup keeps highest final_score per memory_id
+- Brute-force fallback skips empty embeddings
+- Input size limits: store_image 10MB, store_audio 60s at 16kHz
+- Header CRC coverage in SHRM v2 (prevents corrupted entry_count allocation)
+- Unix parent dir fsync after atomic rename (ext4 durability)
+- merge_near_duplicates skips empty text embeddings
+
+### Security
+- Input size limits on image/audio storage prevent OOM
+- CRC32 covers header + metadata + per-channel sections
+
+## [0.3.2]
+
 ### Added — KS13: Provider Integration (v0.3.2)
 - **Provider Scanner**: auto-detect 6 LLM providers via parallel port probing (Ollama, LM Studio, Jan.ai, vLLM, LocalAI, GPT4All)
 - **Model-Name Routing**: requests routed by model name to correct provider backend
@@ -149,7 +186,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 #### Infrastructure
 - GitHub Actions CI: fmt, clippy, test (Ubuntu/macOS/Windows), doc
 - Release workflow: cross-platform binary builds on tag push
-- 222+ tests (unit, integration, stress, precision, scale, token efficiency)
+- 263+ tests (unit, integration, stress, precision, scale, token efficiency, multimodal)
 - Apache 2.0 license
 
 ### Performance

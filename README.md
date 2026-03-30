@@ -12,7 +12,7 @@
 ---
 
 <p align="center">
-  <code>3.50ms</code> echo at 100K memories&nbsp;&nbsp;•&nbsp;&nbsp;<code>+38%</code> more accurate than plain LLM&nbsp;&nbsp;•&nbsp;&nbsp;<code>15.7%</code> token savings
+  <code>3.50ms</code> echo at 100K memories&nbsp;&nbsp;•&nbsp;&nbsp;<code>+38%</code> more accurate than plain LLM&nbsp;&nbsp;•&nbsp;&nbsp;<code>15.7%</code> token savings&nbsp;&nbsp;•&nbsp;&nbsp;<code>multimodal</code> text + vision + speech
 </p>
 
 ---
@@ -72,6 +72,95 @@ In nature, cleaner shrimp maintain entire reef ecosystems — removing parasites
 | Follow-up elimination | **100%** |
 | RAM (1M memories, f32) | ~1.8 GB |
 | RAM (1M memories, binary) | ~150 MB |
+
+## Multimodal Memory
+
+ShrimPK v0.5.0 introduces a 3-channel architecture: **text**, **vision**, and **speech**. Each channel has its own embedding model, LSH index, and persistence section -- unified under a single Echo Memory engine.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│               ShrimPK Echo Memory                       │
+├──────────────┬──────────────┬───────────────────────────┤
+│  Text (384d) │ Vision (512d)│ Speech (899d)             │
+│  BGE-small   │ CLIP ViT-B-32│ ECAPA+Wav2Small+Whisper  │
+│  LSH 16×10   │ LSH 16×10   │ LSH 16×10                │
+├──────────────┴──────────────┴───────────────────────────┤
+│  Cross-Modal Retrieval: text query → image result       │
+│  Auto-Mode: searches all channels, deduplicates         │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Cross-Modal Retrieval
+
+Store an image. Query with text. ShrimPK finds it.
+
+```bash
+# Store an image
+shrimpk store-image photo.jpg --tag "kitchen morning"
+
+# Query with text — finds the image
+shrimpk echo --modality vision "where's the cup?"
+# → photo.jpg (similarity: 0.82) — CLIP matched "cup" to image content
+
+# Auto mode searches all channels
+shrimpk echo "what did I see this morning?"
+# → text memories + image memories, deduplicated by score
+```
+
+### Enabling Modalities
+
+Vision and speech are compile-time feature flags. Vision is enabled by default; speech is architecture-ready (models wired in a future release).
+
+```toml
+# ~/.shrimpk-kernel/config.toml
+enabled_modalities = ["text", "vision"]
+vision_embedding_dim = 512
+speech_embedding_dim = 899
+```
+
+```bash
+# Build with vision support (default)
+cargo build --release --features vision
+
+# Build with all modalities
+cargo build --release --features "vision,speech"
+```
+
+### CLI
+
+```bash
+shrimpk store-image photo.jpg            # Store image via CLIP
+shrimpk store-image screenshot.png --tag "bug report"
+shrimpk echo --modality vision "red car"  # Vision-only search
+shrimpk echo --modality auto "morning"    # Search all channels
+shrimpk stats                             # Shows text_count, vision_count, speech_count
+```
+
+### API
+
+```bash
+# Store image via daemon
+curl -X POST localhost:11435/api/store_image \
+  -F "file=@photo.jpg" -F "tag=kitchen"
+
+# Echo with modality
+curl -X POST localhost:11435/api/echo \
+  -H "Content-Type: application/json" \
+  -d '{"query":"where is the cup?","modality":"vision"}'
+```
+
+### Speech Channel (Architecture Ready)
+
+The speech channel combines three models into a 899-dimensional embedding:
+- **ECAPA-TDNN** (512d) -- speaker identity
+- **Wav2Small** (3d) -- acoustic features
+- **Whisper-tiny** (384d) -- semantic content
+
+The architecture, LSH indices, and persistence format are fully implemented. Model loading will be wired in a future release. When enabled, `shrimpk store-audio recording.wav` will work the same as image storage.
+
+### Scaling
+
+The multimodal engine scales from Raspberry Pi to data center. Per-channel LSH indices keep retrieval sub-linear regardless of memory count. Vision adds ~512 bytes per stored image embedding; speech adds ~899 bytes. RAM auto-detection adjusts budgets per channel.
 
 ## The Ollama Model
 
