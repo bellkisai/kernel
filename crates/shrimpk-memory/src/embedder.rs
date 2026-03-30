@@ -1,6 +1,6 @@
 //! Multi-channel embedding via fastembed.
 //!
-//! Wraps `fastembed::TextEmbedding` with the all-MiniLM-L6-v2 model
+//! Wraps `fastembed::TextEmbedding` with the BGE-small-EN-v1.5 model
 //! for 384-dimensional sentence embeddings. Vision (CLIP 512-dim) and
 //! Speech (899-dim) channels are gated behind `vision` and `speech`
 //! feature flags.
@@ -16,7 +16,7 @@ use tracing::instrument;
 
 /// Multi-channel embedder for text, vision, and speech modalities.
 ///
-/// Text channel (always available): all-MiniLM-L6-v2, 384-dim.
+/// Text channel (always available): BGE-small-EN-v1.5, 384-dim.
 /// Vision channel (feature = "vision"): CLIP ViT-B-32, 512-dim.
 /// Speech channel (feature = "speech"): ECAPA-TDNN + Wav2Small + Whisper-tiny, 899-dim.
 ///
@@ -40,7 +40,7 @@ pub struct MultiEmbedder {
 impl MultiEmbedder {
     /// Initialize the multi-channel embedder.
     ///
-    /// Always loads the text model (all-MiniLM-L6-v2, 384-dim).
+    /// Always loads the text model (BGE-small-EN-v1.5, 384-dim).
     /// When the `vision` feature is enabled, also attempts to load
     /// CLIP ViT-B-32 vision + text encoders (512-dim). If CLIP fails
     /// to initialize, vision is disabled gracefully — text still works.
@@ -52,15 +52,15 @@ impl MultiEmbedder {
     pub fn new() -> Result<Self> {
         let start = std::time::Instant::now();
 
-        let text = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2))
+        let text = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::BGESmallENV15))
             .map_err(|e| {
-                ShrimPKError::Embedding(format!("Failed to init all-MiniLM-L6-v2: {e}"))
+                ShrimPKError::Embedding(format!("Failed to init BGE-small-EN-v1.5: {e}"))
             })?;
 
         let elapsed = start.elapsed();
         tracing::info!(
             elapsed_ms = elapsed.as_millis(),
-            model = "all-MiniLM-L6-v2",
+            model = "BGE-small-EN-v1.5",
             dim = 384,
             "MultiEmbedder initialized (text channel)"
         );
@@ -192,7 +192,7 @@ impl MultiEmbedder {
         Ok(results)
     }
 
-    /// Get the text embedding dimension (384 for all-MiniLM-L6-v2).
+    /// Get the text embedding dimension (384 for BGE-small-EN-v1.5).
     pub fn text_dimension(&self) -> usize {
         384
     }
