@@ -24,6 +24,10 @@ pub async fn dispatch(
         "config_set" => tools::handle_config_set(args),
         "persist" => tools::handle_persist(engine, config).await,
         "status" => tools::handle_status(config),
+        #[cfg(feature = "vision")]
+        "store_image" => tools::handle_store_image(engine, args).await,
+        #[cfg(feature = "speech")]
+        "store_audio" => tools::handle_store_audio(engine, args).await,
         _ => return ToolCallResult::error(format!("Unknown tool: {name}")),
     };
 
@@ -48,9 +52,10 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_has_all_9_tools_covered() {
-        // Verify the match arms cover all tool names
-        let tool_names: Vec<&str> = vec![
+    fn dispatch_has_all_base_tools_covered() {
+        // Verify the match arms cover all base tool names
+        #[allow(unused_mut)]
+        let mut tool_names: Vec<&str> = vec![
             "store",
             "echo",
             "stats",
@@ -61,6 +66,17 @@ mod tests {
             "persist",
             "status",
         ];
-        assert_eq!(tool_names.len(), 9);
+        #[cfg(feature = "vision")]
+        tool_names.push("store_image");
+        #[cfg(feature = "speech")]
+        tool_names.push("store_audio");
+
+        #[allow(unused_mut)]
+        let mut expected = 9;
+        #[cfg(feature = "vision")]
+        { expected += 1; }
+        #[cfg(feature = "speech")]
+        { expected += 1; }
+        assert_eq!(tool_names.len(), expected);
     }
 }

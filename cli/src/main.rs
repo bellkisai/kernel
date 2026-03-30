@@ -35,6 +35,25 @@ enum Commands {
         #[arg(long)]
         quiet: bool,
     },
+    /// Store an image as a vision memory (CLIP embeddings)
+    StoreImage {
+        /// Path to image file (PNG, JPEG, etc.)
+        path: String,
+        /// Source label
+        #[arg(short, long, default_value = "cli")]
+        source: String,
+    },
+    /// Store audio as a speech memory (paralinguistic features)
+    StoreAudio {
+        /// Path to audio file (raw PCM f32 or WAV)
+        path: String,
+        /// Sample rate in Hz
+        #[arg(long, default_value_t = 16000)]
+        sample_rate: u32,
+        /// Source label
+        #[arg(short, long, default_value = "cli")]
+        source: String,
+    },
     /// Find memories that resonate with a query
     Echo {
         /// Query text
@@ -45,6 +64,9 @@ enum Commands {
         /// Output as JSON (for hook/script integration)
         #[arg(long)]
         json: bool,
+        /// Query mode: text, vision, or auto
+        #[arg(long, default_value = "text")]
+        modality: String,
     },
     /// Show engine statistics
     Stats,
@@ -180,6 +202,12 @@ fn detect_ram_gb() -> u64 {
     use sysinfo::System;
     let sys = System::new_all();
     sys.total_memory() / 1_073_741_824
+}
+
+/// Encode bytes to base64 (standard alphabet, padded).
+fn base64_encode(data: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 fn generate_sentence(rng: &mut impl Rng) -> String {
@@ -729,15 +757,40 @@ async fn main() -> anyhow::Result<()> {
                     println!("{resp}");
                 }
             }
+            Commands::StoreImage { path, source } => {
+                let image_bytes = std::fs::read(path)
+                    .map_err(|e| anyhow::anyhow!("Failed to read image file: {e}"))?;
+                let image_b64 = base64_encode(&image_bytes);
+                let resp = daemon_post(
+                    base,
+                    "/api/store_image",
+                    &serde_json::json!({"image_base64": image_b64, "source": source}),
+                )
+                .await?;
+                println!("{resp}");
+            }
+            Commands::StoreAudio { path, sample_rate, source } => {
+                let audio_bytes = std::fs::read(path)
+                    .map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
+                let audio_b64 = base64_encode(&audio_bytes);
+                let resp = daemon_post(
+                    base,
+                    "/api/store_audio",
+                    &serde_json::json!({"audio_base64": audio_b64, "sample_rate": sample_rate, "source": source}),
+                )
+                .await?;
+                println!("{resp}");
+            }
             Commands::Echo {
                 query,
                 max_results,
                 json,
+                modality,
             } => {
                 let resp = daemon_post(
                     base,
                     "/api/echo",
-                    &serde_json::json!({"query": query, "max_results": max_results}),
+                    &serde_json::json!({"query": query, "max_results": max_results, "modality": modality}),
                 )
                 .await?;
                 if *json {
@@ -777,6 +830,15 @@ async fn main() -> anyhow::Result<()> {
                     println!("  Disk usage:        {}", format_bytes(s["disk_usage_bytes"].as_u64().unwrap_or(0)));
                     println!("  Echo queries:      {}", s["total_echo_queries"].as_u64().unwrap_or(0));
                     println!("  Avg echo latency:  {:.2}ms", s["avg_echo_latency_ms"].as_f64().unwrap_or(0.0));
+                    let vc = s["vision_count"].as_u64().unwrap_or(0);
+                    let sc = s["speech_count"].as_u64().unwrap_or(0);
+                    if vc > 0 || sc > 0 {
+                        println!();
+                        println!("  Channels:");
+                        println!("    Text:    {}", format_number(s["text_count"].as_u64().unwrap_or(0) as usize));
+                        println!("    Vision:  {}", format_number(vc as usize));
+                        println!("    Speech:  {}", format_number(sc as usize));
+                    }
                 } else {
                     println!("{resp}");
                 }
@@ -859,13 +921,54 @@ async fn main() -> anyhow::Result<()> {
                 cmd_store(&engine, &text, &source).await?;
             }
         }
+        Commands::StoreImage { .. } | Commands::StoreAudio { .. } => {
+            anyhow::bail!(
+                "Multimodal store requires running daemon with vision/speech features enabled. \
+                 Start daemon first: shrimpk-daemon"
+            );
+        }
         Commands::Echo {
             query,
             max_results,
             json,
+            modality,
         } => {
+            let mode = match modality.as_str() {
+                "vision" => shrimpk_core::QueryMode::Vision,
+                "auto" => shrimpk_core::QueryMode::Auto,
+                _ => shrimpk_core::QueryMode::Text,
+            };
             if json {
                 cmd_echo_json(&engine, &query, max_results).await?
+            } else if mode != shrimpk_core::QueryMode::Text {
+                // In-process supports echo_with_mode
+                let start = Instant::now();
+                let results = engine.echo_with_mode(&query, max_results, mode).await?;
+                let elapsed = start.elapsed();
+                if results.is_empty() {
+                    println!(
+                        "[shrimpk] Echo results for \"{}\" ({:.1}ms): no matches",
+                        truncate(&query, 60),
+                        elapsed.as_secs_f64() * 1000.0
+                    );
+                } else {
+                    println!(
+                        "[shrimpk] Echo results for \"{}\" ({:.1}ms, mode: {}):",
+                        truncate(&query, 60),
+                        elapsed.as_secs_f64() * 1000.0,
+                        modality,
+                    );
+                    for (i, result) in results.iter().enumerate() {
+                        println!(
+                            "  #{} [{:.2}] \"{}\" (source: {}, id: {}...)",
+                            i + 1,
+                            result.similarity,
+                            truncate(&result.content, 60),
+                            result.source,
+                            &result.memory_id.to_string()[..8]
+                        );
+                    }
+                }
             } else {
                 cmd_echo(&engine, &query, max_results).await?
             }

@@ -8,11 +8,9 @@
 
 use chrono::Utc;
 use shrimpk_core::{
-    EchoConfig, EchoResult, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats, QueryMode,
-    Result, SensitivityLevel, ShrimPKError,
+    EchoConfig, EchoResult, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats, Modality,
+    QueryMode, Result, SensitivityLevel, ShrimPKError,
 };
-#[cfg(any(feature = "vision", feature = "speech"))]
-use shrimpk_core::Modality;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -55,7 +53,7 @@ pub struct EchoEngine {
     /// Vision LSH index (CLIP 512-dim). Initialized when vision feature is enabled.
     #[cfg(feature = "vision")]
     vision_lsh: Option<Mutex<CosineHash>>,
-    /// Speech LSH index (579-dim). Initialized when speech feature is enabled.
+    /// Speech LSH index (899-dim). Initialized when speech feature is enabled.
     /// Used in KS36 when audio echo queries are implemented.
     #[cfg(feature = "speech")]
     #[allow(dead_code)]
@@ -388,7 +386,7 @@ impl EchoEngine {
     /// Store audio as a speech memory.
     ///
     /// Pipeline:
-    /// 1. Embed PCM audio with the 3-model speech stack -> 579-dim vector
+    /// 1. Embed PCM audio with the 3-model speech stack -> 899-dim vector
     /// 2. Create MemoryEntry with modality: Speech, speech_embedding: Some(embedding)
     ///    - content is set to "[audio]" (no text content)
     ///    - text embedding is empty (not indexed in text channel)
@@ -1313,10 +1311,28 @@ impl EchoEngine {
             0.0
         };
 
-        // Estimate memory usage:
-        // Each entry: embedding (384 * 4 bytes) + content (~200 bytes avg) + metadata (~100 bytes)
-        let bytes_per_entry = (self.config.embedding_dim * 4 + 300) as u64;
-        let ram_usage = total as u64 * bytes_per_entry;
+        // Count entries by modality
+        let mut text_count: usize = 0;
+        let mut vision_count: usize = 0;
+        let mut speech_count: usize = 0;
+        for entry in store.all_entries() {
+            match entry.modality {
+                Modality::Text => text_count += 1,
+                Modality::Vision => vision_count += 1,
+                Modality::Speech => speech_count += 1,
+            }
+        }
+
+        // Estimate memory usage per channel:
+        // Text: embedding (384 * 4 bytes) + content (~200 bytes avg) + metadata (~100 bytes)
+        // Vision: vision_embedding (512 * 4 bytes) + metadata (~100 bytes)
+        // Speech: speech_embedding (speech_embedding_dim * 4 bytes) + metadata (~100 bytes)
+        let text_bytes_per = (self.config.embedding_dim * 4 + 300) as u64;
+        let vision_bytes_per = (self.config.vision_embedding_dim * 4 + 100) as u64;
+        let speech_bytes_per = (self.config.speech_embedding_dim * 4 + 100) as u64;
+        let ram_usage = text_count as u64 * text_bytes_per
+            + vision_count as u64 * vision_bytes_per
+            + speech_count as u64 * speech_bytes_per;
 
         let disk_usage = shrimpk_core::config::disk_usage(&self.config.data_dir).unwrap_or(0);
 
@@ -1329,6 +1345,9 @@ impl EchoEngine {
             total_echo_queries: stats.query_count,
             disk_usage_bytes: disk_usage,
             max_disk_bytes: self.config.max_disk_bytes,
+            text_count,
+            vision_count,
+            speech_count,
         }
     }
 

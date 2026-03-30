@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use shrimpk_core::{MemoryId, config};
+use shrimpk_core::{MemoryId, QueryMode, config};
 use std::time::Instant;
 
 use crate::state::AppState;
@@ -30,6 +30,32 @@ pub struct EchoRequest {
     pub query: String,
     #[serde(default = "default_max_results")]
     pub max_results: usize,
+    /// Query mode: "text" (default), "vision", or "auto".
+    #[serde(default)]
+    pub modality: Option<String>,
+}
+
+#[cfg(feature = "vision")]
+#[derive(Deserialize)]
+pub struct StoreImageRequest {
+    pub image_base64: String,
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+#[cfg(feature = "speech")]
+#[derive(Deserialize)]
+pub struct StoreAudioRequest {
+    pub audio_base64: String,
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: u32,
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+#[cfg(feature = "speech")]
+fn default_sample_rate() -> u32 {
+    16000
 }
 
 fn default_max_results() -> usize {
@@ -106,10 +132,16 @@ pub async fn echo(
     State(state): State<AppState>,
     Json(req): Json<EchoRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mode = match req.modality.as_deref().unwrap_or("text") {
+        "vision" => QueryMode::Vision,
+        "auto" => QueryMode::Auto,
+        _ => QueryMode::Text,
+    };
+
     let start = Instant::now();
     let results = state
         .engine
-        .echo(&req.query, req.max_results)
+        .echo_with_mode(&req.query, req.max_results, mode)
         .await
         .map_err(|e| {
             (
@@ -152,7 +184,10 @@ pub async fn stats(State(state): State<AppState>) -> Json<Value> {
         "disk_usage_bytes": s.disk_usage_bytes,
         "max_disk_bytes": s.max_disk_bytes,
         "avg_echo_latency_ms": s.avg_echo_latency_ms,
-        "total_echo_queries": s.total_echo_queries
+        "total_echo_queries": s.total_echo_queries,
+        "text_count": s.text_count,
+        "vision_count": s.vision_count,
+        "speech_count": s.speech_count
     }))
 }
 
@@ -388,4 +423,96 @@ pub async fn consolidate(State(state): State<AppState>) -> Json<Value> {
         "facts_extracted": result.facts_extracted,
         "duration_ms": result.duration_ms
     }))
+}
+
+/// POST /api/store_image — store an image as a vision memory.
+#[cfg(feature = "vision")]
+pub async fn store_image(
+    State(state): State<AppState>,
+    Json(req): Json<StoreImageRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use base64::Engine as _;
+
+    let image_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&req.image_base64)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Invalid base64: {e}")})),
+            )
+        })?;
+
+    let id = state
+        .engine
+        .store_image(&image_bytes, &req.source)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    state.engine.persist().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "memory_id": id.to_string()
+    })))
+}
+
+/// POST /api/store_audio — store audio as a speech memory.
+#[cfg(feature = "speech")]
+pub async fn store_audio(
+    State(state): State<AppState>,
+    Json(req): Json<StoreAudioRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    use base64::Engine as _;
+
+    let raw_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&req.audio_base64)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Invalid base64: {e}")})),
+            )
+        })?;
+
+    // Interpret as f32 PCM: every 4 bytes = one f32 sample (little-endian)
+    if raw_bytes.len() % 4 != 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Audio data length must be a multiple of 4 (f32 PCM samples)"})),
+        ));
+    }
+    let pcm_f32: Vec<f32> = raw_bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
+
+    let id = state
+        .engine
+        .store_audio(&pcm_f32, req.sample_rate, &req.source)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    state.engine.persist().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "memory_id": id.to_string()
+    })))
 }

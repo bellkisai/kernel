@@ -5,14 +5,15 @@
 use crate::format::{detect_ram_gb, format_bytes, format_number, tier_name, truncate};
 use crate::protocol::ToolDefinition;
 use serde_json::{Value, json};
-use shrimpk_core::{EchoConfig, MemoryId, config};
+use shrimpk_core::{EchoConfig, MemoryId, QueryMode, config};
 use shrimpk_memory::{EchoEngine, PiiFilter};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Return all 9 tool definitions.
+/// Return all tool definitions (9 base + 2 multimodal).
 pub fn all_tools() -> Vec<ToolDefinition> {
-    vec![
+    #[allow(unused_mut)]
+    let mut tools = vec![
         ToolDefinition {
             name: "store".into(),
             description: "Store a memory in Echo Memory. The memory will persist across sessions and automatically surface when relevant context appears.".into(),
@@ -27,12 +28,13 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "echo".into(),
-            description: "Find memories that resonate with a query. Returns memories ranked by similarity and Hebbian association strength.".into(),
+            description: "Find memories that resonate with a query. Returns memories ranked by similarity and Hebbian association strength. Supports multimodal search via the modality parameter.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Text to find resonating memories for" },
-                    "max_results": { "type": "integer", "description": "Maximum results (default: 10)", "default": 10 }
+                    "max_results": { "type": "integer", "description": "Maximum results (default: 10)", "default": 10 },
+                    "modality": { "type": "string", "enum": ["text", "vision", "auto"], "description": "Query mode: 'text' (default), 'vision' (CLIP cross-modal), or 'auto' (all channels)", "default": "text" }
                 },
                 "required": ["query"]
             }),
@@ -90,7 +92,39 @@ pub fn all_tools() -> Vec<ToolDefinition> {
             description: "Show system status: config tier, disk usage with progress bar, RAM budget, and quantization mode.".into(),
             input_schema: json!({ "type": "object", "properties": {} }),
         },
-    ]
+    ];
+
+    // Multimodal tools — conditionally included based on compile-time feature flags
+    #[cfg(feature = "vision")]
+    tools.push(ToolDefinition {
+        name: "store_image".into(),
+        description: "Store an image as a visual memory using CLIP embeddings. The image will be indexed in the vision channel for cross-modal retrieval.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "image_base64": { "type": "string", "description": "Base64-encoded image data (PNG, JPEG, etc.)" },
+                "source": { "type": "string", "description": "Source label (default: 'mcp')" }
+            },
+            "required": ["image_base64"]
+        }),
+    });
+
+    #[cfg(feature = "speech")]
+    tools.push(ToolDefinition {
+        name: "store_audio".into(),
+        description: "Store audio as a speech memory preserving paralinguistic features (tone, emotion, pace). NOT speech-to-text.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "audio_base64": { "type": "string", "description": "Base64-encoded raw PCM f32 audio data" },
+                "sample_rate": { "type": "integer", "description": "Audio sample rate in Hz (default: 16000)", "default": 16000 },
+                "source": { "type": "string", "description": "Source label (default: 'mcp')" }
+            },
+            "required": ["audio_base64"]
+        }),
+    });
+
+    tools
 }
 
 // ---------------------------------------------------------------------------
@@ -129,15 +163,79 @@ pub async fn handle_store(engine: &Arc<EchoEngine>, args: &Value) -> Result<Stri
     ))
 }
 
+#[cfg(feature = "vision")]
+pub async fn handle_store_image(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let image_b64 = args["image_base64"]
+        .as_str()
+        .ok_or("Missing required argument: image_base64")?;
+    let source = args["source"].as_str().unwrap_or("mcp");
+
+    let image_bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_b64)
+        .map_err(|e| format!("Invalid base64: {e}"))?;
+
+    let id = engine
+        .store_image(&image_bytes, source)
+        .await
+        .map_err(|e| e.to_string())?;
+    engine.persist().await.map_err(|e| e.to_string())?;
+
+    Ok(serde_json::to_string_pretty(&json!({
+        "memory_id": id.to_string()
+    })).unwrap())
+}
+
+#[cfg(feature = "speech")]
+pub async fn handle_store_audio(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let audio_b64 = args["audio_base64"]
+        .as_str()
+        .ok_or("Missing required argument: audio_base64")?;
+    let sample_rate = args["sample_rate"].as_u64().unwrap_or(16000) as u32;
+    let source = args["source"].as_str().unwrap_or("mcp");
+
+    let raw_bytes = base64::engine::general_purpose::STANDARD
+        .decode(audio_b64)
+        .map_err(|e| format!("Invalid base64: {e}"))?;
+
+    // Interpret as f32 PCM: every 4 bytes = one f32 sample
+    if raw_bytes.len() % 4 != 0 {
+        return Err("Audio data length must be a multiple of 4 (f32 PCM samples)".into());
+    }
+    let pcm_f32: Vec<f32> = raw_bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
+
+    let id = engine
+        .store_audio(&pcm_f32, sample_rate, source)
+        .await
+        .map_err(|e| e.to_string())?;
+    engine.persist().await.map_err(|e| e.to_string())?;
+
+    Ok(serde_json::to_string_pretty(&json!({
+        "memory_id": id.to_string()
+    })).unwrap())
+}
+
 pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
     let query = args["query"]
         .as_str()
         .ok_or("Missing required argument: query")?;
     let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
 
+    let mode = match args["modality"].as_str().unwrap_or("text") {
+        "vision" => QueryMode::Vision,
+        "auto" => QueryMode::Auto,
+        _ => QueryMode::Text,
+    };
+
     let start = Instant::now();
     let results = engine
-        .echo(query, max_results)
+        .echo_with_mode(query, max_results, mode)
         .await
         .map_err(|e| e.to_string())?;
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -171,7 +269,7 @@ pub async fn handle_stats(engine: &Arc<EchoEngine>, config: &EchoConfig) -> Resu
     let stats = engine.stats().await;
     let ram_gb = detect_ram_gb();
 
-    Ok(format!(
+    let mut out = format!(
         "Memories:        {}\n\
          Max capacity:    {}\n\
          Index size:      {}\n\
@@ -195,7 +293,19 @@ pub async fn handle_stats(engine: &Arc<EchoEngine>, config: &EchoConfig) -> Resu
         config.similarity_threshold,
         stats.total_echo_queries,
         stats.avg_echo_latency_ms,
-    ))
+    );
+
+    // Per-channel breakdown
+    if stats.vision_count > 0 || stats.speech_count > 0 {
+        out.push_str(&format!(
+            "\n\nChannels:\n  Text:    {}\n  Vision:  {}\n  Speech:  {}",
+            format_number(stats.text_count),
+            format_number(stats.vision_count),
+            format_number(stats.speech_count),
+        ));
+    }
+
+    Ok(out)
 }
 
 pub async fn handle_forget(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
@@ -436,8 +546,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_tools_returns_9() {
-        assert_eq!(all_tools().len(), 9);
+    fn all_tools_returns_expected_count() {
+        let count = all_tools().len();
+        // Base: 9 tools. +1 if vision feature, +1 if speech feature.
+        #[allow(unused_mut)]
+        let mut expected = 9;
+        #[cfg(feature = "vision")]
+        { expected += 1; }
+        #[cfg(feature = "speech")]
+        { expected += 1; }
+        assert_eq!(count, expected);
     }
 
     #[test]

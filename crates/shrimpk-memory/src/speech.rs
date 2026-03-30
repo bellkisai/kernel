@@ -2,26 +2,26 @@
 //!
 //! Captures HOW things were said (tone, volume, emotion, pace, speaker ID),
 //! NOT speech-to-text. Three specialized models produce a concatenated
-//! 579-dim embedding: ECAPA-TDNN (192) + Wav2Small (3) + Whisper-tiny (384).
+//! 899-dim embedding: ECAPA-TDNN (512) + Wav2Small (3) + Whisper-tiny (384).
 //!
 //! Input: 16kHz mono PCM f32 audio samples.
-//! Output: concatenated `[speaker_192 | emotion_3 | prosody_384]`.
+//! Output: concatenated `[speaker_512 | emotion_3 | prosody_384]`.
 //!
 //! # Architecture (ADR-014 D8)
 //!
 //! | Model        | Purpose                          | Dim | ONNX Size |
 //! |-------------|----------------------------------|-----|-----------|
-//! | ECAPA-TDNN  | Speaker identification (who)     | 192 | ~25 MB    |
+//! | ECAPA-TDNN  | Speaker identification (who)     | 512 | ~25 MB    |
 //! | Wav2Small   | Emotion (arousal/dom/valence)     |   3 | ~120 KB   |
 //! | Whisper-tiny| Prosody (rhythm/stress/pace)      | 384 | ~33 MB    |
 
 use shrimpk_core::{Result, ShrimPKError};
 
-/// Total speech embedding dimension: 192 + 3 + 384.
-pub const SPEECH_DIM: usize = 579;
+/// Total speech embedding dimension: 512 + 3 + 384.
+pub const SPEECH_DIM: usize = 899;
 
 /// Per-model dimensions.
-pub const SPEAKER_DIM: usize = 192;
+pub const SPEAKER_DIM: usize = 512;
 pub const EMOTION_DIM: usize = 3;
 pub const PROSODY_DIM: usize = 384;
 
@@ -41,8 +41,8 @@ pub struct SpeechConfig {
 
 /// Speech embedder combining 3 specialized ONNX models.
 ///
-/// Produces a 579-dim embedding capturing paralinguistic features:
-/// - Speaker identity (ECAPA-TDNN, 192-dim)
+/// Produces a 899-dim embedding capturing paralinguistic features:
+/// - Speaker identity (ECAPA-TDNN, 512-dim)
 /// - Emotion (Wav2Small, 3-dim: arousal / dominance / valence)
 /// - Prosody (Whisper-tiny encoder, 384-dim: rhythm / stress / pace)
 ///
@@ -110,12 +110,12 @@ impl SpeechEmbedder {
         embedder
     }
 
-    /// Total embedding dimension (192 + 3 + 384 = 579).
+    /// Total embedding dimension (512 + 3 + 384 = 899).
     pub fn dimension(&self) -> usize {
         self.speaker_dim + self.emotion_dim + self.prosody_dim
     }
 
-    /// Speaker sub-embedding dimension (192).
+    /// Speaker sub-embedding dimension (512).
     pub fn speaker_dimension(&self) -> usize {
         self.speaker_dim
     }
@@ -135,10 +135,10 @@ impl SpeechEmbedder {
         self.initialized
     }
 
-    /// Embed raw PCM audio into a 579-dim vector.
+    /// Embed raw PCM audio into a 899-dim vector.
     ///
     /// Input: mono f32 PCM samples at any sample rate (resampled to 16 kHz internally).
-    /// Output: concatenated `[speaker_192 | emotion_3 | prosody_384]`.
+    /// Output: concatenated `[speaker_512 | emotion_3 | prosody_384]`.
     ///
     /// # Errors
     /// Returns `ShrimPKError::Embedding` if models aren't loaded yet or inference fails.
@@ -162,15 +162,42 @@ impl SpeechEmbedder {
             pcm_f32.to_vec()
         };
 
-        // KS37+: Run through 3 ONNX sessions and concatenate:
-        //   speaker_emb = session_speaker.run(&samples)?   // 192-dim
-        //   emotion_emb = session_emotion.run(&samples)?   // 3-dim
-        //   prosody_emb = session_prosody.run(&samples)?   // 384-dim
-        //   output = [speaker_emb | emotion_emb | prosody_emb]
+        // KS37+: Run through 3 ONNX sessions, normalize, and concatenate:
+        //   let mut speaker_emb = session_speaker.run(&samples)?;  // 512-dim
+        //   let mut emotion_emb = session_emotion.run(&samples)?;  // 3-dim
+        //   let mut prosody_emb = session_prosody.run(&samples)?;  // 384-dim
+        //
+        //   // L2-normalize each sub-embedding before concat to prevent
+        //   // the 384-dim prosody from dominating cosine similarity
+        //   // over the 3-dim emotion vector.
+        //   l2_normalize(&mut speaker_emb);
+        //   l2_normalize(&mut emotion_emb);
+        //   l2_normalize(&mut prosody_emb);
+        //
+        //   let mut combined = Vec::with_capacity(SPEECH_DIM);
+        //   combined.extend_from_slice(&speaker_emb);
+        //   combined.extend_from_slice(&emotion_emb);
+        //   combined.extend_from_slice(&prosody_emb);
+        //   Ok(combined)
 
         Err(ShrimPKError::Embedding(
             "Speech model inference not yet implemented (KS37+)".into(),
         ))
+    }
+}
+
+/// L2-normalize a vector in-place.
+///
+/// Prevents high-dimensional sub-embeddings (e.g. 384-dim prosody) from
+/// dominating cosine similarity over low-dimensional ones (e.g. 3-dim emotion)
+/// when concatenated into the composite speech embedding.
+///
+/// No-op if the vector norm is near zero (< 1e-10) to avoid division by zero.
+/// Used by `embed()` (KS37+) to normalize each sub-embedding before concat.
+pub fn l2_normalize(v: &mut [f32]) {
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 1e-10 {
+        v.iter_mut().for_each(|x| *x /= norm);
     }
 }
 
@@ -207,8 +234,8 @@ mod tests {
     #[test]
     fn speech_embedder_dimensions() {
         let embedder = SpeechEmbedder::new();
-        assert_eq!(embedder.dimension(), 579);
-        assert_eq!(embedder.speaker_dimension(), 192);
+        assert_eq!(embedder.dimension(), 899);
+        assert_eq!(embedder.speaker_dimension(), 512);
         assert_eq!(embedder.emotion_dimension(), 3);
         assert_eq!(embedder.prosody_dimension(), 384);
     }
@@ -216,7 +243,7 @@ mod tests {
     #[test]
     fn speech_embedder_constants_match() {
         assert_eq!(SPEECH_DIM, SPEAKER_DIM + EMOTION_DIM + PROSODY_DIM);
-        assert_eq!(SPEECH_DIM, 579);
+        assert_eq!(SPEECH_DIM, 899);
         assert_eq!(TARGET_SAMPLE_RATE, 16_000);
     }
 
@@ -254,7 +281,7 @@ mod tests {
         let config = SpeechConfig::default();
         let embedder = SpeechEmbedder::from_config(&config);
         assert!(!embedder.is_ready());
-        assert_eq!(embedder.dimension(), 579);
+        assert_eq!(embedder.dimension(), 899);
     }
 
     #[test]
@@ -366,7 +393,7 @@ mod tests {
             "test".into(),
             Modality::Speech,
         );
-        entry.speech_embedding = Some(vec![0.1; 579]);
+        entry.speech_embedding = Some(vec![0.1; 899]);
 
         let json = serde_json::to_string(&entry).unwrap();
         let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
@@ -375,7 +402,7 @@ mod tests {
         assert_eq!(deserialized.content, "[audio]");
         assert!(deserialized.embedding.is_empty());
         let speech_emb = deserialized.speech_embedding.unwrap();
-        assert_eq!(speech_emb.len(), 579);
+        assert_eq!(speech_emb.len(), 899);
         assert!((speech_emb[0] - 0.1).abs() < 1e-6);
     }
 }

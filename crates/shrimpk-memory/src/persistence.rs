@@ -11,7 +11,7 @@
 //! 5       1       Flags: bit 0=has_vision, bit 1=has_speech
 //! 6       2       Text dim: u16 (384)
 //! 8       2       Vision dim: u16 (512 or 0)
-//! 10      2       Speech dim: u16 (579 or 0)
+//! 10      2       Speech dim: u16 (899 or 0)
 //! 12      4       Entry count: u32
 //! ------- 16 bytes total header -------
 //! 16      4       Metadata JSON length (u32)
@@ -26,7 +26,7 @@
 //!         4          Vision CRC32 (over bitmap + embeddings)
 //! ------- Speech section (if has_speech) -------
 //!         ceil(N/8)  Bitmap
-//!         S*579*4    Speech embeddings (only present entries)
+//!         S*899*4    Speech embeddings (only present entries)
 //!         4          Speech CRC32 (over bitmap + embeddings)
 //! ```
 //!
@@ -68,7 +68,7 @@ const HEADER_SIZE_V1: u64 = 64;
 /// 5       1       Flags: u8 (bit 0 = has_vision, bit 1 = has_speech)
 /// 6       2       Text dim: u16 (384)
 /// 8       2       Vision dim: u16 (512 or 0)
-/// 10      2       Speech dim: u16 (579 or 0)
+/// 10      2       Speech dim: u16 (899 or 0)
 /// 12      4       Entry count: u32
 /// ```
 const HEADER_SIZE_V2: u64 = 16;
@@ -210,7 +210,7 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
         entries
             .iter()
             .find_map(|e| e.speech_embedding.as_ref().map(|v| v.len() as u16))
-            .unwrap_or(579)
+            .unwrap_or(899)
     } else {
         0
     };
@@ -223,22 +223,30 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     let mut file = std::fs::File::create(&tmp_path)?;
 
     // --- Write v2 header (16 bytes) ---
-    file.write_all(MAGIC)?; // 4 bytes
-    file.write_all(&[FORMAT_VERSION as u8])?; // 1 byte (version = 2)
-    file.write_all(&[flags])?; // 1 byte
-    file.write_all(&text_dim.to_le_bytes())?; // 2 bytes
-    file.write_all(&vision_dim.to_le_bytes())?; // 2 bytes
-    file.write_all(&speech_dim.to_le_bytes())?; // 2 bytes
-    file.write_all(&(count as u32).to_le_bytes())?; // 4 bytes
+    // Build header bytes for CRC coverage (Fix 3: header + metadata CRC).
+    let mut header_bytes = Vec::with_capacity(HEADER_SIZE_V2 as usize);
+    header_bytes.extend_from_slice(MAGIC); // 4 bytes
+    header_bytes.push(FORMAT_VERSION as u8); // 1 byte (version = 2)
+    header_bytes.push(flags); // 1 byte
+    header_bytes.extend_from_slice(&text_dim.to_le_bytes()); // 2 bytes
+    header_bytes.extend_from_slice(&vision_dim.to_le_bytes()); // 2 bytes
+    header_bytes.extend_from_slice(&speech_dim.to_le_bytes()); // 2 bytes
+    header_bytes.extend_from_slice(&(count as u32).to_le_bytes()); // 4 bytes
     // Total: 16 bytes
+    file.write_all(&header_bytes)?;
 
     // --- Write metadata as JSON + CRC ---
+    // CRC covers header_bytes + meta_json to protect against corrupted
+    // entry_count or dim fields causing terabyte allocations (Fix 3).
     let metas: Vec<MemoryMeta> = entries.iter().map(MemoryMeta::from_entry).collect();
     let meta_json = serde_json::to_vec(&metas)?;
     let meta_len = meta_json.len() as u32;
     file.write_all(&meta_len.to_le_bytes())?;
     file.write_all(&meta_json)?;
-    let meta_crc = crc32fast::hash(&meta_json);
+    let mut meta_hasher = crc32fast::Hasher::new();
+    meta_hasher.update(&header_bytes);
+    meta_hasher.update(&meta_json);
+    let meta_crc = meta_hasher.finalize();
     file.write_all(&meta_crc.to_le_bytes())?;
 
     // --- Write text embeddings section + CRC ---
@@ -277,6 +285,18 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     drop(file);
     std::fs::rename(&tmp_path, path)
         .map_err(|e| ShrimPKError::Persistence(format!("Atomic rename failed: {e}")))?;
+
+    // Ensure directory entry is durable on Unix (ext4 requires parent dir fsync).
+    // Without this, a power loss after rename could lose the file entirely.
+    // No-op on Windows (NTFS handles directory entry durability automatically).
+    #[cfg(unix)]
+    {
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = std::fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+    }
 
     let elapsed = start.elapsed();
     tracing::info!(
@@ -555,7 +575,14 @@ fn load_binary_v2(data: &[u8]) -> Result<EchoStore> {
     );
     cursor += 4;
 
-    let computed_meta_crc = crc32fast::hash(meta_bytes);
+    // CRC covers header_bytes + meta_json (Fix 3: header CRC coverage).
+    // A corrupted entry_count or dim field is caught here before any
+    // allocation based on those values.
+    let header_bytes = &data[..HEADER_SIZE_V2 as usize];
+    let mut meta_hasher = crc32fast::Hasher::new();
+    meta_hasher.update(header_bytes);
+    meta_hasher.update(meta_bytes);
+    let computed_meta_crc = meta_hasher.finalize();
     if computed_meta_crc != stored_meta_crc {
         return Err(ShrimPKError::Persistence(format!(
             "Metadata CRC32 mismatch: stored={stored_meta_crc:#010x}, computed={computed_meta_crc:#010x}. File may be corrupted."
@@ -1681,6 +1708,34 @@ mod tests {
         assert!(
             loaded.get(&id3).unwrap().vision_embedding.is_none(),
             "Should not have vision"
+        );
+    }
+
+    // Fix 3: Header CRC coverage — corrupted entry_count detected before allocation.
+    #[test]
+    fn header_corruption_detected_by_crc() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("store.shrm");
+
+        let mut store = EchoStore::new();
+        store.add(make_entry("hello", vec![1.0, 2.0, 3.0]));
+        save_binary(&store, &path).expect("save");
+
+        // Corrupt byte 12 (first byte of entry_count in v2 header).
+        let mut data = std::fs::read(&path).expect("read file");
+        assert!(data.len() > 16, "v2 file must have at least 16-byte header");
+        data[12] ^= 0xFF; // flip bits in entry_count
+        std::fs::write(&path, &data).expect("write corrupted file");
+
+        let result = load_binary(&path);
+        assert!(
+            result.is_err(),
+            "Corrupted entry_count should be caught by metadata CRC"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("CRC32 mismatch") || err_msg.contains("corrupted"),
+            "Error should mention CRC mismatch, got: {err_msg}"
         );
     }
 }

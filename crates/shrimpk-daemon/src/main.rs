@@ -204,7 +204,8 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("[shrimpk] Rate limit: {rate_limit} req/s.");
 
     // Build router
-    let app = Router::new()
+    #[allow(unused_mut)]
+    let mut app = Router::new()
         .route("/health", get(routes::health))
         .route("/api/store", post(routes::store))
         .route("/api/echo", post(routes::echo))
@@ -215,7 +216,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/config", put(routes::config_set))
         .route("/api/persist", post(routes::persist))
         .route("/api/consolidate", post(routes::consolidate))
-        .route("/api/detect", get(routes::detect_providers))
+        .route("/api/detect", get(routes::detect_providers));
+
+    // Multimodal routes — conditionally compiled
+    #[cfg(feature = "vision")]
+    { app = app.route("/api/store_image", post(routes::store_image)); }
+    #[cfg(feature = "speech")]
+    { app = app.route("/api/store_audio", post(routes::store_audio)); }
+
+    let app = app
         // OpenAI-compatible proxy routes
         .route("/v1/chat/completions", post(proxy::chat_completions))
         .route("/v1/models", get(proxy::models))

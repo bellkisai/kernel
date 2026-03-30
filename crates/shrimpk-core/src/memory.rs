@@ -166,7 +166,7 @@ pub struct MemoryEntry {
     /// CLIP vision embedding (512-dim). Present when image data was stored.
     #[serde(default)]
     pub vision_embedding: Option<Vec<f32>>,
-    /// Speech audio embedding (579-dim). Present when audio data was stored.
+    /// Speech audio embedding (899-dim). Present when audio data was stored.
     #[serde(default)]
     pub speech_embedding: Option<Vec<f32>>,
     /// Where this memory came from (e.g., "conversation", "document", "manual").
@@ -284,6 +284,15 @@ pub struct MemoryStats {
     /// Maximum disk usage allowed in bytes.
     #[serde(default)]
     pub max_disk_bytes: u64,
+    /// Number of text-modality memories.
+    #[serde(default)]
+    pub text_count: usize,
+    /// Number of vision-modality memories.
+    #[serde(default)]
+    pub vision_count: usize,
+    /// Number of speech-modality memories.
+    #[serde(default)]
+    pub speech_count: usize,
 }
 
 /// Summary of a memory entry for dump/listing (no embedding data).

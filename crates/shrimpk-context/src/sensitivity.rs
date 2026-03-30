@@ -63,6 +63,7 @@ mod tests {
             final_score: 0.9,
             source: "test".into(),
             echoed_at: Utc::now(),
+            modality: Default::default(),
         }
     }
 

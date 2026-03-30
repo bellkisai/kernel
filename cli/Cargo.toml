@@ -22,3 +22,4 @@ sysinfo.workspace = true
 toml.workspace = true
 clap = { version = "4", features = ["derive"] }
 reqwest = { workspace = true, features = ["json", "blocking"] }
+base64 = "0.22"

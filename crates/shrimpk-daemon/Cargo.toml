@@ -11,6 +11,11 @@ publish = false
 name = "shrimpk-daemon"
 path = "src/main.rs"
 
+[features]
+default = []
+vision = ["shrimpk-memory/vision"]
+speech = ["shrimpk-memory/speech"]
+
 [dependencies]
 shrimpk-memory.workspace = true
 shrimpk-core = { workspace = true, features = ["sysinfo"] }
@@ -28,6 +33,7 @@ dirs.workspace = true
 reqwest.workspace = true
 futures-util.workspace = true
 tracing.workspace = true
+base64 = "0.22"
 
 [dev-dependencies]
 serde_json.workspace = true

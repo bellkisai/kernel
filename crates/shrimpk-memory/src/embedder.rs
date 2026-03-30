@@ -2,7 +2,7 @@
 //!
 //! Wraps `fastembed::TextEmbedding` with the all-MiniLM-L6-v2 model
 //! for 384-dimensional sentence embeddings. Vision (CLIP 512-dim) and
-//! Speech (579-dim) channels are gated behind `vision` and `speech`
+//! Speech (899-dim) channels are gated behind `vision` and `speech`
 //! feature flags.
 //!
 //! When `vision` is enabled, loads two additional models:
@@ -18,7 +18,7 @@ use tracing::instrument;
 ///
 /// Text channel (always available): all-MiniLM-L6-v2, 384-dim.
 /// Vision channel (feature = "vision"): CLIP ViT-B-32, 512-dim.
-/// Speech channel (feature = "speech"): ECAPA-TDNN + Wav2Small + Whisper-tiny, 579-dim.
+/// Speech channel (feature = "speech"): ECAPA-TDNN + Wav2Small + Whisper-tiny, 899-dim.
 ///
 /// Thread-safe: `TextEmbedding` and `ImageEmbedding` are `Send` (but not `Sync`),
 /// so share via `Mutex` or create per-thread instances.
@@ -31,7 +31,7 @@ pub struct MultiEmbedder {
     /// Separate from `text` (MiniLM 384-dim) because the embedding spaces are incompatible.
     #[cfg(feature = "vision")]
     vision_text: Option<TextEmbedding>,
-    /// Speech embedder — 3 ONNX models producing a 579-dim paralinguistic embedding.
+    /// Speech embedder — 3 ONNX models producing a 899-dim paralinguistic embedding.
     /// Present even when models aren't loaded (`is_ready() == false`).
     #[cfg(feature = "speech")]
     speech: Option<crate::speech::SpeechEmbedder>,
@@ -283,10 +283,10 @@ impl MultiEmbedder {
         512
     }
 
-    /// Embed raw PCM audio into a 579-dimensional speech vector.
+    /// Embed raw PCM audio into a 899-dimensional speech vector.
     ///
     /// Captures paralinguistic features (tone, pace, emotion), NOT speech-to-text.
-    /// Uses ECAPA-TDNN (192) + Wav2Small (3) + Whisper-tiny (384) = 579-dim.
+    /// Uses ECAPA-TDNN (512) + Wav2Small (3) + Whisper-tiny (384) = 899-dim.
     ///
     /// Returns `Ok(Some(embedding))` when models are loaded and inference succeeds.
     /// Returns `Ok(None)` when the speech embedder exists but models aren't ready yet.
@@ -312,7 +312,7 @@ impl MultiEmbedder {
         self.speech.as_ref().map_or(false, |s| s.is_ready())
     }
 
-    /// Get the speech embedding dimension (579 for ECAPA-TDNN + Wav2Small + Whisper-tiny).
+    /// Get the speech embedding dimension (899 for ECAPA-TDNN + Wav2Small + Whisper-tiny).
     #[cfg(feature = "speech")]
     pub fn speech_dimension(&self) -> usize {
         crate::speech::SPEECH_DIM

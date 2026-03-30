@@ -271,6 +271,7 @@ mod tests {
             final_score: similarity as f64,
             source: "test".into(),
             echoed_at: Utc::now(),
+            modality: Default::default(),
         }
     }
 
