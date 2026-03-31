@@ -12,7 +12,7 @@
 //! - At vLLM scale: 30% token reduction = 30% more throughput = 30% fewer GPUs
 //!
 //! ## Token Estimation
-//! Uses ~4 chars per token (same heuristic as the HUB's token counter).
+//! Uses ~4 chars per token (standard LLM heuristic).
 //!
 //! All tests are `#[ignore]` because they require the fastembed model
 //! (all-MiniLM-L6-v2, ~23MB ONNX). Run with:
@@ -26,7 +26,7 @@ use shrimpk_memory::similarity::cosine_similarity;
 // Token estimation
 // ===========================================================================
 
-/// Estimate token count from a string (~4 chars per token, matching the HUB).
+/// Estimate token count from a string (~4 chars per token, standard LLM heuristic).
 fn estimate_tokens(text: &str) -> usize {
     // Standard LLM heuristic: ~4 characters per token on average.
     // GPT tokenizers vary (3.5-4.5), but 4 is the accepted industry estimate.

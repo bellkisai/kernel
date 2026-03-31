@@ -46,3 +46,11 @@ coverage/
 **/.fastembed_cache/
 benchmarks/LongMemEval/
 benchmarks/hindsight-benchmarks/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# ONNX model files
+*.onnx

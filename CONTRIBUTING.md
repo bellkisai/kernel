@@ -25,9 +25,9 @@ Unit tests run entirely in-memory and complete in seconds. Integration tests dow
 |-------|---------|--------|
 | `shrimpk-core` | Types, config, traits | Stable |
 | `shrimpk-memory` | Echo Memory engine | Stable |
-| `shrimpk-router` | Provider routing, cascade, cost | LIBRARY (not yet wired to daemon) |
-| `shrimpk-context` | Context assembly, token budgeting | WIRING (KS15 -- token budgeting for proxy) |
-| `shrimpk-security` | Sandbox, permissions | STUB (planned for future) |
+| `shrimpk-router` | Provider routing, cascade, cost | Library (not yet wired to daemon) |
+| `shrimpk-context` | Context assembly, token budgeting | In progress (token budgeting for proxy) |
+| `shrimpk-security` | Sandbox, permissions | Planned (stub) |
 | `shrimpk-kernel` | Integration facade | Stable |
 | `shrimpk-python` | PyO3 bindings | Exists (untested in CI) |
 | `shrimpk-mcp` | MCP server (9 tools) | Stable |
@@ -44,10 +44,7 @@ Unit tests run entirely in-memory and complete in seconds. Integration tests dow
 
 ## Architecture
 
-The full architecture is documented in:
-
-- `docs-repo/architecture/ECHO-MEMORY-ARCHITECTURE-v1.2.md` -- pipeline, data model, config
-- `memory/project_kernel_decisions.md` -- 16 ADRs covering design choices
+The architecture is documented in the [README](README.md#architecture) and inline doc comments throughout the codebase. Key design decisions are tracked as ADRs in the project documentation.
 
 ## Pull Requests
 

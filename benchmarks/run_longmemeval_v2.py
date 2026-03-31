@@ -76,7 +76,7 @@ def clear_memories():
     data_file = os.path.expanduser("~/.shrimpk-kernel/echo_store.shrm")
     daemon_bin = os.path.expandvars(r"%LOCALAPPDATA%\ShrimPK\bin\shrimpk-daemon.exe")
     if not os.path.exists(daemon_bin):
-        daemon_bin = "C:/Users/lior1/bellkis/kernel/target/release/shrimpk-daemon.exe"
+        daemon_bin = os.path.join(os.path.dirname(__file__), "..", "target", "release", "shrimpk-daemon.exe" if os.name == "nt" else "shrimpk-daemon")
 
     try:
         if sys.platform == "win32":

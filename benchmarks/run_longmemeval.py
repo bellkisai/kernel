@@ -83,7 +83,7 @@ def clear_memories():
     daemon_bin = os.path.expandvars(r"%LOCALAPPDATA%\ShrimPK\bin\shrimpk-daemon.exe")
     if not os.path.exists(daemon_bin):
         # Fallback: try to find it in the kernel build
-        daemon_bin = "C:/Users/lior1/bellkis/kernel/target/release/shrimpk-daemon.exe"
+        daemon_bin = os.path.join(os.path.dirname(__file__), "..", "target", "release", "shrimpk-daemon.exe" if os.name == "nt" else "shrimpk-daemon")
 
     # Kill daemon
     try:

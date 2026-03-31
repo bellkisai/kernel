@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p shrimpk-cli -p shrimpk-mcp -p shrimpk-daemon -p shrimpk-app
+      - run: cargo build --release -p shrimpk-cli -p shrimpk-mcp -p shrimpk-daemon -p shrimpk-tray
       - uses: actions/upload-artifact@v4
         with:
           name: shrimpk-${{ matrix.target }}
