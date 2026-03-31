@@ -110,6 +110,12 @@ pub struct MemoryMeta {
     /// Whether this entry has a speech embedding stored in the binary section (v2+).
     #[serde(default)]
     pub has_speech_embedding: bool,
+    /// Semantic labels for pre-filtered retrieval (ADR-015).
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// Label enrichment version (0=unlabeled, 1=Tier1, 2=Tier2).
+    #[serde(default)]
+    pub label_version: u8,
 }
 
 impl MemoryMeta {
@@ -131,6 +137,8 @@ impl MemoryMeta {
             modality: entry.modality,
             has_vision_embedding: entry.vision_embedding.is_some(),
             has_speech_embedding: entry.speech_embedding.is_some(),
+            labels: entry.labels.clone(),
+            label_version: entry.label_version,
         }
     }
 
@@ -154,6 +162,8 @@ impl MemoryMeta {
             echo_count: self.echo_count,
             enriched: self.enriched,
             parent_id: self.parent_id,
+            labels: self.labels,
+            label_version: self.label_version,
         }
     }
 }
@@ -1737,5 +1747,58 @@ mod tests {
             err_msg.contains("CRC32 mismatch") || err_msg.contains("corrupted"),
             "Error should mention CRC mismatch, got: {err_msg}"
         );
+    }
+
+    // --- Label persistence roundtrip (KS42, ADR-015) ---
+
+    #[test]
+    fn binary_roundtrip_preserves_labels() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("store.shrm");
+
+        let mut store = EchoStore::new();
+        let mut entry = make_entry("I am learning Japanese", vec![0.1, 0.2, 0.3]);
+        entry.labels = vec![
+            "topic:language".into(),
+            "action:learning".into(),
+            "entity:japanese".into(),
+        ];
+        entry.label_version = 1;
+        let id = entry.id.clone();
+        store.add(entry);
+
+        save_binary(&store, &path).expect("save");
+        let loaded = load_binary(&path).expect("load");
+
+        let r = loaded.get(&id).expect("should find entry");
+        assert_eq!(
+            r.labels,
+            vec!["topic:language", "action:learning", "entity:japanese"],
+            "Labels must survive SHRM binary roundtrip"
+        );
+        assert_eq!(r.label_version, 1, "label_version must survive roundtrip");
+    }
+
+    #[test]
+    fn binary_roundtrip_legacy_no_labels() {
+        // Simulate loading a store where entries were saved without label fields.
+        // The serde(default) on MemoryMeta should produce empty labels + version 0.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("store.shrm");
+
+        let mut store = EchoStore::new();
+        let entry = make_entry("legacy entry", vec![0.5, 0.6, 0.7]);
+        let id = entry.id.clone();
+        // labels and label_version are at their defaults (empty, 0)
+        assert!(entry.labels.is_empty());
+        assert_eq!(entry.label_version, 0);
+        store.add(entry);
+
+        save_binary(&store, &path).expect("save");
+        let loaded = load_binary(&path).expect("load");
+
+        let r = loaded.get(&id).expect("should find entry");
+        assert!(r.labels.is_empty(), "Legacy entry should load with empty labels");
+        assert_eq!(r.label_version, 0, "Legacy entry should load with label_version 0");
     }
 }

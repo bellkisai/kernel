@@ -190,6 +190,17 @@ pub struct MemoryEntry {
     /// consolidation. When a child matches during echo, the parent's content is returned.
     #[serde(default)]
     pub parent_id: Option<MemoryId>,
+    /// Semantic labels for pre-filtered retrieval (ADR-015).
+    /// Each label is a prefixed string (e.g., "topic:language", "entity:rust").
+    /// Populated incrementally: Tier 1 at store time, Tier 2 during consolidation.
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// Label enrichment version.
+    /// 0 = unlabeled (legacy or new, pre-classification).
+    /// 1 = keyword-only (Tier 1: prototype matching + rules).
+    /// 2 = LLM-enriched (Tier 2: NER + Ollama classification).
+    #[serde(default)]
+    pub label_version: u8,
 }
 
 impl MemoryEntry {
@@ -212,6 +223,8 @@ impl MemoryEntry {
             echo_count: 0,
             enriched: false,
             parent_id: None,
+            labels: Vec::new(),
+            label_version: 0,
         }
     }
 
@@ -474,6 +487,64 @@ mod tests {
         assert_eq!(QueryMode::Text.to_string(), "text");
         assert_eq!(QueryMode::Vision.to_string(), "vision");
         assert_eq!(QueryMode::Auto.to_string(), "auto");
+    }
+
+    // --- Label fields (KS42, ADR-015) ---
+
+    #[test]
+    fn label_fields_default_on_new() {
+        let entry = MemoryEntry::new("test".into(), vec![1.0], "test".into());
+        assert!(entry.labels.is_empty());
+        assert_eq!(entry.label_version, 0);
+    }
+
+    #[test]
+    fn label_fields_serde_roundtrip() {
+        let mut entry = MemoryEntry::new("test".into(), vec![1.0], "test".into());
+        entry.labels = vec!["topic:language".into(), "entity:rust".into(), "domain:work".into()];
+        entry.label_version = 2;
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.labels, vec!["topic:language", "entity:rust", "domain:work"]);
+        assert_eq!(deserialized.label_version, 2);
+    }
+
+    #[test]
+    fn label_fields_default_on_legacy_json() {
+        // Simulates a pre-label MemoryEntry without labels/label_version fields
+        let json = r#"{
+            "id":"00000000-0000-0000-0000-000000000000",
+            "content":"legacy","masked_content":null,"reformulated":null,
+            "embedding":[],"source":"test",
+            "sensitivity":"Public",
+            "created_at":"2025-01-01T00:00:00Z",
+            "last_echoed":null,"echo_count":0
+        }"#;
+        let entry: MemoryEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.labels.is_empty(), "Legacy JSON should deserialize to empty labels");
+        assert_eq!(entry.label_version, 0, "Legacy JSON should deserialize to label_version 0");
+    }
+
+    #[test]
+    fn label_fields_empty_labels_roundtrip() {
+        let entry = MemoryEntry::new("test".into(), vec![], "test".into());
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.labels.is_empty());
+        assert_eq!(deserialized.label_version, 0);
+    }
+
+    #[test]
+    fn label_fields_max_labels() {
+        let mut entry = MemoryEntry::new("test".into(), vec![], "test".into());
+        entry.labels = (0..10).map(|i| format!("topic:label{i}")).collect();
+        entry.label_version = 1;
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.labels.len(), 10);
     }
 
     #[test]

@@ -119,6 +119,10 @@ pub struct EchoConfig {
     pub use_lsh: bool,
     /// Whether to use Bloom filter pre-screening before LSH.
     pub use_bloom: bool,
+    /// Whether to use label-based pre-filtering for candidate retrieval (ADR-015).
+    /// When true, semantic labels on memories provide an inverted index that narrows
+    /// candidates before cosine scoring. When false, falls back to pure LSH.
+    pub use_labels: bool,
     /// Maximum disk usage in bytes for the data directory.
     #[serde(default = "default_max_disk_bytes")]
     pub max_disk_bytes: u64,
@@ -280,6 +284,7 @@ impl Default for EchoConfig {
             embedding_dim: 384,
             use_lsh: true,
             use_bloom: true,
+            use_labels: true,
             max_disk_bytes: DEFAULT_MAX_DISK_BYTES,
             ollama_url: default_ollama_url(),
             enrichment_model: default_enrichment_model(),
@@ -391,6 +396,7 @@ pub struct FileConfig {
     pub embedding_dim: Option<usize>,
     pub use_lsh: Option<bool>,
     pub use_bloom: Option<bool>,
+    pub use_labels: Option<bool>,
     pub max_disk_bytes: Option<u64>,
     pub ollama_url: Option<String>,
     pub enrichment_model: Option<String>,
@@ -534,6 +540,9 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.use_bloom {
             config.use_bloom = v;
+        }
+        if let Some(v) = fc.use_labels {
+            config.use_labels = v;
         }
         if let Some(v) = fc.max_disk_bytes {
             config.max_disk_bytes = v;
