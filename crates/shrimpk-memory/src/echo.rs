@@ -76,6 +76,8 @@ pub struct EchoEngine {
     consolidation_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Consolidator for LLM-based fact extraction during sleep consolidation.
     consolidator: Box<dyn shrimpk_core::Consolidator>,
+    /// Pre-computed prototype embeddings for Tier 1 label classification (ADR-015).
+    prototypes: crate::labels::LabelPrototypes,
 }
 
 impl EchoEngine {
@@ -87,7 +89,15 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Embedding` if the model fails to initialize.
     #[instrument(skip(config), fields(max_memories = config.max_memories, threshold = config.similarity_threshold))]
     pub fn new(config: EchoConfig) -> Result<Self> {
-        let embedder = MultiEmbedder::new()?;
+        let mut embedder = MultiEmbedder::new()?;
+
+        // Initialize label prototypes BEFORE wrapping embedder in Mutex (ADR-015 D4).
+        // Prototype embeddings are computed once at startup.
+        let mut prototypes = crate::labels::LabelPrototypes::new_empty();
+        if config.use_labels {
+            prototypes.initialize(|desc| embedder.embed_text(desc).ok());
+        }
+
         let pii_filter = PiiFilter::new();
         let reformulator = MemoryReformulator::new();
         let store = RwLock::new(EchoStore::new());
@@ -144,6 +154,7 @@ impl EchoEngine {
             stats: Mutex::new(EchoStats::default()),
             consolidation_handle: Mutex::new(None),
             consolidator: consolidator_impl,
+            prototypes,
         })
     }
 
@@ -256,12 +267,27 @@ impl EchoEngine {
             entry.masked_content = Some(masked_text);
         }
         entry.reformulated = reformulated.clone();
+
+        // 3b. Tier 1 label generation (ADR-015 D4)
+        if self.config.use_labels && self.prototypes.is_initialized() {
+            let labels = crate::labels::generate_tier1_labels(
+                text,
+                &embedding,
+                &self.prototypes,
+            );
+            if !labels.is_empty() {
+                entry.labels = labels;
+                entry.label_version = 1;
+            }
+        }
+
         let id = entry.id.clone();
 
         tracing::debug!(
             reformulated = reformulated.is_some(),
             category = ?category,
-            "Memory reformulation + categorization step"
+            labels = entry.labels.len(),
+            "Memory reformulation + categorization + labeling step"
         );
 
         // 4. Add to store, LSH index, and Bloom filter
@@ -770,11 +796,18 @@ impl EchoEngine {
         //    Source C: Brute-force fallback (only if A+B return too few)
         let embeddings = store.all_embeddings();
 
-        // 5a. Label-based candidates (ADR-015 D6 — inert until Tier 1 generation is wired in KS45)
-        let label_candidates: Vec<u32> = if self.config.use_labels {
-            // TODO(KS45): classify query into labels, then store.query_labels(&labels)
-            // For now, returns empty — pure LSH path, zero behavior change.
-            Vec::new()
+        // 5a. Label-based candidates (ADR-015 D6)
+        let label_candidates: Vec<u32> = if self.config.use_labels && self.prototypes.is_initialized() {
+            let query_labels = crate::labels::classify_query(
+                &effective_query,
+                &query_embedding,
+                &self.prototypes,
+            );
+            if !query_labels.is_empty() {
+                store.query_labels(&query_labels)
+            } else {
+                Vec::new()
+            }
         } else {
             Vec::new()
         };
@@ -1465,7 +1498,14 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Persistence` if store file is corrupted.
     #[instrument(skip(config), fields(data_dir = %config.data_dir.display()))]
     pub fn load(config: EchoConfig) -> Result<Self> {
-        let embedder = MultiEmbedder::new()?;
+        let mut embedder = MultiEmbedder::new()?;
+
+        // Initialize label prototypes (ADR-015)
+        let mut prototypes = crate::labels::LabelPrototypes::new_empty();
+        if config.use_labels {
+            prototypes.initialize(|desc| embedder.embed_text(desc).ok());
+        }
+
         let pii_filter = PiiFilter::new();
         let reformulator = MemoryReformulator::new();
 
@@ -1575,6 +1615,7 @@ impl EchoEngine {
             stats: Mutex::new(EchoStats::default()),
             consolidation_handle: Mutex::new(None),
             consolidator: consolidator_impl,
+            prototypes,
         })
     }
 

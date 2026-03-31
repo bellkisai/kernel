@@ -19,6 +19,7 @@ pub mod consolidator;
 pub mod echo;
 pub mod embedder;
 pub mod hebbian;
+pub mod labels;
 pub mod lsh;
 pub mod persistence;
 pub mod pii;
