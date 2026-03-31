@@ -31,6 +31,9 @@ pub struct EchoStore {
     /// Reverse index: parent MemoryId -> child entry indices.
     /// Maintained incrementally on add/remove. Enables O(1) child lookup for Pipe B.
     parent_children: HashMap<MemoryId, Vec<usize>>,
+    /// Inverted index: label string -> sorted store indices (ADR-015 D3).
+    /// Maintained incrementally on add/remove. Enables O(1) label-based pre-filtering.
+    label_index: HashMap<String, Vec<u32>>,
 }
 
 impl EchoStore {
@@ -41,6 +44,7 @@ impl EchoStore {
             embeddings: Vec::new(),
             id_to_index: HashMap::new(),
             parent_children: HashMap::new(),
+            label_index: HashMap::new(),
         }
     }
 
@@ -55,6 +59,13 @@ impl EchoStore {
         // Maintain parent-children index
         if let Some(ref pid) = entry.parent_id {
             self.parent_children.entry(pid.clone()).or_default().push(index);
+        }
+        // Maintain label inverted index (ADR-015 D3)
+        for label in &entry.labels {
+            self.label_index
+                .entry(label.clone())
+                .or_default()
+                .push(index as u32);
         }
         self.entries.push(entry);
         self.embeddings.push(embedding);
@@ -80,6 +91,16 @@ impl EchoStore {
         }
         self.parent_children.remove(&self.entries[index].id);
 
+        // Clean label index for the removed entry
+        for label in &self.entries[index].labels {
+            if let Some(posting) = self.label_index.get_mut(label) {
+                posting.retain(|&i| i != index as u32);
+                if posting.is_empty() {
+                    self.label_index.remove(label);
+                }
+            }
+        }
+
         if index != last_index {
             // Swap the last entry into this slot
             let moved_id = self.entries[last_index].id.clone();
@@ -89,6 +110,16 @@ impl EchoStore {
                 for idx in children.iter_mut() {
                     if *idx == last_index {
                         *idx = index;
+                    }
+                }
+            }
+            // Fix label index references from last_index to index
+            for label in &self.entries[last_index].labels {
+                if let Some(posting) = self.label_index.get_mut(label) {
+                    for idx in posting.iter_mut() {
+                        if *idx == last_index as u32 {
+                            *idx = index as u32;
+                        }
                     }
                 }
             }
@@ -163,6 +194,61 @@ impl EchoStore {
     /// Used to short-circuit Pipe B entirely when no enrichment has occurred.
     pub fn has_enriched_memories(&self) -> bool {
         !self.parent_children.is_empty()
+    }
+
+    // --- Label index API (ADR-015 D3) ---
+
+    /// Query the label index with OR semantics.
+    ///
+    /// Returns a deduplicated, sorted vector of store indices matching ANY of the
+    /// provided labels. If labels is empty, returns empty.
+    pub fn query_labels(&self, labels: &[String]) -> Vec<u32> {
+        if labels.is_empty() {
+            return Vec::new();
+        }
+        let mut result: Vec<u32> = Vec::new();
+        for label in labels {
+            if let Some(posting) = self.label_index.get(label) {
+                result.extend_from_slice(posting);
+            }
+        }
+        result.sort_unstable();
+        result.dedup();
+        result
+    }
+
+    /// Rebuild the label index from scratch by scanning all entries.
+    ///
+    /// Called during load() to reconstruct the derived index.
+    /// O(N * L) where N = entries, L = average labels per entry.
+    pub fn rebuild_label_index(&mut self) {
+        self.label_index.clear();
+        for (idx, entry) in self.entries.iter().enumerate() {
+            for label in &entry.labels {
+                self.label_index
+                    .entry(label.clone())
+                    .or_default()
+                    .push(idx as u32);
+            }
+        }
+    }
+
+    /// Number of unique labels in the index.
+    pub fn label_count(&self) -> usize {
+        self.label_index.len()
+    }
+
+    /// Get the labels for a specific entry by index.
+    pub fn labels_for(&self, index: usize) -> &[String] {
+        self.entries
+            .get(index)
+            .map(|e| e.labels.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get the posting list size for a specific label.
+    pub fn label_posting_len(&self, label: &str) -> usize {
+        self.label_index.get(label).map_or(0, |v| v.len())
     }
 
     /// Save the store to a binary file.
@@ -414,6 +500,198 @@ mod tests {
         assert_eq!(store.entry_at(0).unwrap().content, "zero");
         assert_eq!(store.entry_at(1).unwrap().content, "one");
         assert!(store.entry_at(99).is_none());
+    }
+
+    // --- Label index tests (KS43, ADR-015 D3) ---
+
+    fn make_labeled_entry(content: &str, labels: &[&str]) -> MemoryEntry {
+        let mut entry = make_entry(content);
+        entry.labels = labels.iter().map(|s| s.to_string()).collect();
+        entry.label_version = 1;
+        entry
+    }
+
+    #[test]
+    fn label_index_add_indexes_labels() {
+        let mut store = EchoStore::new();
+        store.add(make_labeled_entry("learning japanese", &["topic:language", "action:learning"]));
+
+        let results = store.query_labels(&["topic:language".into()]);
+        assert_eq!(results, vec![0], "Entry 0 should be in topic:language posting list");
+
+        let results = store.query_labels(&["action:learning".into()]);
+        assert_eq!(results, vec![0], "Entry 0 should be in action:learning posting list");
+
+        assert_eq!(store.label_count(), 2);
+    }
+
+    #[test]
+    fn label_index_remove_cleans_index() {
+        let mut store = EchoStore::new();
+        let entry = make_labeled_entry("temp", &["topic:temp"]);
+        let id = entry.id.clone();
+        store.add(entry);
+
+        assert_eq!(store.label_posting_len("topic:temp"), 1);
+        store.remove(&id);
+        assert_eq!(store.label_posting_len("topic:temp"), 0);
+        assert_eq!(store.label_count(), 0, "Empty posting list should be removed");
+    }
+
+    #[test]
+    fn label_index_swap_remove_fixup() {
+        let mut store = EchoStore::new();
+        let e0 = make_labeled_entry("first", &["shared:label", "only:first"]);
+        let e1 = make_labeled_entry("second", &["shared:label", "only:second"]);
+        let e2 = make_labeled_entry("third", &["shared:label", "only:third"]);
+        let id0 = e0.id.clone();
+        let id2 = e2.id.clone();
+        store.add(e0);
+        store.add(e1);
+        store.add(e2);
+
+        // Remove entry 0 — entry 2 (third) gets swapped to index 0
+        store.remove(&id0);
+        assert_eq!(store.len(), 2);
+
+        // "third" is now at index 0
+        assert_eq!(store.get(&id2).unwrap().content, "third");
+
+        // Label index for "only:third" should point to 0 (not 2)
+        let results = store.query_labels(&["only:third".into()]);
+        assert_eq!(results, vec![0], "Swapped entry should be at index 0");
+
+        // "shared:label" should contain indices 0 and 1 (not 0 and 2)
+        let shared = store.query_labels(&["shared:label".into()]);
+        assert_eq!(shared, vec![0, 1], "shared:label should have updated indices");
+
+        // "only:first" should be gone
+        assert_eq!(store.label_posting_len("only:first"), 0);
+    }
+
+    #[test]
+    fn label_index_remove_last_no_swap() {
+        let mut store = EchoStore::new();
+        let e0 = make_labeled_entry("first", &["topic:a"]);
+        let e1 = make_labeled_entry("second", &["topic:b"]);
+        let id1 = e1.id.clone();
+        store.add(e0);
+        store.add(e1);
+
+        // Remove last entry — no swap needed
+        store.remove(&id1);
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.label_posting_len("topic:b"), 0);
+        assert_eq!(store.query_labels(&["topic:a".into()]), vec![0]);
+    }
+
+    #[test]
+    fn label_index_rebuild_matches_incremental() {
+        let mut store = EchoStore::new();
+        store.add(make_labeled_entry("a", &["x:1", "y:2"]));
+        store.add(make_labeled_entry("b", &["x:1", "z:3"]));
+        store.add(make_labeled_entry("c", &["y:2", "z:3"]));
+
+        // Capture incremental state
+        let before = store.label_index.clone();
+
+        // Rebuild from scratch
+        store.rebuild_label_index();
+
+        // Sort posting lists for comparison (order may differ)
+        let normalize = |m: &HashMap<String, Vec<u32>>| -> HashMap<String, Vec<u32>> {
+            m.iter().map(|(k, v)| {
+                let mut sorted = v.clone();
+                sorted.sort();
+                (k.clone(), sorted)
+            }).collect()
+        };
+
+        assert_eq!(normalize(&before), normalize(&store.label_index),
+            "Rebuilt index should match incrementally-built index");
+    }
+
+    #[test]
+    fn query_labels_or_semantics() {
+        let mut store = EchoStore::new();
+        store.add(make_labeled_entry("a", &["topic:language"]));
+        store.add(make_labeled_entry("b", &["topic:career"]));
+        store.add(make_labeled_entry("c", &["topic:language", "topic:career"]));
+
+        // OR: entries matching either label
+        let results = store.query_labels(&["topic:language".into(), "topic:career".into()]);
+        assert_eq!(results, vec![0, 1, 2], "OR should return union, deduplicated and sorted");
+    }
+
+    #[test]
+    fn query_labels_empty_input() {
+        let mut store = EchoStore::new();
+        store.add(make_labeled_entry("a", &["topic:x"]));
+        let results = store.query_labels(&[]);
+        assert!(results.is_empty(), "Empty label query should return empty");
+    }
+
+    #[test]
+    fn label_count_tracks_unique_labels() {
+        let mut store = EchoStore::new();
+        assert_eq!(store.label_count(), 0);
+
+        store.add(make_labeled_entry("a", &["x:1", "y:2"]));
+        assert_eq!(store.label_count(), 2);
+
+        store.add(make_labeled_entry("b", &["x:1", "z:3"]));
+        assert_eq!(store.label_count(), 3); // x:1, y:2, z:3
+    }
+
+    #[test]
+    fn labels_for_returns_entry_labels() {
+        let mut store = EchoStore::new();
+        store.add(make_labeled_entry("a", &["topic:language", "domain:life"]));
+        assert_eq!(store.labels_for(0), &["topic:language", "domain:life"]);
+        assert!(store.labels_for(99).is_empty());
+    }
+
+    #[test]
+    fn label_index_stress_add_remove_sequence() {
+        // Deterministic 100-operation add/remove sequence
+        let mut store = EchoStore::new();
+        let mut ids: Vec<MemoryId> = Vec::new();
+
+        // Add 50 entries
+        for i in 0..50 {
+            let labels: Vec<&str> = match i % 5 {
+                0 => vec!["topic:a", "domain:work"],
+                1 => vec!["topic:b", "domain:life"],
+                2 => vec!["topic:a", "topic:b"],
+                3 => vec!["domain:work"],
+                _ => vec!["topic:a", "domain:life", "action:learning"],
+            };
+            let entry = make_labeled_entry(&format!("entry_{i}"), &labels);
+            ids.push(entry.id.clone());
+            store.add(entry);
+        }
+
+        // Remove 25 entries (every other one)
+        for i in (0..50).step_by(2) {
+            store.remove(&ids[i]);
+        }
+
+        assert_eq!(store.len(), 25);
+
+        // Verify consistency: rebuild should match
+        let before = store.label_index.clone();
+        store.rebuild_label_index();
+
+        let normalize = |m: &HashMap<String, Vec<u32>>| -> HashMap<String, Vec<u32>> {
+            m.iter().map(|(k, v)| {
+                let mut sorted = v.clone();
+                sorted.sort();
+                (k.clone(), sorted)
+            }).collect()
+        };
+
+        assert_eq!(normalize(&before), normalize(&store.label_index),
+            "After 50 adds + 25 removes, rebuild should match incremental index");
     }
 
     #[test]
