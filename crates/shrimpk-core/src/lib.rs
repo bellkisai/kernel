@@ -21,4 +21,4 @@ pub use memory::{
     Modality, QueryMode, SensitivityLevel,
 };
 pub use pii::{PiiMatch, PiiType};
-pub use traits::{Consolidator, ModelBackend, Provider};
+pub use traits::{ConsolidationOutput, Consolidator, LabelSet, ModelBackend, Provider};

@@ -86,6 +86,36 @@ pub struct ModelCapabilities {
     pub is_local: bool,
 }
 
+/// Structured output from the combined fact extraction + label classification call (ADR-015 D7).
+#[derive(Debug, Clone, Default)]
+pub struct ConsolidationOutput {
+    /// Extracted atomic facts (same as extract_facts output).
+    pub facts: Vec<String>,
+    /// Semantic labels from LLM classification (Tier 2). None for legacy consolidators.
+    pub labels: Option<LabelSet>,
+}
+
+/// Semantic labels extracted by the LLM during consolidation (ADR-015).
+/// Used for Tier 2 label enrichment (upgrades label_version from 1 to 2).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct LabelSet {
+    /// Topic labels (e.g., ["career", "language"]).
+    #[serde(default)]
+    pub topic: Vec<String>,
+    /// Domain labels (e.g., ["work", "life"]).
+    #[serde(default)]
+    pub domain: Vec<String>,
+    /// Action labels (e.g., ["learning", "building"]).
+    #[serde(default)]
+    pub action: Vec<String>,
+    /// Memory type (e.g., "fact", "preference", "goal").
+    #[serde(default)]
+    pub memtype: Option<String>,
+    /// Sentiment (e.g., "positive", "negative", "neutral").
+    #[serde(default)]
+    pub sentiment: Option<String>,
+}
+
 /// A backend that extracts atomic facts from memory text during consolidation.
 ///
 /// Implementations call LLMs (local or cloud) to decompose a paragraph-length
@@ -109,6 +139,21 @@ pub trait Consolidator: Send + Sync {
 
     /// Human-readable name for this consolidator backend.
     fn name(&self) -> &str;
+
+    /// Combined fact extraction + label classification (ADR-015 D7).
+    ///
+    /// Returns both facts and semantic labels in a single call. The default
+    /// implementation calls `extract_facts()` and returns labels: None,
+    /// preserving backward compatibility with existing consolidators.
+    ///
+    /// Override this in consolidators that support the combined prompt
+    /// (e.g., OllamaConsolidator with JSON schema output).
+    fn extract_facts_and_labels(&self, text: &str, max_facts: usize) -> ConsolidationOutput {
+        ConsolidationOutput {
+            facts: self.extract_facts(text, max_facts),
+            labels: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -128,5 +173,38 @@ mod tests {
     fn model_id_display() {
         let id = ModelId::new("llama-3.1-8b");
         assert_eq!(id.to_string(), "llama-3.1-8b");
+    }
+
+    // --- KS46: ConsolidationOutput + LabelSet ---
+
+    #[test]
+    fn consolidation_output_default() {
+        let output = ConsolidationOutput::default();
+        assert!(output.facts.is_empty());
+        assert!(output.labels.is_none());
+    }
+
+    #[test]
+    fn label_set_serde_roundtrip() {
+        let ls = LabelSet {
+            topic: vec!["career".into(), "technology".into()],
+            domain: vec!["work".into()],
+            action: vec!["building".into()],
+            memtype: Some("preference".into()),
+            sentiment: Some("positive".into()),
+        };
+        let json = serde_json::to_string(&ls).unwrap();
+        let deserialized: LabelSet = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.topic, vec!["career", "technology"]);
+        assert_eq!(deserialized.memtype, Some("preference".into()));
+    }
+
+    #[test]
+    fn label_set_deserialize_with_missing_fields() {
+        let json = r#"{"topic": ["language"]}"#;
+        let ls: LabelSet = serde_json::from_str(json).unwrap();
+        assert_eq!(ls.topic, vec!["language"]);
+        assert!(ls.domain.is_empty());
+        assert!(ls.memtype.is_none());
     }
 }

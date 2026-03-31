@@ -10,7 +10,7 @@
 //!
 //! Use [`from_config`] to construct the right provider from [`EchoConfig`].
 
-use shrimpk_core::{Consolidator, EchoConfig};
+use shrimpk_core::{ConsolidationOutput, Consolidator, EchoConfig, LabelSet};
 
 // ---- Shared prompt + parser ----
 
@@ -89,6 +89,63 @@ impl OllamaConsolidator {
     }
 }
 
+/// Combined prompt for fact extraction + label classification (ADR-015 D7).
+fn combined_enrichment_prompt(max_facts: usize) -> String {
+    format!(
+        "Analyze this memory and return a JSON object with two keys.\n\n\
+         1. \"facts\": Extract up to {max_facts} atomic facts. Each starts with \"The user\".\n\
+         2. \"labels\": Classify based on what this memory IS ABOUT, not just the words it contains.\n\
+            A memory about attending a class implies learning/education.\n\
+            A memory about running implies exercise/health.\n\n\
+         Label categories:\n\
+         - topic: [career, language, education, health, fitness, housing, food, music, technology, finance, travel, relationships, hobby, entertainment, pets]\n\
+         - domain: [work, life, social, health, creative]\n\
+         - action: [learning, building, planning, moving, exercising, leading, deciding]\n\
+         - memtype: one of [fact, preference, goal, habit, event, opinion, plan]\n\
+         - sentiment: one of [positive, negative, neutral, mixed]\n\n\
+         Return JSON:\n\
+         {{\"facts\": [\"The user ...\"], \"labels\": {{\"topic\": [...], \"domain\": [...], \"action\": [...], \"memtype\": \"...\", \"sentiment\": \"...\"}}}}"
+    )
+}
+
+/// Parse the combined JSON response from the LLM.
+fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutput {
+    // Try to parse as JSON first
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+        let facts = json["facts"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| s.len() > 5)
+                    .take(max_facts)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let labels = if let Some(labels_obj) = json.get("labels") {
+            match serde_json::from_value::<LabelSet>(labels_obj.clone()) {
+                Ok(ls) => Some(ls),
+                Err(e) => {
+                    tracing::debug!(error = %e, "Failed to parse LabelSet from combined response");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        ConsolidationOutput { facts, labels }
+    } else {
+        // Fallback: parse as plain text facts (backward compat with non-JSON responses)
+        ConsolidationOutput {
+            facts: parse_facts(content, max_facts),
+            labels: None,
+        }
+    }
+}
+
 impl Consolidator for OllamaConsolidator {
     fn extract_facts(&self, text: &str, max_facts: usize) -> Vec<String> {
         let prompt = match &self.system_prompt {
@@ -139,6 +196,51 @@ impl Consolidator for OllamaConsolidator {
 
     fn name(&self) -> &str {
         "ollama"
+    }
+
+    fn extract_facts_and_labels(&self, text: &str, max_facts: usize) -> ConsolidationOutput {
+        let prompt = combined_enrichment_prompt(max_facts);
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": text}
+            ],
+            "stream": false,
+            "format": "json",
+            "options": {"temperature": 0.0, "num_predict": 512}
+        });
+
+        let endpoint = format!("{}/api/chat", self.url.trim_end_matches('/'));
+
+        let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+        tracing::info!(
+            target: "shrimpk::audit",
+            endpoint = %endpoint,
+            data_bytes = body_bytes.len(),
+            direction = "outbound",
+            component = "consolidator-combined",
+            "External data transmission (facts + labels)"
+        );
+
+        let mut resp = match self.agent.post(&endpoint).send_json(&body) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(provider = "ollama", error = %e, "Combined consolidator: Ollama unreachable");
+                return ConsolidationOutput::default();
+            }
+        };
+
+        let json: serde_json::Value = match resp.body_mut().read_json() {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::debug!(provider = "ollama", error = %e, "Combined consolidator: parse error");
+                return ConsolidationOutput::default();
+            }
+        };
+
+        let content = json["message"]["content"].as_str().unwrap_or("");
+        parse_combined_response(content, max_facts)
     }
 }
 
@@ -395,5 +497,82 @@ mod tests {
         let c = OllamaConsolidator::new("http://127.0.0.1:99999".into(), "test".into(), None);
         let facts = c.extract_facts("test text", 5);
         assert!(facts.is_empty());
+    }
+
+    // --- KS46: ConsolidationOutput + combined response parsing ---
+
+    #[test]
+    fn noop_extract_facts_and_labels_returns_none_labels() {
+        let c = NoopConsolidator;
+        let output = c.extract_facts_and_labels("any text", 5);
+        assert!(output.facts.is_empty());
+        assert!(output.labels.is_none(), "Noop should return labels: None");
+    }
+
+    #[test]
+    fn parse_combined_valid_json() {
+        let json = r#"{"facts": ["The user uses Neovim", "The user lives in Berlin"], "labels": {"topic": ["technology"], "domain": ["work"], "action": ["building"], "memtype": "preference", "sentiment": "positive"}}"#;
+        let output = parse_combined_response(json, 10);
+        assert_eq!(output.facts.len(), 2);
+        assert!(output.facts[0].contains("Neovim"));
+
+        let labels = output.labels.expect("Should have labels");
+        assert_eq!(labels.topic, vec!["technology"]);
+        assert_eq!(labels.domain, vec!["work"]);
+        assert_eq!(labels.action, vec!["building"]);
+        assert_eq!(labels.memtype, Some("preference".into()));
+        assert_eq!(labels.sentiment, Some("positive".into()));
+    }
+
+    #[test]
+    fn parse_combined_facts_only_fallback() {
+        // If LLM returns plain text instead of JSON, fall back to fact parsing
+        let text = "The user uses Neovim\nThe user lives in Berlin";
+        let output = parse_combined_response(text, 10);
+        assert_eq!(output.facts.len(), 2);
+        assert!(output.labels.is_none(), "Plain text should have no labels");
+    }
+
+    #[test]
+    fn parse_combined_partial_labels() {
+        // JSON with facts but malformed labels — facts should still work
+        let json = r#"{"facts": ["The user prefers dark mode"], "labels": "invalid"}"#;
+        let output = parse_combined_response(json, 10);
+        assert_eq!(output.facts.len(), 1);
+        assert!(output.labels.is_none(), "Malformed labels should be None");
+    }
+
+    #[test]
+    fn parse_combined_empty_labels() {
+        let json = r#"{"facts": ["The user runs daily"], "labels": {"topic": [], "domain": [], "action": [], "memtype": null, "sentiment": null}}"#;
+        let output = parse_combined_response(json, 10);
+        assert_eq!(output.facts.len(), 1);
+        let labels = output.labels.expect("Should parse empty labels");
+        assert!(labels.topic.is_empty());
+        assert!(labels.memtype.is_none());
+    }
+
+    #[test]
+    fn parse_combined_respects_max_facts() {
+        let json = r#"{"facts": ["Fact A here", "Fact B here", "Fact C here", "Fact D here"], "labels": {}}"#;
+        let output = parse_combined_response(json, 2);
+        assert_eq!(output.facts.len(), 2);
+    }
+
+    #[test]
+    fn combined_prompt_contains_label_categories() {
+        let prompt = combined_enrichment_prompt(5);
+        assert!(prompt.contains("topic:"), "Prompt should mention topic");
+        assert!(prompt.contains("memtype:"), "Prompt should mention memtype");
+        assert!(prompt.contains("sentiment:"), "Prompt should mention sentiment");
+        assert!(prompt.contains("IS ABOUT"), "Prompt should emphasize implicit inference");
+    }
+
+    #[test]
+    fn ollama_combined_handles_unreachable() {
+        let c = OllamaConsolidator::new("http://127.0.0.1:99999".into(), "test".into(), None);
+        let output = c.extract_facts_and_labels("test text", 5);
+        assert!(output.facts.is_empty());
+        assert!(output.labels.is_none());
     }
 }
