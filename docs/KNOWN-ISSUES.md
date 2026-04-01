@@ -44,14 +44,28 @@ distribution, which is the most likely cause of the regression.
    The v0.4.0 benchmark on `all-MiniLM-L6-v2` (same 384-dim) did not show this behavior,
    which makes model distribution the more likely cause.
 
-**Workaround:** None. At 10K memories latency is within target. For applications that need
-sub-10ms recall at 100K scale, the recommendation is to wait for v0.6.0 where LSH parameter
-tuning will be completed.
+**Update (v0.6.0 label bucket benchmark):**
 
-**Investigation needed:** Profile LSH hit rate and Bloom false-positive rate at 100K using the
-`tracing` spans in the echo path. Use `cargo flamegraph` to identify the hot path. Compare
-query latency distribution between 10K and 100K to determine whether the regression is linear
-(suggesting algorithmic cause) or stepped (suggesting cache/memory cause).
+Label-based pre-filtering (ADR-015) reduced 100K P50 from 38.94ms to 27.70ms (1.4x improvement).
+However, profiling revealed the **embedding step alone costs ~8ms per query** with BGE-small-EN-v1.5.
+This is a fixed cost independent of store size — the previous 3.50ms target was set against
+`all-MiniLM-L6-v2` which embeds roughly 2x faster. The 4.0ms target is unrealistic with the
+current model.
+
+**Revised baseline:**
+- Embedding cost: ~8ms (BGE-small, fixed per query)
+- Retrieval at 100K with labels: ~20ms (down from ~31ms without labels)
+- Retrieval at 10K: ~2-3ms (labels not needed at this scale)
+
+**Future investigation:**
+- Verify BGE-small embedding latency vs MiniLM on same hardware
+- If confirmed ~2x slower: adjust target to P50 < 15ms at 100K (embed + retrieval)
+- Consider embedding result caching for repeated query patterns
+- Consider reverting to MiniLM if the quality delta (MTEB 56.3 vs 62.0) is not worth the latency cost
+
+**Workaround:** At 10K memories latency is well within target (~8-11ms including embedding).
+For 100K scale, labels provide 1.4x improvement. Further gains require either a faster
+embedding model or query embedding caching.
 
 **Contribution opportunity:** See ROADMAP.md — "Investigate 100K latency regression" (Help wanted).
 
