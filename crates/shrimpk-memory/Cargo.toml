@@ -11,6 +11,8 @@ default = []
 # Adds ~352 MB model download on first use.
 vision = []
 speech = []
+# GLiNER NER: BLOCKED — gline-rs pins ort =2.0.0-rc.9, fastembed pins =2.0.0-rc.10.
+# Revisit when gline-rs updates to ort rc.10+. Entity extraction uses Tier 1 heuristics for now.
 
 [dependencies]
 bloomfilter.workspace = true

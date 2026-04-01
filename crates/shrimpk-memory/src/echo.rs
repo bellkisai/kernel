@@ -1619,6 +1619,26 @@ impl EchoEngine {
         })
     }
 
+    /// Run async Tier 1 label bootstrap on all unlabeled entries (ADR-015 D7).
+    ///
+    /// Call this after `load()` to retroactively label existing memories.
+    /// Non-blocking: acquires a write lock, runs bootstrap, releases.
+    /// Returns the number of entries that received labels.
+    pub async fn bootstrap_labels(&self) -> usize {
+        if !self.config.use_labels || !self.prototypes.is_initialized() {
+            return 0;
+        }
+        let mut store = self.store.write().await;
+        let unlabeled = store.all_entries().iter().filter(|e| e.label_version == 0).count();
+        if unlabeled == 0 {
+            tracing::debug!("No unlabeled entries, skipping bootstrap");
+            return 0;
+        }
+        tracing::info!(unlabeled, "Starting Tier 1 label bootstrap");
+        let updated = store.bootstrap_tier1_labels(&self.prototypes);
+        updated
+    }
+
     /// Run a consolidation pass immediately, acquiring all necessary locks.
     ///
     /// This is the manual trigger for maintenance. It acquires write locks on

@@ -246,9 +246,46 @@ impl EchoStore {
             .unwrap_or(&[])
     }
 
+    /// Get mutable access to the label index (for consolidation Pass 4).
+    pub fn label_index_mut(&mut self) -> &mut HashMap<String, Vec<u32>> {
+        &mut self.label_index
+    }
+
     /// Get the posting list size for a specific label.
     pub fn label_posting_len(&self, label: &str) -> usize {
         self.label_index.get(label).map_or(0, |v| v.len())
+    }
+
+    /// One-time bootstrap: apply Tier 1 labels to all unlabeled entries (ADR-015 D7).
+    ///
+    /// Called after load() when entries with label_version == 0 are detected.
+    /// Uses prototype cosine matching + rule-based classification.
+    /// Pure Rust, no LLM — processes 100K entries in seconds.
+    pub fn bootstrap_tier1_labels(&mut self, prototypes: &crate::labels::LabelPrototypes) -> usize {
+        let mut updated = 0;
+        for idx in 0..self.entries.len() {
+            if self.entries[idx].label_version == 0 {
+                let labels = crate::labels::generate_tier1_labels(
+                    &self.entries[idx].content,
+                    &self.embeddings[idx],
+                    prototypes,
+                );
+                if !labels.is_empty() {
+                    // Update label index
+                    for label in &labels {
+                        self.label_index
+                            .entry(label.clone())
+                            .or_default()
+                            .push(idx as u32);
+                    }
+                    self.entries[idx].labels = labels;
+                    self.entries[idx].label_version = 1;
+                    updated += 1;
+                }
+            }
+        }
+        tracing::info!(updated, total = self.entries.len(), "Tier 1 label bootstrap complete");
+        updated
     }
 
     /// Save the store to a binary file.
