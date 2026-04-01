@@ -44,14 +44,13 @@ consolidation) configuration.
 
 Memory-mapped binary format with 32-bit CRC per entry, atomic flush, and crash recovery. Stores
 text embeddings (384-dim), optional vision embeddings (512-dim), optional speech embeddings
-(899-dim field present but always empty in v0.5.0), metadata, and sensitivity labels.
+(896-dim field, populated from v0.6.0 onward), metadata, and sensitivity labels.
 
 **Speech architecture (structure only)**
 
-`shrimpk-memory/src/speech.rs` defines the full `SpeechEmbedder` struct, dimension constants
-(`SPEAKER_DIM=512`, `PROSODY_DIM=384`, `SPEECH_DIM=899`), and preprocessing stubs. The 16 kHz
-resampler uses linear interpolation as a placeholder. No ONNX sessions are wired — `embed()`
-returns an error until v0.6.0.
+`shrimpk-memory/src/speech.rs` defines the full `SpeechEmbedder` struct with dimension constants
+(`SPEAKER_DIM=512`, `PROSODY_DIM=384`, `SPEECH_DIM=896`), Whisper log-Mel preprocessing, and
+ONNX sessions wired in v0.6.0. The 16 kHz resampler uses linear interpolation.
 
 **MCP server**
 
@@ -81,10 +80,9 @@ Target: Q2 2026. Focus: wire the speech ONNX models and upgrade the vision model
 
 ### Speech: Wire ONNX models (896-dim after emotion removal)
 
-The current speech architecture reserves 899 dimensions (512 speaker + 3 emotion + 384 prosody).
-In v0.6.0 the emotion channel is dropped — the intended model (Wav2Small) carries a
-CC-BY-NC-SA-4.0 license that is incompatible with Apache 2.0. The wired speech pipeline
-will be **896-dim** (ECAPA-TDNN 512 + Whisper-tiny encoder 384).
+The speech pipeline is **896-dim** (ECAPA-TDNN 512 + Whisper-tiny encoder 384). The emotion
+channel (Wav2Small, CC-BY-NC-SA-4.0) was dropped as license-incompatible. Both wired models
+carry permissive licenses: ECAPA-TDNN (Apache-2.0) and Whisper-tiny (MIT).
 
 #### ECAPA-TDNN 512-dim — speaker identification
 

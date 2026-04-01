@@ -118,10 +118,10 @@ specifications, and model identifiers are fully documented in the codebase and i
 **Impact:** Audio memories cannot be stored or retrieved. The `Modality::Speech` enum variant
 exists and round-trips through serialization correctly. No crash or data corruption occurs.
 
-**Plan:** v0.6.0 will wire the ONNX sessions using `ort` (pinned to fastembed's
-`=2.0.0-rc.11`), implement Kaldi fbank preprocessing for ECAPA-TDNN via the `mel-spec` crate,
-implement Whisper log-Mel preprocessing for the encoder, replace the linear resampler with
-`rubato` for alias-free sample rate conversion, and add a Silero VAD gate to skip silent frames.
+**Plan (v0.7.0):** KS50 will wire the ONNX sessions using `ort` (pinned to fastembed's
+`=2.0.0-rc.11`), implement Whisper log-Mel preprocessing for the encoder, replace the linear
+resampler with `rubato` for alias-free sample rate conversion, and add `hound` for WAV decode.
+Note: Kaldi fbank (ECAPA-TDNN) preprocessing and Silero VAD are planned for a later sprint.
 
 **Contribution opportunity:** See ROADMAP.md — "Wire ECAPA-TDNN ONNX session" and
 "Wire Whisper-tiny encoder ONNX session" (Help wanted).
@@ -180,18 +180,12 @@ The original speech pipeline design included a 3-dim emotion embedding (arousal,
 valence) via Wav2Small (`audeering/wav2small`). Wav2Small is CC-BY-NC-SA-4.0, which forbids
 commercial use and requires ShareAlike. This is incompatible with ShrimPK's Apache 2.0 license.
 
-The emotion channel has been removed from the v0.6.0 implementation plan. The wired speech
-pipeline will be 896-dim (ECAPA-TDNN 512 + Whisper-tiny 384) rather than the 899-dim
-originally documented.
+The emotion channel has been removed. The wired speech pipeline is 896-dim (ECAPA-TDNN 512 +
+Whisper-tiny 384) as shipped in v0.6.0 (KS50). `SPEECH_DIM = 896` and `EMOTION_DIM` is gone.
 
 **What this means for stored data:** The SHRM v2 format field `speech_embedding` is a variable-
-length `Vec<f32>`. If a future version re-adds the emotion channel, the stored dimension will
+length `Vec<f32>`. If a future version re-adds an emotion channel, the stored dimension will
 differ from v0.6.0 speech embeddings. A migration step will be required at that point.
-
-**What this means for the code:** `EMOTION_DIM = 3` and `SPEECH_DIM = 899` remain as constants
-in `speech.rs` but reflect the original design, not the wired behavior. Before v0.6.0 ships,
-these constants will be updated to `SPEECH_DIM = 896` and `EMOTION_DIM = 0`. The struct field
-and `SpeechConfig::emotion_model_path` will be removed or deprecated.
 
 **No alternatives under permissive licenses exist today.** All dimensional speech emotion models
 (arousal/dominance/valence) from audEERING carry non-commercial licenses. A categorical

@@ -10,7 +10,10 @@ default = []
 # CLIP ViT-B-32 vision channel (512-dim). Requires fastembed's image-models feature (on by default).
 # Adds ~352 MB model download on first use.
 vision = []
-speech = []
+# Speech channel: ECAPA-TDNN (512-dim, Apache-2.0) + Whisper-tiny encoder (384-dim, MIT) = 896-dim.
+# Adds ~58 MB model download on first use. Requires `ort`, `hf-hub`, `dirs`.
+# hound is optional (WAV decode for tests), rubato/ndarray are available for future quality improvement.
+speech = ["dep:ort", "dep:hf-hub"]
 # GLiNER NER: BLOCKED — gline-rs pins ort =2.0.0-rc.9, fastembed pins =2.0.0-rc.10.
 # Revisit when gline-rs updates to ort rc.10+. Entity extraction uses Tier 1 heuristics for now.
 
@@ -34,6 +37,23 @@ regex.workspace = true
 sysinfo.workspace = true
 fs2.workspace = true
 ureq.workspace = true
+
+# --- Speech feature deps (optional, gated behind `speech` feature) ---
+# ort: direct ONNX Runtime access for ECAPA-TDNN + Whisper-tiny encoder.
+# Must match the version fastembed already pulls (2.0.0-rc.11) to avoid duplicate linking.
+ort = { version = "2.0.0-rc.11", optional = true, features = ["download-binaries"] }
+# hf-hub: download ONNX model weights from HuggingFace Hub on first use.
+# Matches the version fastembed already pulls (0.4) to avoid duplicate deps.
+hf-hub = { version = "0.4", optional = true }
+# hound: read/decode WAV audio files for tests and integration.
+hound = { version = "3.5", optional = true }
+# rubato: high-quality band-limited resampling (replaces the linear-interpolation stub).
+rubato = { version = "1", optional = true }
+# ndarray: tensor manipulation for Whisper log-Mel spectrogram computation.
+# Must match the version ort already pulls (0.17) to avoid duplicate linking issues.
+ndarray = { version = "0.17", optional = true }
+# dirs: locate the user's home directory for model cache (~/.shrimpk-kernel/models/).
+dirs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

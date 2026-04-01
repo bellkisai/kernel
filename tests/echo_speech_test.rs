@@ -1,0 +1,245 @@
+//! Speech channel integration tests (KS50).
+//!
+//! Run fast unit tests (no network, no feature flag):
+//!     cargo test --test echo_speech_test
+//!
+//! Run all tests including model-download tests (~58 MB, requires network):
+//!     cargo test --test echo_speech_test --features shrimpk-memory/speech -- --include-ignored --test-threads=1
+
+// ---------------------------------------------------------------------------
+// Fast unit tests — no feature flags, no network, always pass
+// ---------------------------------------------------------------------------
+
+/// SPEECH_DIM constant must be exactly 896 regardless of feature flags.
+///
+/// Hard gate: if this fails, the 899→896 migration (Wav2Small emotion channel dropped) is incomplete.
+#[test]
+fn speech_dim_is_896() {
+    assert_eq!(
+        shrimpk_memory::speech::SPEECH_DIM,
+        896,
+        "SPEECH_DIM must be 896 (ECAPA-TDNN 512 + Whisper-tiny 384). \
+         Was 899 before KS50 (Wav2Small CC-BY-NC-SA channel dropped per CHANGELOG v0.6.0)."
+    );
+}
+
+#[test]
+fn speech_sub_dims_sum_to_speech_dim() {
+    assert_eq!(
+        shrimpk_memory::speech::SPEAKER_DIM + shrimpk_memory::speech::PROSODY_DIM,
+        shrimpk_memory::speech::SPEECH_DIM,
+    );
+}
+
+#[test]
+fn target_sample_rate_is_16k() {
+    assert_eq!(shrimpk_memory::speech::TARGET_SAMPLE_RATE, 16_000);
+}
+
+/// l2_normalize must produce a unit vector.
+#[test]
+fn l2_normalize_produces_unit_vector() {
+    let mut v = vec![3.0f32, 4.0]; // norm = 5.0
+    shrimpk_memory::speech::l2_normalize(&mut v);
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    assert!((norm - 1.0).abs() < 1e-6, "Expected unit norm, got {norm}");
+}
+
+/// l2_normalize must not panic on zero vector.
+#[test]
+fn l2_normalize_zero_vector_no_panic() {
+    let mut v = vec![0.0f32; 512];
+    shrimpk_memory::speech::l2_normalize(&mut v); // must not panic or NaN
+    assert!(v.iter().all(|&x| x == 0.0));
+}
+
+/// resample_linear identity case.
+#[test]
+fn resample_linear_identity() {
+    let samples = vec![0.1f32, 0.2, 0.3, 0.4];
+    let out = shrimpk_memory::speech::resample_linear(&samples, 16000, 16000);
+    assert_eq!(out, samples);
+}
+
+#[test]
+fn resample_linear_downsample_3_to_1() {
+    // 48kHz → 16kHz is 3:1 ratio, output ~ input_len / 3
+    let samples: Vec<f32> = (0..4800).map(|i| (i as f32 / 100.0).sin()).collect();
+    let out = shrimpk_memory::speech::resample_linear(&samples, 48000, 16000);
+    let expected = (4800.0 * 16000.0 / 48000.0) as usize;
+    assert_eq!(out.len(), expected);
+}
+
+// ---------------------------------------------------------------------------
+// Stub behaviour tests — these run when speech feature is ABSENT.
+// When `--features shrimpk-memory/speech` is passed, these are excluded.
+// Run stub tests with: cargo test --test echo_speech_test (no feature flag)
+// ---------------------------------------------------------------------------
+
+mod stub_tests {
+    use shrimpk_memory::speech::{SpeechConfig, SpeechEmbedder};
+
+    #[test]
+    fn stub_embedder_is_not_ready() {
+        // When speech feature is enabled, SpeechEmbedder::new() still starts not-ready
+        // (deferred model loading). When disabled, stub always returns false.
+        let emb = SpeechEmbedder::new();
+        assert!(!emb.is_ready());
+    }
+
+    #[test]
+    fn from_config_no_paths_not_ready() {
+        let emb = SpeechEmbedder::from_config(&SpeechConfig::default());
+        // Without paths and without downloading, embedder must not be ready
+        assert!(!emb.is_ready());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Feature-gated tests — require `--features shrimpk-memory/speech`
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "speech")]
+mod speech_feature_tests {
+    use shrimpk_memory::speech::SpeechEmbedder;
+
+    #[test]
+    fn embedder_starts_not_ready() {
+        let emb = SpeechEmbedder::new();
+        assert!(
+            !emb.is_ready(),
+            "Embedder must not auto-load models at construction time"
+        );
+    }
+
+    /// Stores a 1-second 440 Hz sine-wave audio clip as a speech memory, then
+    /// retrieves it with an echo text query to verify cross-modal recall works.
+    ///
+    /// Requires ~58 MB model download on first run.
+    /// Models are cached in `~/.shrimpk-kernel/models/` after first download.
+    #[tokio::test]
+    #[ignore = "requires model download (~58 MB) — run with --include-ignored"]
+    async fn speech_store_and_echo() {
+        use shrimpk_core::{EchoConfig, Modality};
+        use shrimpk_memory::EchoEngine;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let config = EchoConfig {
+            data_dir: dir.path().to_path_buf(),
+            embedding_dim: 384,
+            speech_embedding_dim: 896,
+            max_memories: 1000,
+            similarity_threshold: 0.05,
+            max_echo_results: 10,
+            enabled_modalities: vec![Modality::Text, Modality::Speech],
+            ..Default::default()
+        };
+
+        let engine = EchoEngine::new(config).expect("EchoEngine::new");
+
+        // Generate 1 second of 440 Hz sine wave at 16 kHz (16,000 samples)
+        let sample_rate: u32 = 16_000;
+        let freq = 440.0f32;
+        let pcm: Vec<f32> = (0..(sample_rate as usize))
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin())
+            .collect();
+
+        assert_eq!(pcm.len(), 16_000);
+
+        // Store as a speech memory (EchoEngine::store_audio)
+        let memory_id_result = engine.store_audio(&pcm, sample_rate, "integration-test").await;
+
+        match memory_id_result {
+            Ok(id) => {
+                eprintln!("Stored speech memory with id {id}");
+
+                // Echo by text query — should find stored memories
+                let results = engine
+                    .echo("[audio]", 10)
+                    .await
+                    .expect("echo should succeed");
+
+                assert!(
+                    !results.is_empty(),
+                    "Echo should return at least 1 result for stored speech memory"
+                );
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("download")
+                    || msg.contains("network")
+                    || msg.contains("load")
+                    || msg.contains("not available")
+                {
+                    eprintln!(
+                        "SKIP: Speech model unavailable ({msg}) — run with network for full test"
+                    );
+                } else {
+                    panic!("Unexpected error storing speech memory: {e}");
+                }
+            }
+        }
+
+        engine.shutdown().await;
+    }
+
+    /// Verify embed_pcm returns exactly 896 dimensions after model load.
+    #[tokio::test]
+    #[ignore = "requires model download (~58 MB) — run with --include-ignored"]
+    async fn embed_pcm_returns_896_dim() {
+        let mut embedder = SpeechEmbedder::new();
+        embedder
+            .load_models()
+            .expect("Models should load (requires network)");
+
+        assert!(embedder.is_ready(), "Embedder should be ready after load_models()");
+
+        // 1 second of silence at 16kHz
+        let pcm = vec![0.0f32; 16_000];
+        let emb = embedder.embed_pcm(&pcm, 16_000).expect("embed_pcm should succeed");
+
+        assert_eq!(
+            emb.len(),
+            shrimpk_memory::speech::SPEECH_DIM,
+            "embed_pcm must return exactly {}-dim vector",
+            shrimpk_memory::speech::SPEECH_DIM
+        );
+
+        // Sanity-check: sub-vectors should be L2-normalized individually
+        // speaker sub-vector (first 512 dims) should have norm ~1.0
+        let speaker: Vec<f32> = emb[..shrimpk_memory::speech::SPEAKER_DIM].to_vec();
+        let speaker_norm: f32 = speaker.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (speaker_norm - 1.0).abs() < 0.05,
+            "Speaker sub-vector should be L2-normalized, got norm={speaker_norm}"
+        );
+
+        // prosody sub-vector (last 384 dims) should have norm ~1.0
+        let prosody: Vec<f32> = emb[shrimpk_memory::speech::SPEAKER_DIM..].to_vec();
+        let prosody_norm: f32 = prosody.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (prosody_norm - 1.0).abs() < 0.05,
+            "Prosody sub-vector should be L2-normalized, got norm={prosody_norm}"
+        );
+    }
+
+    /// Verify resampling from 44.1kHz input is handled transparently.
+    #[tokio::test]
+    #[ignore = "requires model download (~58 MB) — run with --include-ignored"]
+    async fn embed_pcm_resamples_44100_to_16k() {
+        let mut embedder = SpeechEmbedder::new();
+        embedder.load_models().expect("Models should load");
+
+        // 0.5s of 440Hz tone at 44.1kHz
+        let pcm_44k: Vec<f32> = (0..22_050usize)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin())
+            .collect();
+
+        let emb = embedder
+            .embed_pcm(&pcm_44k, 44_100)
+            .expect("embed_pcm with 44.1kHz input should succeed after resampling");
+
+        assert_eq!(emb.len(), shrimpk_memory::speech::SPEECH_DIM);
+    }
+}

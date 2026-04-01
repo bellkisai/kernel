@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-01
+
+### Added
+- **Label bucket architecture (ADR-015):** Semantic labels on memories for pre-filtered retrieval
+- **7-dimension label taxonomy:** topic, domain, entity, action, temporal, memtype, sentiment
+- **Tier 1 label generation:** Prototype cosine matching + rule-based classifier at store time (<2ms)
+- **Tier 2 label enrichment:** Combined LLM prompt (facts + labels) during consolidation
+- **Label inverted index:** HashMap<String, Vec<u32>> on EchoStore with incremental maintenance
+- **D6 three-source candidate merge:** Labels + LSH + brute-force fallback in echo pipeline
+- **Query classification:** Tier A keyword + Tier B prototype cosine for label-based pre-filtering
+- **LabelPrototypes:** 37 rich prototype descriptions initialized at engine startup
+- **ConsolidationOutput + LabelSet:** Structured output from combined consolidation call
+- **bootstrap_labels():** Async retroactive labeling for existing stores
+- **use_labels config:** Toggle for safe rollout and A/B benchmarking
+- **100K benchmark suite:** echo_label_bench.rs with diverse 15-category content generator
+- **Pipeline timing suite:** echo_label_tuning.rs for stage-level profiling
+- **Public documentation:** 9 docs in kernel/docs/ (Architecture, Benchmarks, Integration Guide, etc.)
+- **GitHub templates:** Bug report, feature request, PR template
+- **SECURITY.md:** Vulnerability reporting policy
+- **Branch protection:** master requires PR with 1 approval
+
+### Changed
+- **Echo pipeline:** Candidate retrieval uses label + LSH union (MIN_CANDIDATES lowered from 10 to 5)
+- **Consolidator trait:** New extract_facts_and_labels() with default backward-compatible impl
+- **MemoryEntry:** Added labels: Vec<String> and label_version: u8 fields
+- **MemoryMeta:** Propagates labels through SHRM v2 save/load roundtrip
+- **EchoConfig:** Added use_labels: bool (default true)
+- **EchoEngine:** LabelPrototypes initialized at new()/load() before Mutex wrapping
+- **Speech architecture:** Emotion channel dropped (Wav2Small CC-BY-NC-SA incompatible). 899-dim -> 896-dim (ECAPA-TDNN 512 + Whisper-tiny 384)
+- **Repository:** Now public at github.com/bellkisai/kernel (Apache 2.0)
+
+### Performance
+- **100K retrieval:** 35% improvement with labels (P50 38.94ms -> 27.70ms)
+- **Embedding floor:** ~8ms per query with BGE-small (2x slower than previous MiniLM)
+- **Label overhead at store time:** ~30% increase (prototype matching per memory)
+- **10K and below:** Labels add marginal overhead; LSH alone is sufficient
+
+### Fixed
+- Hardcoded developer paths in benchmarks/*.py replaced with portable os.path
+- release.yml: -p shrimpk-app -> -p shrimpk-tray (correct package name)
+- SECURITY.md version: 0.4.x -> 0.5.x
+- Internal sprint references (KS numbers) removed from public docs
+
 ## [0.5.0] — 2026-03-29
 
 ### Added

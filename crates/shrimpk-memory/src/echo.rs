@@ -53,8 +53,7 @@ pub struct EchoEngine {
     /// Vision LSH index (CLIP 512-dim). Initialized when vision feature is enabled.
     #[cfg(feature = "vision")]
     vision_lsh: Option<Mutex<CosineHash>>,
-    /// Speech LSH index (899-dim). Initialized when speech feature is enabled.
-    /// Used in KS36 when audio echo queries are implemented.
+    /// Speech LSH index (896-dim: ECAPA-TDNN 512 + Whisper-tiny 384). Initialized when speech feature is enabled.
     #[cfg(feature = "speech")]
     #[allow(dead_code)]
     speech_lsh: Option<Mutex<CosineHash>>,
@@ -412,7 +411,7 @@ impl EchoEngine {
     /// Store audio as a speech memory.
     ///
     /// Pipeline:
-    /// 1. Embed PCM audio with the 3-model speech stack -> 899-dim vector
+    /// 1. Embed PCM audio with the 2-model speech stack -> 896-dim vector
     /// 2. Create MemoryEntry with modality: Speech, speech_embedding: Some(embedding)
     ///    - content is set to "[audio]" (no text content)
     ///    - text embedding is empty (not indexed in text channel)

@@ -1,8 +1,14 @@
 # ADR-015: Label Bucket Architecture
 
 **Date:** 2026-03-31
-**Status:** Proposed
+**Status:** Accepted (implemented in v0.6.0, KS42-KS49)
 **Authors:** Architecture team
+
+**Implementation notes (KS48 benchmark results):**
+- Labels provide 35% retrieval improvement at 100K (P50 38.94ms -> 27.70ms)
+- Embedding cost is the dominant floor (~8ms with BGE-small-EN-v1.5)
+- Entity-level label granularity (GLiNER) deferred due to ort version conflict
+- Future: finer labels + embedding cache will unlock further gains
 
 ---
 

@@ -81,8 +81,8 @@ ShrimPK v0.5.0 introduces a 3-channel architecture: **text**, **vision**, and **
 ┌─────────────────────────────────────────────────────────┐
 │               ShrimPK Echo Memory                       │
 ├──────────────┬──────────────┬───────────────────────────┤
-│  Text (384d) │ Vision (512d)│ Speech (899d)             │
-│  BGE-small   │ CLIP ViT-B-32│ ECAPA+Wav2Small+Whisper  │
+│  Text (384d) │ Vision (512d)│ Speech (896d)             │
+│  BGE-small   │ CLIP ViT-B-32│ ECAPA-TDNN+Whisper-tiny  │
 │  LSH 16×10   │ LSH 16×10   │ LSH 16×10                │
 ├──────────────┴──────────────┴───────────────────────────┤
 │  Cross-Modal Retrieval: text query → image result       │
@@ -115,7 +115,7 @@ Vision and speech are compile-time feature flags. Vision is enabled by default; 
 # ~/.shrimpk-kernel/config.toml
 enabled_modalities = ["text", "vision"]
 vision_embedding_dim = 512
-speech_embedding_dim = 899
+speech_embedding_dim = 896
 ```
 
 ```bash
@@ -149,18 +149,17 @@ curl -X POST localhost:11435/api/echo \
   -d '{"query":"where is the cup?","modality":"vision"}'
 ```
 
-### Speech Channel (Architecture Ready)
+### Speech Channel (KS50)
 
-The speech channel combines three models into a 899-dimensional embedding:
-- **ECAPA-TDNN** (512d) -- speaker identity
-- **Wav2Small** (3d) -- acoustic features
-- **Whisper-tiny** (384d) -- semantic content
+The speech channel combines two permissive-license models into a 896-dimensional embedding:
+- **ECAPA-TDNN** (512d, Apache-2.0) — speaker identity
+- **Whisper-tiny encoder** (384d, MIT) — prosody / rhythm / pace
 
-The architecture, LSH indices, and persistence format are fully implemented. Model loading will be wired in a future release. When enabled, `shrimpk store-audio recording.wav` will work the same as image storage.
+Both models auto-download from HuggingFace Hub (~58 MB total) on first use and are cached locally. When enabled, `shrimpk store-audio recording.wav` works the same as image storage.
 
 ### Scaling
 
-The multimodal engine scales from Raspberry Pi to data center. Per-channel LSH indices keep retrieval sub-linear regardless of memory count. Vision adds ~512 bytes per stored image embedding; speech adds ~899 bytes. RAM auto-detection adjusts budgets per channel.
+The multimodal engine scales from Raspberry Pi to data center. Per-channel LSH indices keep retrieval sub-linear regardless of memory count. Vision adds ~512 bytes per stored image embedding; speech adds ~896 bytes. RAM auto-detection adjusts budgets per channel.
 
 ## The Ollama Model
 

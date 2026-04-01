@@ -15,8 +15,14 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+# Feature pass-throughs for workspace integration tests.
+# When running `cargo test --test <name> --features speech`, the speech ONNX
+# inference models are compiled into the test binary.
+[features]
+speech = ["shrimpk-memory/speech"]
+
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Bellkis AI <hello@bellkis.com>"]
@@ -62,12 +68,12 @@ reqwest = { version = "0.12", features = ["blocking", "json", "stream"] }
 ureq = { version = "3", features = ["json"] }
 futures-util = "0.3"
 # Internal crates (version required for crates.io publish)
-shrimpk-core = { version = "0.5.0", path = "crates/shrimpk-core" }
-shrimpk-memory = { version = "0.5.0", path = "crates/shrimpk-memory" }
-shrimpk-router = { version = "0.5.0", path = "crates/shrimpk-router" }
-shrimpk-context = { version = "0.5.0", path = "crates/shrimpk-context" }
-shrimpk-security = { version = "0.5.0", path = "crates/shrimpk-security" }
-shrimpk-kernel = { version = "0.5.0", path = "crates/shrimpk-kernel" }
+shrimpk-core = { version = "0.6.0", path = "crates/shrimpk-core" }
+shrimpk-memory = { version = "0.6.0", path = "crates/shrimpk-memory" }
+shrimpk-router = { version = "0.6.0", path = "crates/shrimpk-router" }
+shrimpk-context = { version = "0.6.0", path = "crates/shrimpk-context" }
+shrimpk-security = { version = "0.6.0", path = "crates/shrimpk-security" }
+shrimpk-kernel = { version = "0.6.0", path = "crates/shrimpk-kernel" }
 
 # Workspace-root integration tests (tests/*.rs)
 [dev-dependencies]

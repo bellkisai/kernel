@@ -26,7 +26,8 @@ pub mod pii;
 pub mod reformulator;
 pub mod reranker;
 pub mod similarity;
-#[cfg(feature = "speech")]
+// Speech module is always compiled — constants, l2_normalize, resample_linear are always available.
+// The `speech` feature gates the real ONNX inference implementation.
 pub mod speech;
 pub mod store;
 
