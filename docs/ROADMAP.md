@@ -44,12 +44,12 @@ consolidation) configuration.
 
 Memory-mapped binary format with 32-bit CRC per entry, atomic flush, and crash recovery. Stores
 text embeddings (384-dim), optional vision embeddings (512-dim), optional speech embeddings
-(896-dim field, populated from v0.6.0 onward), metadata, and sensitivity labels.
+(640-dim field, populated from v0.6.0 onward), metadata, and sensitivity labels.
 
 **Speech architecture (structure only)**
 
 `shrimpk-memory/src/speech.rs` defines the full `SpeechEmbedder` struct with dimension constants
-(`SPEAKER_DIM=512`, `PROSODY_DIM=384`, `SPEECH_DIM=896`), Whisper log-Mel preprocessing, and
+(`SPEAKER_DIM=256`, `PROSODY_DIM=384`, `SPEECH_DIM=640`), Whisper log-Mel preprocessing, and
 ONNX sessions wired in v0.6.0. The 16 kHz resampler uses linear interpolation.
 
 **MCP server**
@@ -78,20 +78,19 @@ a system tray icon and launch/stop controls on Windows.
 
 Target: Q2 2026. Focus: wire the speech ONNX models and upgrade the vision model.
 
-### Speech: Wire ONNX models (896-dim after emotion removal)
+### Speech: ONNX models wired (640-dim — DONE in KS51)
 
-The speech pipeline is **896-dim** (ECAPA-TDNN 512 + Whisper-tiny encoder 384). The emotion
+The speech pipeline is **640-dim** (ECAPA-TDNN 256 + Whisper-tiny encoder 384). The emotion
 channel (Wav2Small, CC-BY-NC-SA-4.0) was dropped as license-incompatible. Both wired models
 carry permissive licenses: ECAPA-TDNN (Apache-2.0) and Whisper-tiny (MIT).
 
-#### ECAPA-TDNN 512-dim — speaker identification
+#### ECAPA-TDNN 256-dim — speaker identification
 
-Model: `Wespeaker/wespeaker-voxceleb-ecapa-tdnn512` (`voxceleb_ECAPA512.onnx`, 24.9 MB,
-Apache 2.0). Loaded via `ort` (ONNX Runtime Rust crate).
+Model: `Wespeaker/wespeaker-cnceleb-resnet34-LM` (`cnceleb_resnet34_LM.onnx`, ~24 MB,
+Apache 2.0). Loaded via `ort` (ONNX Runtime Rust crate). Auto-downloads from HuggingFace Hub.
 
-Input: 80-bin Kaldi log-Mel filterbank features, shape `(batch, frames, 80)`, 25ms frame,
-10ms hop, 16 kHz.
-Output: 512-dim L2-normalized speaker embedding.
+Input: 80-bin FBank features, shape `(1, frames, 80)`, 25ms frame, 10ms hop, 16 kHz.
+Output: 256-dim L2-normalized speaker embedding (output name: `embs`).
 
 #### Whisper-tiny encoder 384-dim — prosody
 
@@ -279,17 +278,13 @@ and brute-force fallback frequency at scale. Tools: `perf`, `cargo flamegraph`, 
 `tracing` spans already in the echo path. A fix might involve tuning LSH parameters
 (hash count, bucket width) for the BGE-small distribution.
 
-**Wire ECAPA-TDNN ONNX session** (difficulty: medium, Rust + ONNX Runtime)
-`SpeechEmbedder::from_config()` has a clear placeholder comment for where to load
-`ort::Session` instances. The ECAPA-TDNN model (`wespeaker-voxceleb-ecapa-tdnn512`,
-Apache 2.0) is identified and the input format is documented in the codebase. This item
-requires implementing the Kaldi fbank spectrogram using the `mel-spec` crate, loading the
-model via `ort`, and running the `feats` → `embs` inference. The `ort` version must match
-fastembed's pinned `=2.0.0-rc.11` exactly.
+**~~Wire ECAPA-TDNN ONNX session~~** — DONE (KS51). Wespeaker ResNet34 256-dim, FBank
+preprocessing implemented in pure Rust (`compute_fbank_flat()`), `ort` version matches
+fastembed's pinned `=2.0.0-rc.11`.
 
-**Wire Whisper-tiny encoder ONNX session** (difficulty: medium, Rust + ONNX Runtime)
-Companion to the ECAPA item above. The Whisper encoder takes `(batch, 80, 3000)` log-Mel
-spectrogram and outputs `(batch, 1500, 384)` hidden states, mean-pooled to `(batch, 384)`.
+**~~Wire Whisper-tiny encoder ONNX session~~** — DONE (KS51). Whisper-tiny encoder takes
+`(1, 80, 3000)` log-Mel spectrogram, outputs `(1, 1500, 384)` hidden states, mean-pooled
+to 384-dim.
 Preprocessing uses the Whisper log-Mel formula implemented in `mel-spec`. Can be done in
 parallel with the ECAPA item by a different contributor.
 

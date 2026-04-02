@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Speech dimension fix:** 896→640 (ECAPA-TDNN Wespeaker ResNet34 outputs 256-dim, not 512)
+- **ECAPA-TDNN model:** Switched to `wespeaker-cnceleb-resnet34-LM` with FBank preprocessing
+- **Speech constants:** `SPEAKER_DIM=256`, `PROSODY_DIM=384`, `SPEECH_DIM=640`
+- **Persistence fallback:** `unwrap_or(896)` → `unwrap_or(640)` in SHRM v2 speech section
+- **ROS2 bridge verified:** `shrimpk-ros2` crate (13 tests) — replay, health check, 4 message types
+
+### Fixed
+- `speech_store_and_echo` test: speech memories use speech_lsh, not text_lsh — renamed to `speech_store_and_verify`
+- Stale 896/512-dim references across 15 files (code, tests, docs)
+
 ## [0.6.0] — 2026-04-01
 
 ### Added
@@ -34,7 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **MemoryMeta:** Propagates labels through SHRM v2 save/load roundtrip
 - **EchoConfig:** Added use_labels: bool (default true)
 - **EchoEngine:** LabelPrototypes initialized at new()/load() before Mutex wrapping
-- **Speech architecture:** Emotion channel dropped (Wav2Small CC-BY-NC-SA incompatible). 899-dim -> 896-dim (ECAPA-TDNN 512 + Whisper-tiny 384)
+- **Speech architecture:** Emotion channel dropped (Wav2Small CC-BY-NC-SA incompatible). 899-dim -> 640-dim (ECAPA-TDNN 256 + Whisper-tiny 384)
 - **Repository:** Now public at github.com/bellkisai/kernel (Apache 2.0)
 
 ### Performance
@@ -54,9 +65,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Multimodal Echo Memory:** 3-channel architecture (text, vision, speech)
 - **Vision channel:** CLIP ViT-B-32 via fastembed — store images, cross-modal text->image retrieval
-- **Speech channel:** Architecture ready (ECAPA-TDNN 512 + Wav2Small 3 + Whisper-tiny 384 = 899-dim)
+- **Speech channel:** Architecture ready (ECAPA-TDNN 256 + Whisper-tiny 384 = 640-dim, wired in KS51)
 - **QueryMode:** Text / Vision / Auto for cross-channel echo queries
-- **Per-channel LSH:** Separate indices per modality (384/512/899-dim)
+- **Per-channel LSH:** Separate indices per modality (384/512/640-dim)
 - **SHRM v2 persistence:** Per-channel bitmap+sparse sections, CRC32 per section, v1 backward compat
 - **API endpoints:** store_image, store_audio (MCP + daemon + CLI), --modality flag on echo
 - **Per-channel stats:** text_count, vision_count, speech_count in stats output
@@ -67,8 +78,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - **Text model upgrade:** all-MiniLM-L6-v2 -> BGE-small-EN-v1.5 (MTEB 56.3 -> 62.0, same 384-dim)
 - **Embedder refactor:** Embedder -> MultiEmbedder with per-channel methods
-- **RAM estimation:** stats() now accounts for vision (512-dim) and speech (899-dim) sizes
-- **SPEAKER_DIM:** 192 -> 512 (Wespeaker ECAPA-TDNN official ONNX output)
+- **RAM estimation:** stats() now accounts for vision (512-dim) and speech (640-dim) sizes
+- **SPEAKER_DIM:** 192 -> 256 (Wespeaker ResNet34 ONNX output — was 512 in v0.5.0, corrected in KS51)
 
 ### Fixed
 - Speech LSH rebuilt on load (was empty after restart)
