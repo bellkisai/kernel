@@ -367,7 +367,7 @@ The two models capture complementary aspects of speech:
 
 | Model | Dimension | Captures |
 |---|---|---|
-| ECAPA-TDNN | 512 | Speaker identity — who is speaking |
+| ECAPA-TDNN | 256 | Speaker identity — who is speaking |
 | Whisper-tiny encoder | 384 | Prosody: rhythm, stress, pace |
 
 > **Note:** An emotion channel (arousal/dominance/valence) was explored during design but dropped because all available models (e.g., Wav2Small) carry non-commercial licenses incompatible with Apache 2.0. The architecture can accommodate a third sub-embedding when a permissively licensed emotion model becomes available.

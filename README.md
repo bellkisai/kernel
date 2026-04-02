@@ -151,8 +151,8 @@ curl -X POST localhost:11435/api/echo \
 
 ### Speech Channel (KS50)
 
-The speech channel combines two permissive-license models into a 896-dimensional embedding:
-- **ECAPA-TDNN** (512d, Apache-2.0) — speaker identity
+The speech channel combines two permissive-license models into a 640-dimensional embedding:
+- **ECAPA-TDNN** (256d, Apache-2.0) — speaker identity
 - **Whisper-tiny encoder** (384d, MIT) — prosody / rhythm / pace
 
 Both models auto-download from HuggingFace Hub (~58 MB total) on first use and are cached locally. When enabled, `shrimpk store-audio recording.wav` works the same as image storage.

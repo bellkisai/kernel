@@ -213,7 +213,7 @@ pub struct EchoConfig {
     /// Embedding dimension for vision channel (CLIP). Default: 512.
     #[serde(default = "default_vision_dim")]
     pub vision_embedding_dim: usize,
-    /// Embedding dimension for speech channel. Default: 896 (ECAPA-TDNN 512 + Whisper-tiny 384).
+    /// Embedding dimension for speech channel. Default: 640 (ECAPA-TDNN 256 + Whisper-tiny 384).
     #[serde(default = "default_speech_dim")]
     pub speech_embedding_dim: usize,
 }
@@ -225,7 +225,7 @@ fn default_vision_dim() -> usize {
     512
 }
 fn default_speech_dim() -> usize {
-    896
+    640
 }
 
 fn default_proxy_target() -> String {

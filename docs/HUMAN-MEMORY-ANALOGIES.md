@@ -155,9 +155,9 @@ ShrimPK v0.5.0 mirrors this architecture directly with three independent embeddi
 
 **Vision channel** (CLIP ViT-B/32, 512-dim): The visual cortex stream. Images, screenshots, and visual observations. CLIP's joint text-image embedding space enables a critical capability: you can query with text and retrieve images, or vice versa — the same way seeing a kitchen can trigger language-encoded cooking memories.
 
-**Speech channel** (ECAPA-TDNN 512-dim + Whisper-tiny 384-dim, concatenated 896-dim total): The auditory/paralinguistic stream. This channel captures not what was said, but *how* it was said — speaker identity and prosodic patterns like rhythm and stress. The two-model architecture matches distinct processing layers of the auditory cortex:
+**Speech channel** (ECAPA-TDNN 256-dim + Whisper-tiny 384-dim, concatenated 640-dim total): The auditory/paralinguistic stream. This channel captures not what was said, but *how* it was said — speaker identity and prosodic patterns like rhythm and stress. The two-model architecture matches distinct processing layers of the auditory cortex:
 
-- **ECAPA-TDNN** (512-dim): Speaker identity — analogous to voice recognition in the superior temporal gyrus.
+- **ECAPA-TDNN** (256-dim): Speaker identity — analogous to voice recognition in the superior temporal gyrus.
 - **Whisper-tiny encoder** (384-dim): Prosodic structure — analogous to prosodic processing in the right hemisphere, which tracks rhythm, stress, and intonation independently of word content.
 
 > **Note:** An emotion sub-embedding (arousal/dominance/valence) was explored during design but dropped because available models carry non-commercial licenses incompatible with Apache 2.0. The architecture can accommodate a third sub-embedding when a permissively licensed emotion model becomes available — this would correspond to affective processing in the amygdala-connected auditory pathways.

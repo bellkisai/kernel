@@ -110,7 +110,7 @@ Calling `SpeechEmbedder::embed()` returns an error:
 Speech models not loaded. Install ONNX models or enable speech feature with model paths.
 ```
 
-This is expected behavior. The ONNX sessions for ECAPA-TDNN (speaker, 512-dim) and
+This is expected behavior. The ONNX sessions for ECAPA-TDNN (speaker, 256-dim) and
 Whisper-tiny encoder (prosody, 384-dim) are not yet loaded. The architecture, input format
 specifications, and model identifiers are fully documented in the codebase and in the
 `shrimpk-memory/src/speech.rs` module docstring.
@@ -180,8 +180,8 @@ The original speech pipeline design included a 3-dim emotion embedding (arousal,
 valence) via Wav2Small (`audeering/wav2small`). Wav2Small is CC-BY-NC-SA-4.0, which forbids
 commercial use and requires ShareAlike. This is incompatible with ShrimPK's Apache 2.0 license.
 
-The emotion channel has been removed. The wired speech pipeline is 896-dim (ECAPA-TDNN 512 +
-Whisper-tiny 384) as shipped in v0.6.0 (KS50). `SPEECH_DIM = 896` and `EMOTION_DIM` is gone.
+The emotion channel has been removed. The wired speech pipeline is 640-dim (ECAPA-TDNN 256 +
+Whisper-tiny 384) as confirmed in KS51. `SPEECH_DIM = 640` and `EMOTION_DIM` is gone.
 
 **What this means for stored data:** The SHRM v2 format field `speech_embedding` is a variable-
 length `Vec<f32>`. If a future version re-adds an emotion channel, the stored dimension will

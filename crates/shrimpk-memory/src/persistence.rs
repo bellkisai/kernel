@@ -11,7 +11,7 @@
 //! 5       1       Flags: bit 0=has_vision, bit 1=has_speech
 //! 6       2       Text dim: u16 (384)
 //! 8       2       Vision dim: u16 (512 or 0)
-//! 10      2       Speech dim: u16 (896 or 0)
+//! 10      2       Speech dim: u16 (640 or 0)
 //! 12      4       Entry count: u32
 //! ------- 16 bytes total header -------
 //! 16      4       Metadata JSON length (u32)
@@ -26,7 +26,7 @@
 //!         4          Vision CRC32 (over bitmap + embeddings)
 //! ------- Speech section (if has_speech) -------
 //!         ceil(N/8)  Bitmap
-//!         S*896*4    Speech embeddings (only present entries)
+//!         S*640*4    Speech embeddings (only present entries)
 //!         4          Speech CRC32 (over bitmap + embeddings)
 //! ```
 //!
@@ -68,7 +68,7 @@ const HEADER_SIZE_V1: u64 = 64;
 /// 5       1       Flags: u8 (bit 0 = has_vision, bit 1 = has_speech)
 /// 6       2       Text dim: u16 (384)
 /// 8       2       Vision dim: u16 (512 or 0)
-/// 10      2       Speech dim: u16 (896 or 0)
+/// 10      2       Speech dim: u16 (640 or 0)
 /// 12      4       Entry count: u32
 /// ```
 const HEADER_SIZE_V2: u64 = 16;
@@ -220,7 +220,7 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
         entries
             .iter()
             .find_map(|e| e.speech_embedding.as_ref().map(|v| v.len() as u16))
-            .unwrap_or(896)
+            .unwrap_or(640)
     } else {
         0
     };

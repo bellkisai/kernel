@@ -1186,7 +1186,7 @@ let results = engine.echo_with_mode(
 
 ### Speech Channel (Architecture Ready)
 
-The speech channel architecture is fully implemented (ECAPA-TDNN 512d + Whisper-tiny encoder 384d = 896d total). Model loading will be wired in a future release. Build with `--features speech` to enable the architecture; `store_audio` will function once models are wired.
+The speech channel is implemented (ECAPA-TDNN 256d + Whisper-tiny encoder 384d = 640d total). Build with `--features speech` to enable; models auto-download from HuggingFace Hub (~58 MB) on first use.
 
 The encoding format for audio is raw PCM f32 little-endian. Convert from any audio format using ffmpeg:
 

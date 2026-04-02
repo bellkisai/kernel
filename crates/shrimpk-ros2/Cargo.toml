@@ -1,0 +1,34 @@
+[package]
+name = "shrimpk-ros2"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ROS2 bridge for ShrimPK — robot sensor data → echo memory"
+publish = false
+
+[[bin]]
+name = "shrimpk-ros2"
+path = "src/bin/shrimpk-ros2.rs"
+
+[features]
+default = []
+ros2 = ["dep:r2r"]
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+base64 = "0.22"
+image = "0.25"
+futures-util = { workspace = true }
+r2r = { version = "0.9", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"

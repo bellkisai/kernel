@@ -166,7 +166,7 @@ pub struct MemoryEntry {
     /// CLIP vision embedding (512-dim). Present when image data was stored.
     #[serde(default)]
     pub vision_embedding: Option<Vec<f32>>,
-    /// Speech audio embedding (896-dim). Present when audio data was stored.
+    /// Speech audio embedding (640-dim). Present when audio data was stored.
     #[serde(default)]
     pub speech_embedding: Option<Vec<f32>>,
     /// Where this memory came from (e.g., "conversation", "document", "manual").

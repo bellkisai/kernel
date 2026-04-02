@@ -10,7 +10,7 @@ default = []
 # CLIP ViT-B-32 vision channel (512-dim). Requires fastembed's image-models feature (on by default).
 # Adds ~352 MB model download on first use.
 vision = []
-# Speech channel: ECAPA-TDNN (512-dim, Apache-2.0) + Whisper-tiny encoder (384-dim, MIT) = 896-dim.
+# Speech channel: ECAPA-TDNN (256-dim, Apache-2.0) + Whisper-tiny encoder (384-dim, MIT) = 640-dim.
 # Adds ~58 MB model download on first use. Requires `ort`, `hf-hub`, `dirs`.
 # hound is optional (WAV decode for tests), rubato/ndarray are available for future quality improvement.
 speech = ["dep:ort", "dep:hf-hub"]

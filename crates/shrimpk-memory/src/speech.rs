@@ -2,16 +2,16 @@
 //!
 //! Captures HOW things were said (tone, pace, speaker identity),
 //! NOT speech-to-text. Two specialized models produce a concatenated
-//! 896-dim embedding: ECAPA-TDNN (512) + Whisper-tiny encoder (384).
+//! 640-dim embedding: ECAPA-TDNN ResNet34 (256) + Whisper-tiny encoder (384).
 //!
 //! Input: 16kHz mono PCM f32 audio samples.
-//! Output: concatenated `[speaker_512 | prosody_384]`, both L2-normalized.
+//! Output: concatenated `[speaker_256 | prosody_384]`, both L2-normalized.
 //!
 //! # Architecture (KS50)
 //!
 //! | Model        | Purpose                          | Dim | License   | ONNX Size |
 //! |-------------|----------------------------------|-----|-----------|-----------|
-//! | ECAPA-TDNN  | Speaker identification (who)     | 512 | Apache-2.0| ~25 MB    |
+//! | ECAPA-TDNN (ResNet34) | Speaker identification (who) | 256 | Apache-2.0| ~25 MB |
 //! | Whisper-tiny| Prosody (rhythm/stress/pace)      | 384 | MIT       | ~33 MB    |
 //!
 //! The Wav2Small emotion channel (3-dim) was dropped (CC-BY-NC-SA incompatible).
@@ -20,19 +20,25 @@
 //! # Model Sources
 //! - ECAPA-TDNN: `Wespeaker/wespeaker-cnceleb-resnet34-LM` (Apache-2.0)
 //!   <https://huggingface.co/Wespeaker/wespeaker-cnceleb-resnet34-LM>
+//!   File: `cnceleb_resnet34_LM.onnx`
 //! - Whisper-tiny encoder: `onnx-community/whisper-tiny` (MIT / OpenAI Whisper License)
 //!   <https://huggingface.co/onnx-community/whisper-tiny>
+//!   File: `onnx/encoder_model.onnx` (ONNX files live in the `onnx/` subdirectory)
 //!
 //! # Cache
 //! Models are stored in `~/.shrimpk-kernel/models/` and downloaded on first use.
 
 use shrimpk_core::{Result, ShrimPKError};
 
-/// Total speech embedding dimension: 512 (ECAPA-TDNN) + 384 (Whisper-tiny) = 896.
-pub const SPEECH_DIM: usize = 896;
+/// Total speech embedding dimension: 256 (ECAPA-TDNN ResNet34) + 384 (Whisper-tiny) = 640.
+///
+/// Note: Wespeaker ResNet34 outputs 256-dim (not 512 as originally assumed).
+/// The CHANGELOG v0.5.0 claim of 512-dim was based on the ResNet34 spec sheet;
+/// the actual cnceleb_resnet34_LM.onnx model has a 256-dim embedding head.
+pub const SPEECH_DIM: usize = 640;
 
-/// Speaker sub-embedding dimension (ECAPA-TDNN).
-pub const SPEAKER_DIM: usize = 512;
+/// Speaker sub-embedding dimension (ECAPA-TDNN / Wespeaker ResNet34).
+pub const SPEAKER_DIM: usize = 256;
 
 /// Prosody sub-embedding dimension (Whisper-tiny encoder mean-pool).
 pub const PROSODY_DIM: usize = 384;
@@ -72,12 +78,14 @@ mod inner {
     // ECAPA-TDNN — Apache-2.0 license
     // https://huggingface.co/Wespeaker/wespeaker-cnceleb-resnet34-LM
     const SPEAKER_REPO: &str = "Wespeaker/wespeaker-cnceleb-resnet34-LM";
-    const SPEAKER_FILENAME: &str = "wespeaker-cnceleb-resnet34-LM.onnx";
+    // Actual filename in the repo (confirmed via HF API, 2026-04-01)
+    const SPEAKER_FILENAME: &str = "cnceleb_resnet34_LM.onnx";
 
     // Whisper-tiny encoder — MIT license / OpenAI Whisper License
     // https://huggingface.co/onnx-community/whisper-tiny
     const PROSODY_REPO: &str = "onnx-community/whisper-tiny";
-    const PROSODY_FILENAME: &str = "encoder_model.onnx";
+    // ONNX files live in the `onnx/` subdirectory of this repo (confirmed via HF API, 2026-04-01)
+    const PROSODY_FILENAME: &str = "onnx/encoder_model.onnx";
 
     // -------------------------------------------------------------------------
     // Model cache + download
@@ -234,8 +242,49 @@ mod inner {
     }
 
     // -------------------------------------------------------------------------
-    // L2 normalization
+    // Kaldi-style FBank for ECAPA-TDNN
     // -------------------------------------------------------------------------
+
+    /// Compute Kaldi-style log-Mel FBank features for ECAPA-TDNN.
+    ///
+    /// Returns a flat Vec of shape `[1, n_frames, N_MELS]` (batch, time, mels).
+    /// Unlike Whisper, the time axis is variable-length and no global
+    /// normalization is applied — just log10 of the mel energies.
+    fn compute_fbank_flat(pcm: &[f32]) -> Vec<f32> {
+        let filters = mel_filterbank(N_MELS, N_FFT, TARGET_SAMPLE_RATE);
+
+        // Number of frames from actual audio length (no fixed window)
+        let n_frames = if pcm.len() >= N_FFT {
+            (pcm.len() - N_FFT) / HOP_LENGTH + 1
+        } else {
+            1
+        };
+
+        // [n_frames, N_MELS] row-major
+        let mut fbank = vec![0.0f32; n_frames * N_MELS];
+
+        for frame_idx in 0..n_frames {
+            let start = frame_idx * HOP_LENGTH;
+            let end = start + N_FFT;
+
+            let mut frame = vec![0.0f32; N_FFT];
+            let copy_end = end.min(pcm.len());
+            if start < pcm.len() {
+                frame[..copy_end - start].copy_from_slice(&pcm[start..copy_end]);
+            }
+
+            let windowed = hann_window(&frame);
+            let power = power_spectrum(&windowed);
+
+            for (m_idx, filter) in filters.iter().enumerate() {
+                let mel_val: f32 = filter.iter().zip(power.iter()).map(|(f, p)| f * p).sum();
+                // Kaldi FBank: simple log, no global normalization
+                fbank[frame_idx * N_MELS + m_idx] = mel_val.max(1e-10).log10();
+            }
+        }
+
+        fbank
+    }
 
     // -------------------------------------------------------------------------
     // SpeechEmbedder — real ONNX implementation
@@ -243,7 +292,7 @@ mod inner {
 
     /// Speech embedder backed by two ONNX sessions.
     pub struct SpeechEmbedder {
-        /// ECAPA-TDNN ORT session → 512-dim speaker embedding (Apache-2.0).
+        /// ECAPA-TDNN ORT session → 256-dim speaker embedding (Apache-2.0).
         speaker_session: Option<Session>,
         /// Whisper-tiny encoder ORT session → 384-dim prosody embedding (MIT).
         prosody_session: Option<Session>,
@@ -323,9 +372,15 @@ mod inner {
                             );
                             self.speaker_session = Some(session);
                         }
-                        Err(e) => tracing::warn!("ECAPA-TDNN session build failed: {e}"),
+                        Err(e) => {
+                            eprintln!("[speech diag] ECAPA-TDNN session build failed: {e}");
+                            tracing::warn!("ECAPA-TDNN session build failed: {e}");
+                        }
                     },
-                    Err(e) => tracing::warn!("ECAPA-TDNN download failed: {e}"),
+                    Err(e) => {
+                        eprintln!("[speech diag] ECAPA-TDNN download failed: {e}");
+                        tracing::warn!("ECAPA-TDNN download failed: {e}");
+                    }
                 }
             }
 
@@ -348,9 +403,15 @@ mod inner {
                             );
                             self.prosody_session = Some(session);
                         }
-                        Err(e) => tracing::warn!("Whisper-tiny session build failed: {e}"),
+                        Err(e) => {
+                            eprintln!("[speech diag] Whisper-tiny session build failed: {e}");
+                            tracing::warn!("Whisper-tiny session build failed: {e}");
+                        }
                     },
-                    Err(e) => tracing::warn!("Whisper-tiny download failed: {e}"),
+                    Err(e) => {
+                        eprintln!("[speech diag] Whisper-tiny download failed: {e}");
+                        tracing::warn!("Whisper-tiny download failed: {e}");
+                    }
                 }
             }
 
@@ -377,30 +438,37 @@ mod inner {
             Ok(())
         }
 
-        /// Run ECAPA-TDNN → 512-dim speaker embedding.
+        /// Run ECAPA-TDNN → 256-dim speaker embedding.
         ///
-        /// Input: `[1, T]` waveform tensor (f32 PCM at 16kHz).
+        /// The Wespeaker ONNX model expects Kaldi-style FBank features as input
+        /// (`feats`, shape `[1, n_frames, 80]`), NOT raw waveform. The model
+        /// outputs `embs` with shape `[1, 512]`.
         fn run_speaker(&mut self, pcm_16k: &[f32]) -> Result<Vec<f32>> {
             let session = self.speaker_session.as_mut().ok_or_else(|| {
                 ShrimPKError::Embedding("ECAPA-TDNN session not loaded".into())
             })?;
 
-            // Build input tensor [1, T]
-            let t = pcm_16k.len();
-            let input_tensor =
-                Tensor::<f32>::from_array(([1usize, t], pcm_16k.to_vec().into_boxed_slice()))
-                    .map_err(|e| {
-                        ShrimPKError::Embedding(format!("ECAPA-TDNN input tensor failed: {e}"))
-                    })?;
+            // Compute Kaldi-style FBank features: [n_frames, 80] flat
+            let fbank = compute_fbank_flat(pcm_16k);
+            let n_frames = fbank.len() / N_MELS;
 
-            // Run inference
+            // Build input tensor [1, n_frames, 80]
+            let input_tensor = Tensor::<f32>::from_array((
+                [1usize, n_frames, N_MELS],
+                fbank.into_boxed_slice(),
+            ))
+            .map_err(|e| {
+                ShrimPKError::Embedding(format!("ECAPA-TDNN input tensor failed: {e}"))
+            })?;
+
+            // Run inference — input name is "feats", output is "embs"
             let outputs = session
-                .run(ort::inputs!["waveform" => input_tensor])
+                .run(ort::inputs!["feats" => input_tensor])
                 .map_err(|e| {
                     ShrimPKError::Embedding(format!("ECAPA-TDNN inference failed: {e}"))
                 })?;
 
-            // Extract output — expected [1, 512] or [512]
+            // Extract output — expected [1, 512]
             let output_val = outputs
                 .values()
                 .next()
@@ -471,10 +539,10 @@ mod inner {
             Ok(prosody_emb)
         }
 
-        /// Embed raw PCM audio into a 896-dim vector.
+        /// Embed raw PCM audio into a 640-dim vector.
         ///
         /// Input: mono f32 PCM samples at any sample rate.
-        /// Output: L2-normalized `[speaker_512 | prosody_384]`.
+        /// Output: L2-normalized `[speaker_256 | prosody_384]`.
         ///
         /// Auto-downloads ONNX models on first call (~58 MB total).
         ///
@@ -496,7 +564,7 @@ mod inner {
                 pcm_f32.to_vec()
             };
 
-            // ECAPA-TDNN → 512-dim (L2-normalized)
+            // ECAPA-TDNN → 256-dim (L2-normalized)
             let mut speaker_emb = self.run_speaker(&pcm_16k)?;
             super::l2_normalize(&mut speaker_emb);
 
@@ -504,7 +572,7 @@ mod inner {
             let mut prosody_emb = self.run_prosody(&pcm_16k)?;
             super::l2_normalize(&mut prosody_emb);
 
-            // Concatenate → 896-dim
+            // Concatenate → 640-dim
             let mut combined = Vec::with_capacity(SPEECH_DIM);
             combined.extend_from_slice(&speaker_emb);
             combined.extend_from_slice(&prosody_emb);
@@ -684,8 +752,8 @@ mod tests {
     // --- Constant sanity checks (always run) ---
 
     #[test]
-    fn speech_dim_is_896() {
-        assert_eq!(SPEECH_DIM, 896, "SPEECH_DIM must be 896 (512 + 384)");
+    fn speech_dim_is_640() {
+        assert_eq!(SPEECH_DIM, 640, "SPEECH_DIM must be 640 (256 + 384)");
     }
 
     #[test]
@@ -790,10 +858,10 @@ mod tests {
         assert_eq!(resample_linear(&[0.42], 48000, 16000).len(), 0);
     }
 
-    // --- MemoryEntry roundtrip with 896-dim speech embedding ---
+    // --- MemoryEntry roundtrip with 640-dim speech embedding ---
 
     #[test]
-    fn memory_entry_speech_embedding_roundtrip_896() {
+    fn memory_entry_speech_embedding_roundtrip_640() {
         use shrimpk_core::{MemoryEntry, Modality};
 
         let mut entry = MemoryEntry::new_with_modality(
