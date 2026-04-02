@@ -118,6 +118,17 @@ pub fn all_tools() -> Vec<ToolDefinition> {
                 "required": ["memory_id"]
             }),
         },
+        ToolDefinition {
+            name: "memory_get".into(),
+            description: "Get the full content of a specific memory by ID. Use after echo/graph/related to expand a truncated result.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "memory_id": { "type": "string", "description": "UUID of the memory to retrieve" }
+                },
+                "required": ["memory_id"]
+            }),
+        },
     ];
 
     // Multimodal tools — conditionally included based on compile-time feature flags
@@ -387,6 +398,34 @@ pub async fn handle_memory_related(
     });
 
     Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
+}
+
+pub async fn handle_memory_get(
+    engine: &Arc<EchoEngine>,
+    args: &Value,
+) -> Result<String, String> {
+    let id_str = args["memory_id"]
+        .as_str()
+        .ok_or("Missing required argument: memory_id")?;
+    let uuid = uuid::Uuid::parse_str(id_str).map_err(|e| format!("Invalid UUID: {e}"))?;
+    let id = MemoryId::from_uuid(uuid);
+
+    let entry = engine.memory_get(&id).await.map_err(|e| e.to_string())?;
+
+    let output = json!({
+        "memory_id": entry.id.to_string(),
+        "content": entry.display_content(),
+        "source": entry.source,
+        "modality": format!("{}", entry.modality),
+        "labels": entry.labels,
+        "echo_count": entry.echo_count,
+        "created_at": entry.created_at.to_rfc3339(),
+        "category": format!("{:?}", entry.category),
+        "sensitivity": format!("{:?}", entry.sensitivity),
+        "novelty_score": entry.novelty_score
+    });
+
+    Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".into()))
 }
 
 pub async fn handle_stats(engine: &Arc<EchoEngine>, config: &EchoConfig) -> Result<String, String> {
@@ -672,10 +711,10 @@ mod tests {
     #[test]
     fn all_tools_returns_expected_count() {
         let count = all_tools().len();
-        // Base: 11 tools (9 original + memory_graph + memory_related).
+        // Base: 12 tools (9 original + memory_graph + memory_related + memory_get).
         // +1 if vision feature, +1 if speech feature.
         #[allow(unused_mut)]
-        let mut expected = 11;
+        let mut expected = 12;
         #[cfg(feature = "vision")]
         { expected += 1; }
         #[cfg(feature = "speech")]

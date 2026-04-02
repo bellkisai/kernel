@@ -218,7 +218,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/consolidate", post(routes::consolidate))
         .route("/api/detect", get(routes::detect_providers))
         .route("/api/memory_graph", post(routes::memory_graph))
-        .route("/api/memory_related", post(routes::memory_related));
+        .route("/api/memory_related", post(routes::memory_related))
+        .route("/api/memory_get", post(routes::memory_get));
 
     // Multimodal routes — conditionally compiled
     #[cfg(feature = "vision")]

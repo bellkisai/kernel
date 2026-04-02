@@ -201,6 +201,10 @@ pub struct MemoryEntry {
     /// 2 = LLM-enriched (Tier 2: NER + Ollama classification).
     #[serde(default)]
     pub label_version: u8,
+    /// Novelty score at store time: 1.0 - max cosine similarity to existing memories.
+    /// Higher = more novel/unique. Used for consolidation priority.
+    #[serde(default)]
+    pub novelty_score: f32,
 }
 
 impl MemoryEntry {
@@ -225,6 +229,7 @@ impl MemoryEntry {
             parent_id: None,
             labels: Vec::new(),
             label_version: 0,
+            novelty_score: 0.0,
         }
     }
 
@@ -348,6 +353,9 @@ pub struct MemoryEntrySummary {
     pub echo_count: u32,
     pub sensitivity: SensitivityLevel,
     pub category: MemoryCategory,
+    /// Novelty score at store time (0.0 to 1.0).
+    #[serde(default)]
+    pub novelty_score: f32,
 }
 
 #[cfg(test)]

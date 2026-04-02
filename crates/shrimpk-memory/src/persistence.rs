@@ -116,6 +116,9 @@ pub struct MemoryMeta {
     /// Label enrichment version (0=unlabeled, 1=Tier1, 2=Tier2).
     #[serde(default)]
     pub label_version: u8,
+    /// Novelty score at store time (0.0 to 1.0).
+    #[serde(default)]
+    pub novelty_score: f32,
 }
 
 impl MemoryMeta {
@@ -139,6 +142,7 @@ impl MemoryMeta {
             has_speech_embedding: entry.speech_embedding.is_some(),
             labels: entry.labels.clone(),
             label_version: entry.label_version,
+            novelty_score: entry.novelty_score,
         }
     }
 
@@ -164,6 +168,7 @@ impl MemoryMeta {
             parent_id: self.parent_id,
             labels: self.labels,
             label_version: self.label_version,
+            novelty_score: self.novelty_score,
         }
     }
 }

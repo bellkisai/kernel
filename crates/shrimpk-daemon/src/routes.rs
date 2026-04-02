@@ -89,6 +89,11 @@ fn default_max_results() -> usize {
 }
 
 #[derive(Deserialize)]
+pub struct MemoryGetRequest {
+    pub memory_id: String,
+}
+
+#[derive(Deserialize)]
 pub struct ConfigSetRequest {
     pub key: String,
     pub value: String,
@@ -546,6 +551,44 @@ pub async fn memory_related(
         "results": results_json,
         "count": results.len(),
         "elapsed_ms": (elapsed_ms * 10.0).round() / 10.0
+    })))
+}
+
+/// POST /api/memory_get — get full content of a specific memory by ID.
+pub async fn memory_get(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryGetRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let uuid = uuid::Uuid::parse_str(&req.memory_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Invalid UUID: {e}")})),
+        )
+    })?;
+    let id = MemoryId::from_uuid(uuid);
+
+    let entry = state
+        .engine
+        .memory_get(&id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "memory_id": entry.id.to_string(),
+        "content": entry.display_content(),
+        "source": entry.source,
+        "modality": format!("{}", entry.modality),
+        "labels": entry.labels,
+        "echo_count": entry.echo_count,
+        "created_at": entry.created_at.to_rfc3339(),
+        "category": format!("{:?}", entry.category),
+        "sensitivity": format!("{:?}", entry.sensitivity),
+        "novelty_score": entry.novelty_score
     })))
 }
 

@@ -79,6 +79,18 @@ pub struct EchoEngine {
     prototypes: crate::labels::LabelPrototypes,
 }
 
+/// Truncate a string to `max_chars` characters, appending "..." if truncated.
+/// Uses char boundaries to avoid splitting multi-byte characters.
+fn truncate_content(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars {
+        return s.to_string();
+    }
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => format!("{}...", &s[..byte_idx]),
+        None => s.to_string(),
+    }
+}
+
 impl EchoEngine {
     /// Initialize a new EchoEngine with an empty store.
     ///
@@ -280,13 +292,56 @@ impl EchoEngine {
             }
         }
 
+        // 3c. Compute novelty score: 1.0 - max cosine similarity to existing memories.
+        //     Uses LSH candidates (fast path) or brute-force top-20 if LSH returns empty.
+        {
+            let store = self.store.read().await;
+            if !store.is_empty() {
+                // Try LSH candidates first (sub-linear)
+                let candidates: Vec<u32> = if self.config.use_lsh {
+                    self.text_lsh
+                        .lock()
+                        .map(|lsh| lsh.query(&embedding))
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                let max_sim = if !candidates.is_empty() {
+                    // Score against LSH candidates only
+                    candidates
+                        .iter()
+                        .filter_map(|&idx| store.embedding_at(idx as usize))
+                        .filter(|emb| !emb.is_empty())
+                        .map(|emb| similarity::cosine_similarity(&embedding, emb))
+                        .fold(0.0f32, f32::max)
+                } else {
+                    // Brute-force fallback: scan all embeddings, find max among top-20
+                    let all_embs = store.all_embeddings();
+                    let mut sims: Vec<f32> = all_embs
+                        .iter()
+                        .filter(|e| !e.is_empty())
+                        .map(|emb| similarity::cosine_similarity(&embedding, emb))
+                        .collect();
+                    sims.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+                    sims.into_iter().take(20).next().unwrap_or(0.0)
+                };
+
+                entry.novelty_score = (1.0 - max_sim).clamp(0.0, 1.0);
+            } else {
+                // First memory is maximally novel
+                entry.novelty_score = 1.0;
+            }
+        }
+
         let id = entry.id.clone();
 
         tracing::debug!(
             reformulated = reformulated.is_some(),
             category = ?category,
             labels = entry.labels.len(),
-            "Memory reformulation + categorization + labeling step"
+            novelty = entry.novelty_score,
+            "Memory reformulation + categorization + labeling + novelty step"
         );
 
         // 4. Add to store, LSH index, and Bloom filter
@@ -317,6 +372,18 @@ impl EchoEngine {
         );
 
         Ok(id)
+    }
+
+    /// Retrieve the full content of a specific memory by ID.
+    ///
+    /// Returns the complete `MemoryEntry` without truncation. Use this after
+    /// echo/graph/related to expand a truncated result.
+    pub async fn memory_get(&self, id: &MemoryId) -> Result<MemoryEntry> {
+        let store = self.store.read().await;
+        store
+            .get(id)
+            .cloned()
+            .ok_or_else(|| ShrimPKError::Memory(format!("Memory not found: {id}")))
     }
 
     /// Store an image as a vision memory with optional text description for cross-modal recall.
@@ -1172,7 +1239,7 @@ impl EchoEngine {
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
-                    content: entry.display_content().to_string(),
+                    content: truncate_content(entry.display_content(), 200),
                     similarity: score,
                     final_score: (score as f64 + boost + recency_boost) * decay,
                     source: entry.source.clone(),
@@ -1366,7 +1433,7 @@ impl EchoEngine {
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
-                    content: entry.display_content().to_string(),
+                    content: truncate_content(entry.display_content(), 200),
                     similarity: score,
                     final_score: (score as f64 + boost + recency_boost) * decay,
                     source: entry.source.clone(),
@@ -1555,6 +1622,7 @@ impl EchoEngine {
                 echo_count: e.echo_count,
                 sensitivity: e.sensitivity,
                 category: e.category,
+                novelty_score: e.novelty_score,
             })
             .collect()
     }
@@ -1683,7 +1751,7 @@ impl EchoEngine {
                 let entry = store.entry_at(idx)?;
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
-                    content: entry.display_content().to_string(),
+                    content: truncate_content(entry.display_content(), 200),
                     similarity: score,
                     final_score: score as f64,
                     source: entry.source.clone(),

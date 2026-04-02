@@ -96,6 +96,11 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         max_results: usize,
     },
+    /// Get the full content of a specific memory by ID
+    Get {
+        /// Memory UUID
+        memory_id: String,
+    },
     /// Show engine statistics
     Stats,
     /// Remove a memory by UUID
@@ -434,6 +439,32 @@ async fn cmd_related(
             result.source,
             &result.memory_id.to_string()[..8]
         );
+    }
+
+    Ok(())
+}
+
+async fn cmd_get(engine: &EchoEngine, id_str: &str) -> anyhow::Result<()> {
+    let uuid = uuid::Uuid::parse_str(id_str)
+        .map_err(|e| anyhow::anyhow!("Invalid UUID \"{id_str}\": {e}"))?;
+    let id = shrimpk_core::MemoryId::from_uuid(uuid);
+
+    let entry = engine.memory_get(&id).await?;
+
+    println!("[shrimpk] Memory {}", entry.id);
+    println!("  Content:     {}", entry.display_content());
+    println!("  Source:      {}", entry.source);
+    println!("  Modality:    {}", entry.modality);
+    println!("  Category:    {:?}", entry.category);
+    println!("  Sensitivity: {:?}", entry.sensitivity);
+    println!("  Echo count:  {}", entry.echo_count);
+    println!("  Created:     {}", entry.created_at.to_rfc3339());
+    println!("  Novelty:     {:.3}", entry.novelty_score);
+    if !entry.labels.is_empty() {
+        println!("  Labels:      {}", entry.labels.join(", "));
+    }
+    if let Some(last) = entry.last_echoed {
+        println!("  Last echoed: {}", last.to_rfc3339());
     }
 
     Ok(())
@@ -1128,6 +1159,15 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
                 println!("{resp}");
             }
+            Commands::Get { memory_id } => {
+                let resp = daemon_post(
+                    base,
+                    "/api/memory_get",
+                    &serde_json::json!({"memory_id": memory_id}),
+                )
+                .await?;
+                println!("{resp}");
+            }
             Commands::Config { .. } | Commands::Status => unreachable!(),
         }
         return Ok(());
@@ -1257,6 +1297,9 @@ async fn main() -> anyhow::Result<()> {
             max_results,
         } => {
             cmd_related(&engine, &memory_id, label.as_deref(), max_results).await?;
+        }
+        Commands::Get { memory_id } => {
+            cmd_get(&engine, &memory_id).await?;
         }
         Commands::Config { .. } | Commands::Status => unreachable!(),
     }

@@ -26,6 +26,7 @@ pub async fn dispatch(
         "status" => tools::handle_status(config),
         "memory_graph" => tools::handle_memory_graph(engine, args).await,
         "memory_related" => tools::handle_memory_related(engine, args).await,
+        "memory_get" => tools::handle_memory_get(engine, args).await,
         #[cfg(feature = "vision")]
         "store_image" => tools::handle_store_image(engine, args).await,
         #[cfg(feature = "speech")]
@@ -69,6 +70,7 @@ mod tests {
             "status",
             "memory_graph",
             "memory_related",
+            "memory_get",
         ];
         #[cfg(feature = "vision")]
         tool_names.push("store_image");
@@ -76,7 +78,7 @@ mod tests {
         tool_names.push("store_audio");
 
         #[allow(unused_mut)]
-        let mut expected = 11;
+        let mut expected = 12;
         #[cfg(feature = "vision")]
         { expected += 1; }
         #[cfg(feature = "speech")]

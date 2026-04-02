@@ -232,6 +232,13 @@ async fn proxy_to_daemon(
                 .send()
                 .await
         }
+        "memory_get" => {
+            client
+                .post(format!("{base}/api/memory_get"))
+                .json(args)
+                .send()
+                .await
+        }
         _ => {
             return Some(protocol::ToolCallResult::error(format!(
                 "Unknown tool: {tool_name}"
