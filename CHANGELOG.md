@@ -6,12 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-02
+
+### Added
+- **Speech ONNX inference:** ECAPA-TDNN + Whisper-tiny encoder fully wired with auto-download from HuggingFace Hub (~58 MB)
+- **FBank preprocessing:** Pure Rust 80-bin filterbank computation for ECAPA-TDNN (`compute_fbank_flat()`)
+- **ROS2 bridge:** `shrimpk-ros2` crate with String/Image/Audio/Pose message types, replay mode, health check (13 tests)
+- **Speech latency benchmark:** `echo_speech_bench.rs` for embed_pcm and store_audio profiling
+
 ### Changed
 - **Speech dimension fix:** 896→640 (ECAPA-TDNN Wespeaker ResNet34 outputs 256-dim, not 512)
-- **ECAPA-TDNN model:** Switched to `wespeaker-cnceleb-resnet34-LM` with FBank preprocessing
+- **ECAPA-TDNN model:** `wespeaker-cnceleb-resnet34-LM` with FBank input (was assumed raw waveform)
 - **Speech constants:** `SPEAKER_DIM=256`, `PROSODY_DIM=384`, `SPEECH_DIM=640`
 - **Persistence fallback:** `unwrap_or(896)` → `unwrap_or(640)` in SHRM v2 speech section
-- **ROS2 bridge verified:** `shrimpk-ros2` crate (13 tests) — replay, health check, 4 message types
 
 ### Fixed
 - `speech_store_and_echo` test: speech memories use speech_lsh, not text_lsh — renamed to `speech_store_and_verify`

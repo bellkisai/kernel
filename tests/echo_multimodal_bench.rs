@@ -41,13 +41,13 @@ fn top_n_contains(results: &[EchoResult], n: usize, needle: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn version_is_0_6_0() {
+fn version_is_0_7_0() {
     // This test runs in the workspace root package context
     // Check that the workspace version was bumped
     let version = env!("CARGO_PKG_VERSION");
     assert!(
-        version.starts_with("0.6."),
-        "Expected v0.6.x, got {version}. Did you forget the version bump?"
+        version.starts_with("0.7."),
+        "Expected v0.7.x, got {version}. Did you forget the version bump?"
     );
 }
 
