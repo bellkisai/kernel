@@ -51,6 +51,8 @@ pub struct StoreAudioRequest {
     pub sample_rate: u32,
     #[serde(default = "default_source")]
     pub source: String,
+    /// Optional text description for cross-modal text→speech recall.
+    pub description: Option<String>,
 }
 
 #[cfg(feature = "speech")]
@@ -496,7 +498,7 @@ pub async fn store_audio(
 
     let id = state
         .engine
-        .store_audio(&pcm_f32, req.sample_rate, &req.source)
+        .store_audio(&pcm_f32, req.sample_rate, &req.source, req.description.as_deref())
         .await
         .map_err(|e| {
             (

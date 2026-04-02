@@ -174,7 +174,7 @@ mod bench {
         ];
 
         // Warmup with first clip
-        let _ = engine.store_audio(&clips[0].1, 16_000, "bench-warmup").await;
+        let _ = engine.store_audio(&clips[0].1, 16_000, "bench-warmup", None).await;
 
         let n = 20;
         let start = Instant::now();
@@ -183,7 +183,7 @@ mod bench {
 
         for i in 0..n {
             let (_, pcm) = &clips[i % clips.len()];
-            match engine.store_audio(pcm, 16_000, "bench").await {
+            match engine.store_audio(pcm, 16_000, "bench", None).await {
                 Ok(_) => ok += 1,
                 Err(e) => {
                     eprintln!("store_audio failed: {e}");

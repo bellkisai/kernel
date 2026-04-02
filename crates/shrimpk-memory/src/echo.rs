@@ -408,21 +408,23 @@ impl EchoEngine {
         Ok(id)
     }
 
-    /// Store audio as a speech memory.
+    /// Store audio as a speech memory with optional text description for cross-modal recall.
     ///
     /// Pipeline:
     /// 1. Embed PCM audio with the 2-model speech stack -> 640-dim vector
-    /// 2. Create MemoryEntry with modality: Speech, speech_embedding: Some(embedding)
-    ///    - content is set to "[audio]" (no text content)
-    ///    - text embedding is empty (not indexed in text channel)
-    /// 3. Insert into speech_lsh (NOT text_lsh, NOT bloom)
-    /// 4. Add to store
-    /// 5. Return memory ID
+    /// 2. If description provided: embed text → index in text_lsh + bloom for cross-modal recall
+    /// 3. Create MemoryEntry with modality: Speech, speech_embedding, optional text embedding
+    /// 4. Auto-label with `memtype:audio` + Tier 1 labels from description (if any)
+    /// 5. Insert into speech_lsh (and text_lsh if description present)
+    /// 6. Return memory ID
     ///
     /// # Arguments
     /// * `pcm_f32` - Raw mono f32 PCM audio samples
     /// * `sample_rate` - Sample rate of the input audio (resampled to 16kHz internally)
     /// * `source` - Where this audio came from (e.g., "microphone", "file")
+    /// * `description` - Optional text description for cross-modal text→speech recall.
+    ///   Examples: "meeting standup recording", "robot microphone feed", "voice note about project".
+    ///   When provided, text echo queries can find this speech memory.
     ///
     /// # Errors
     /// Returns `ShrimPKError::Embedding` if speech embedding fails or speech models are not loaded.
@@ -434,6 +436,7 @@ impl EchoEngine {
         pcm_f32: &[f32],
         sample_rate: u32,
         source: &str,
+        description: Option<&str>,
     ) -> Result<MemoryId> {
         // Guard: reject oversized audio to prevent OOM during ONNX inference
         const MAX_AUDIO_SAMPLES: usize = 16000 * 60; // 60 seconds at 16kHz
@@ -471,34 +474,75 @@ impl EchoEngine {
             )
         })?;
 
-        // 2. Build entry: speech modality, empty text embedding, speech_embedding populated
+        // 2. Build content and optional text embedding for cross-modal recall
+        let content = description.unwrap_or("[audio]").to_string();
+        let text_embedding = if let Some(desc) = description {
+            let mut embedder = self
+                .embedder
+                .lock()
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            embedder.embed_text(desc)?
+        } else {
+            Vec::new()
+        };
+
         let mut entry = MemoryEntry::new_with_modality(
-            "[audio]".to_string(),
-            Vec::new(), // no text embedding
+            content,
+            text_embedding.clone(),
             source.to_string(),
             Modality::Speech,
         );
         entry.speech_embedding = Some(speech_embedding.clone());
-        let id = entry.id.clone();
 
-        // 3. Add to store + speech LSH (skip text LSH and Bloom)
+        // 3. Auto-label: always memtype:audio, plus Tier 1 labels from description
+        let mut labels = vec!["memtype:audio".to_string()];
+        if description.is_some() && self.config.use_labels && self.prototypes.is_initialized() && !text_embedding.is_empty() {
+            let desc_labels = crate::labels::generate_tier1_labels(
+                description.unwrap(),
+                &text_embedding,
+                &self.prototypes,
+            );
+            labels.extend(desc_labels);
+        }
+        entry.labels = labels;
+        entry.label_version = 1;
+
+        let id = entry.id.clone();
+        let has_text = !text_embedding.is_empty();
+
+        // 4. Add to store + speech LSH + optionally text LSH and Bloom
         {
             let mut store = self.store.write().await;
             let index = store.add(entry);
 
-            // Insert into speech LSH (NOT text LSH — different dimensionality)
+            // Always insert into speech LSH
             if let Some(ref slsh) = self.speech_lsh
                 && let Ok(mut lsh) = slsh.lock()
             {
                 lsh.insert(index as u32, &speech_embedding);
             }
-            // Intentionally skip Bloom filter — Bloom works on text fingerprints
+
+            // If we have a text embedding, also index in text channel for cross-modal recall
+            if has_text {
+                if self.config.use_lsh
+                    && let Ok(mut lsh) = self.text_lsh.lock()
+                {
+                    lsh.insert(index as u32, &text_embedding);
+                }
+                if self.config.use_bloom {
+                    if let Some(desc) = description {
+                        let mut bloom = self.bloom.write().await;
+                        bloom.insert_memory(desc);
+                    }
+                }
+            }
         }
 
         tracing::info!(
             memory_id = %id,
             modality = "speech",
             dim = speech_embedding.len(),
+            cross_modal = has_text,
             "Audio memory stored"
         );
 

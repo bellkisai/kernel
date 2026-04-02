@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Speech ONNX inference:** ECAPA-TDNN + Whisper-tiny encoder fully wired with auto-download from HuggingFace Hub (~58 MB)
 - **FBank preprocessing:** Pure Rust 80-bin filterbank computation for ECAPA-TDNN (`compute_fbank_flat()`)
+- **Cross-modal speech recall:** `store_audio` now accepts optional `description` parameter — text description is embedded and indexed in text_lsh + bloom, enabling text queries to find speech memories
+- **Auto-labeling:** Speech memories automatically labeled `memtype:audio` + Tier 1 labels from description
 - **ROS2 bridge:** `shrimpk-ros2` crate with String/Image/Audio/Pose message types, replay mode, health check (13 tests)
 - **Speech latency benchmark:** `echo_speech_bench.rs` for embed_pcm and store_audio profiling
 

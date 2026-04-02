@@ -118,7 +118,8 @@ pub fn all_tools() -> Vec<ToolDefinition> {
             "properties": {
                 "audio_base64": { "type": "string", "description": "Base64-encoded raw PCM f32 audio data" },
                 "sample_rate": { "type": "integer", "description": "Audio sample rate in Hz (default: 16000)", "default": 16000 },
-                "source": { "type": "string", "description": "Source label (default: 'mcp')" }
+                "source": { "type": "string", "description": "Source label (default: 'mcp')" },
+                "description": { "type": "string", "description": "Text description for cross-modal recall (e.g., 'meeting standup recording')" }
             },
             "required": ["audio_base64"]
         }),
@@ -210,8 +211,10 @@ pub async fn handle_store_audio(engine: &Arc<EchoEngine>, args: &Value) -> Resul
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect();
 
+    let description = args["description"].as_str();
+
     let id = engine
-        .store_audio(&pcm_f32, sample_rate, source)
+        .store_audio(&pcm_f32, sample_rate, source, description)
         .await
         .map_err(|e| e.to_string())?;
     engine.persist().await.map_err(|e| e.to_string())?;

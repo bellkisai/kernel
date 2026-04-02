@@ -53,6 +53,9 @@ enum Commands {
         /// Source label
         #[arg(short, long, default_value = "cli")]
         source: String,
+        /// Text description for cross-modal recall (e.g., "meeting standup recording")
+        #[arg(short, long)]
+        description: Option<String>,
     },
     /// Find memories that resonate with a query
     Echo {
@@ -769,14 +772,18 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
                 println!("{resp}");
             }
-            Commands::StoreAudio { path, sample_rate, source } => {
+            Commands::StoreAudio { path, sample_rate, source, description } => {
                 let audio_bytes = std::fs::read(path)
                     .map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
                 let audio_b64 = base64_encode(&audio_bytes);
+                let mut body = serde_json::json!({"audio_base64": audio_b64, "sample_rate": sample_rate, "source": source});
+                if let Some(desc) = description {
+                    body["description"] = serde_json::json!(desc);
+                }
                 let resp = daemon_post(
                     base,
                     "/api/store_audio",
-                    &serde_json::json!({"audio_base64": audio_b64, "sample_rate": sample_rate, "source": source}),
+                    &body,
                 )
                 .await?;
                 println!("{resp}");

@@ -140,13 +140,21 @@ impl DaemonClient {
         };
         debug!(samples = pcm_f32.len(), sample_rate, "store_audio → daemon");
 
+        // Use label_hint as description for cross-modal text→speech recall
+        let description = label_hint.map(|l| format!("audio from ROS2 topic: {l}"));
+
+        let mut body = json!({
+            "audio_base64": b64,
+            "sample_rate": sample_rate,
+            "source": source
+        });
+        if let Some(ref desc) = description {
+            body["description"] = json!(desc);
+        }
+
         let resp = self
             .post("/api/store_audio")
-            .json(&json!({
-                "audio_base64": b64,
-                "sample_rate": sample_rate,
-                "source": source
-            }))
+            .json(&body)
             .send()
             .await
             .context("POST /api/store_audio failed")?;

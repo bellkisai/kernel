@@ -148,7 +148,7 @@ mod speech_feature_tests {
         assert_eq!(pcm.len(), 16_000);
 
         // Store as a speech memory (EchoEngine::store_audio)
-        let memory_id_result = engine.store_audio(&pcm, sample_rate, "integration-test").await;
+        let memory_id_result = engine.store_audio(&pcm, sample_rate, "integration-test", None).await;
 
         match memory_id_result {
             Ok(id) => {
@@ -237,5 +237,66 @@ mod speech_feature_tests {
             .expect("embed_pcm with 44.1kHz input should succeed after resampling");
 
         assert_eq!(emb.len(), shrimpk_memory::speech::SPEECH_DIM);
+    }
+
+    /// Cross-modal recall: store audio with description → find via text echo.
+    ///
+    /// This is the ROSCon demo path:
+    /// 1. Robot stores audio with description "standup meeting recording"
+    /// 2. User asks "meeting" → text echo finds the speech memory
+    #[tokio::test]
+    #[ignore = "requires model download (~58 MB) — run with --include-ignored"]
+    async fn cross_modal_text_finds_speech_memory() {
+        use shrimpk_core::{EchoConfig, Modality};
+        use shrimpk_memory::EchoEngine;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let config = EchoConfig {
+            data_dir: dir.path().to_path_buf(),
+            embedding_dim: 384,
+            speech_embedding_dim: shrimpk_memory::speech::SPEECH_DIM,
+            max_memories: 1000,
+            similarity_threshold: 0.01,
+            max_echo_results: 10,
+            enabled_modalities: vec![Modality::Text, Modality::Speech],
+            ..Default::default()
+        };
+
+        let engine = EchoEngine::new(config).expect("EchoEngine::new");
+
+        // Store some text memories as distractors
+        engine.store("I went grocery shopping yesterday", "test").await.expect("store text");
+        engine.store("The weather was sunny and warm", "test").await.expect("store text");
+
+        // Store audio WITH description — enables cross-modal recall
+        let pcm: Vec<f32> = (0..16_000usize)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin())
+            .collect();
+
+        let id = engine
+            .store_audio(&pcm, 16_000, "test", Some("daily standup meeting recording"))
+            .await
+            .expect("store_audio with description");
+
+        eprintln!("Stored cross-modal speech memory: {id}");
+
+        // Text echo should find the speech memory via its description
+        let results = engine.echo("standup meeting", 10).await.expect("echo");
+
+        let found = results.iter().any(|r| r.memory_id == id);
+        assert!(
+            found,
+            "Text echo for 'standup meeting' should find the speech memory stored with \
+             description 'daily standup meeting recording'. Got {} results: {:?}",
+            results.len(),
+            results.iter().map(|r| (&r.memory_id, &r.content)).collect::<Vec<_>>()
+        );
+
+        // Verify the memory has memtype:audio label
+        let stats = engine.stats().await;
+        assert_eq!(stats.speech_count, 1);
+
+        engine.shutdown().await;
     }
 }
