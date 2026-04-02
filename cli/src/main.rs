@@ -42,6 +42,9 @@ enum Commands {
         /// Source label
         #[arg(short, long, default_value = "cli")]
         source: String,
+        /// Text description for cross-modal recall (e.g., "kitchen photo")
+        #[arg(short, long)]
+        description: Option<String>,
     },
     /// Store audio as a speech memory (paralinguistic features)
     StoreAudio {
@@ -79,7 +82,14 @@ enum Commands {
         id: String,
     },
     /// List all stored memories
-    Dump,
+    Dump {
+        /// Output format: "text" (default) or "md" (Markdown files, Obsidian-compatible)
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Output directory for Markdown export (default: ./shrimpk-export/)
+        #[arg(long)]
+        output_dir: Option<String>,
+    },
     /// Run performance benchmark
     Bench {
         /// Number of memories to store
@@ -423,6 +433,80 @@ async fn cmd_dump(engine: &EchoEngine, config: &EchoConfig) -> anyhow::Result<()
     Ok(())
 }
 
+/// Export memories as Markdown files (Obsidian-compatible).
+async fn cmd_dump_md(engine: &EchoEngine, config: &EchoConfig, output_dir: Option<&str>) -> anyhow::Result<()> {
+    let stats = engine.stats().await;
+    if stats.total_memories == 0 {
+        println!("[shrimpk] No memories to export.");
+        return Ok(());
+    }
+
+    engine.persist().await?;
+    let store_path = config.data_dir.join("echo_store.json");
+
+    if !store_path.exists() {
+        println!("[shrimpk] No store file found at {}", store_path.display());
+        return Ok(());
+    }
+
+    let json = std::fs::read_to_string(&store_path)?;
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&json)?;
+    let dir = output_dir.unwrap_or("shrimpk-export");
+    export_memories_md(&entries, dir)
+}
+
+/// Write each memory entry as a Markdown file with YAML frontmatter.
+fn export_memories_md(entries: &[serde_json::Value], output_dir: &str) -> anyhow::Result<()> {
+    std::fs::create_dir_all(output_dir)?;
+
+    let mut count = 0;
+    for entry in entries {
+        let id = entry["id"]
+            .as_str()
+            .or_else(|| entry["id"].get("0").and_then(|v| v.as_str()))
+            .unwrap_or("unknown");
+        let content = entry["content"].as_str().unwrap_or("");
+        let source = entry["source"].as_str().unwrap_or("unknown");
+        let modality = entry["modality"].as_str().unwrap_or("Text");
+        let sensitivity = entry["sensitivity"].as_str().unwrap_or("Public");
+        let echo_count = entry["echo_count"].as_u64().unwrap_or(0);
+        let created_at = entry["created_at"].as_str().unwrap_or("");
+        let labels: Vec<&str> = entry["labels"]
+            .as_array()
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+
+        let id_short = if id.len() >= 8 { &id[..8] } else { id };
+        let filename = format!("{}/{}.md", output_dir, id_short);
+
+        let labels_yaml = if labels.is_empty() {
+            "[]".to_string()
+        } else {
+            format!("[{}]", labels.iter().map(|l| format!("\"{}\"", l)).collect::<Vec<_>>().join(", "))
+        };
+
+        let md = format!(
+            "---\n\
+             id: \"{id}\"\n\
+             modality: {modality}\n\
+             source: \"{source}\"\n\
+             sensitivity: {sensitivity}\n\
+             echo_count: {echo_count}\n\
+             created_at: \"{created_at}\"\n\
+             labels: {labels_yaml}\n\
+             ---\n\
+             \n\
+             {content}\n"
+        );
+
+        std::fs::write(&filename, md)?;
+        count += 1;
+    }
+
+    println!("[shrimpk] Exported {count} memories to {output_dir}/");
+    Ok(())
+}
+
 async fn cmd_bench(engine: &EchoEngine, count: usize) -> anyhow::Result<()> {
     println!("[shrimpk] Benchmark: storing {count} memories...");
 
@@ -760,14 +844,18 @@ async fn main() -> anyhow::Result<()> {
                     println!("{resp}");
                 }
             }
-            Commands::StoreImage { path, source } => {
+            Commands::StoreImage { path, source, description } => {
                 let image_bytes = std::fs::read(path)
                     .map_err(|e| anyhow::anyhow!("Failed to read image file: {e}"))?;
                 let image_b64 = base64_encode(&image_bytes);
+                let mut body = serde_json::json!({"image_base64": image_b64, "source": source});
+                if let Some(desc) = description {
+                    body["description"] = serde_json::json!(desc);
+                }
                 let resp = daemon_post(
                     base,
                     "/api/store_image",
-                    &serde_json::json!({"image_base64": image_b64, "source": source}),
+                    &body,
                 )
                 .await?;
                 println!("{resp}");
@@ -854,9 +942,15 @@ async fn main() -> anyhow::Result<()> {
                 let resp = daemon_delete(base, &format!("/api/memories/{id}")).await?;
                 println!("{resp}");
             }
-            Commands::Dump => {
-                let resp = daemon_get(base, "/api/memories?limit=50").await?;
-                println!("{resp}");
+            Commands::Dump { format, output_dir } => {
+                let resp = daemon_get(base, "/api/memories?limit=10000").await?;
+                if format == "md" {
+                    let entries: Vec<serde_json::Value> = serde_json::from_str(&resp).unwrap_or_default();
+                    let dir = output_dir.as_deref().unwrap_or("shrimpk-export");
+                    export_memories_md(&entries, dir)?;
+                } else {
+                    println!("{resp}");
+                }
             }
             Commands::Bench { .. } => {
                 anyhow::bail!("Bench requires in-process engine. Stop daemon and retry.");
@@ -982,7 +1076,13 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Stats => cmd_stats(&engine, &config).await?,
         Commands::Forget { id } => cmd_forget(&engine, &id).await?,
-        Commands::Dump => cmd_dump(&engine, &config).await?,
+        Commands::Dump { format, output_dir } => {
+            if format == "md" {
+                cmd_dump_md(&engine, &config, output_dir.as_deref()).await?;
+            } else {
+                cmd_dump(&engine, &config).await?;
+            }
+        }
         Commands::Bench { count } => {
             if count == 0 {
                 anyhow::bail!("Count must be at least 1");

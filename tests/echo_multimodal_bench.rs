@@ -154,7 +154,7 @@ fn clip_image_embed_latency() {
     for (i, img) in images.iter().enumerate() {
         let start = Instant::now();
         let _id = rt
-            .block_on(async { engine.store_image(img, "bench").await })
+            .block_on(async { engine.store_image(img, "bench", None).await })
             .expect("store_image");
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         latencies.push(ms);
@@ -207,7 +207,7 @@ fn cross_modal_echo_latency() {
         }
         for i in 0..100 {
             let img = create_test_png(64, 64, (i * 3) as u8, 100, 200);
-            engine.store_image(&img, "bench").await.expect("store_image");
+            engine.store_image(&img, "bench", None).await.expect("store_image");
         }
     });
 
@@ -296,7 +296,7 @@ fn text_to_image_recall() {
                     b.saturating_add(v * 3),
                 );
                 engine
-                    .store_image(&img, &format!("category_{name}"))
+                    .store_image(&img, &format!("category_{name}"), None)
                     .await
                     .expect("store_image");
             }
@@ -385,7 +385,7 @@ fn ram_measurement_10k_multimodal() {
         for i in 0..1_000 {
             let img = create_test_png(32, 32, (i % 256) as u8, 100, 150);
             engine
-                .store_image(&img, "bench")
+                .store_image(&img, "bench", None)
                 .await
                 .expect("store_image");
         }
@@ -393,7 +393,7 @@ fn ram_measurement_10k_multimodal() {
         for i in 0..1_000 {
             let img = create_test_png(32, 32, 200, (i % 256) as u8, 100);
             engine
-                .store_image(&img, "bench_multi")
+                .store_image(&img, "bench_multi", None)
                 .await
                 .expect("store_image");
             engine
@@ -450,7 +450,7 @@ fn mixed_modal_throughput() {
         }
         for i in 0..300 {
             let img = create_test_png(32, 32, (i * 3 % 256) as u8, 128, 64);
-            engine.store_image(&img, "bench").await.unwrap();
+            engine.store_image(&img, "bench", None).await.unwrap();
         }
     });
     let store_elapsed = store_start.elapsed();

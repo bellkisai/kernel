@@ -97,9 +97,17 @@ impl DaemonClient {
         };
         debug!(png_len = png_bytes.len(), "store_image → daemon");
 
+        // Use label_hint as description for cross-modal text→vision recall
+        let description = label_hint.map(|l| format!("image from ROS2 topic: {l}"));
+
+        let mut body = json!({ "image_base64": b64, "source": source });
+        if let Some(ref desc) = description {
+            body["description"] = json!(desc);
+        }
+
         let resp = self
             .post("/api/store_image")
-            .json(&json!({ "image_base64": b64, "source": source }))
+            .json(&body)
             .send()
             .await
             .context("POST /api/store_image failed")?;

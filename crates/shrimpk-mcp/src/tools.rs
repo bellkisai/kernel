@@ -103,7 +103,8 @@ pub fn all_tools() -> Vec<ToolDefinition> {
             "type": "object",
             "properties": {
                 "image_base64": { "type": "string", "description": "Base64-encoded image data (PNG, JPEG, etc.)" },
-                "source": { "type": "string", "description": "Source label (default: 'mcp')" }
+                "source": { "type": "string", "description": "Source label (default: 'mcp')" },
+                "description": { "type": "string", "description": "Text description for cross-modal recall (e.g., 'kitchen photo', 'whiteboard diagram')" }
             },
             "required": ["image_base64"]
         }),
@@ -177,8 +178,10 @@ pub async fn handle_store_image(engine: &Arc<EchoEngine>, args: &Value) -> Resul
         .decode(image_b64)
         .map_err(|e| format!("Invalid base64: {e}"))?;
 
+    let description = args["description"].as_str();
+
     let id = engine
-        .store_image(&image_bytes, source)
+        .store_image(&image_bytes, source, description)
         .await
         .map_err(|e| e.to_string())?;
     engine.persist().await.map_err(|e| e.to_string())?;

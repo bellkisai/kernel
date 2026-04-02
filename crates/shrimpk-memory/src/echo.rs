@@ -319,27 +319,34 @@ impl EchoEngine {
         Ok(id)
     }
 
-    /// Store an image as a vision memory.
+    /// Store an image as a vision memory with optional text description for cross-modal recall.
     ///
     /// Pipeline:
     /// 1. Embed image with CLIP vision encoder -> 512-dim vector
-    /// 2. Create MemoryEntry with modality: Vision, vision_embedding: Some(embedding)
-    ///    - content is set to "[image]" (no text content)
-    ///    - text embedding is empty (not indexed in text channel)
-    /// 3. Insert into vision_lsh (NOT text_lsh, NOT bloom)
-    /// 4. Add to store
-    /// 5. Return memory ID
+    /// 2. If description provided: embed text → index in text_lsh + bloom for cross-modal recall
+    /// 3. Create MemoryEntry with modality: Vision, vision_embedding, optional text embedding
+    /// 4. Auto-label with `memtype:image` + Tier 1 labels from description (if any)
+    /// 5. Insert into vision_lsh (and text_lsh if description present)
+    /// 6. Return memory ID
     ///
     /// # Arguments
     /// * `image_data` - Raw image bytes (PNG, JPEG, BMP, etc.)
     /// * `source` - Where this image came from (e.g., "screenshot", "upload")
+    /// * `description` - Optional text description for cross-modal text→vision recall.
+    ///   Examples: "kitchen photo", "robot camera feed from hallway", "whiteboard diagram".
+    ///   When provided, text echo queries can find this vision memory.
     ///
     /// # Errors
     /// Returns `ShrimPKError::Embedding` if CLIP embedding fails or vision is not available.
     /// Returns `ShrimPKError::Memory` if the store is at capacity.
     #[cfg(feature = "vision")]
     #[instrument(skip(self, image_data), fields(data_len = image_data.len(), source = source))]
-    pub async fn store_image(&self, image_data: &[u8], source: &str) -> Result<MemoryId> {
+    pub async fn store_image(
+        &self,
+        image_data: &[u8],
+        source: &str,
+        description: Option<&str>,
+    ) -> Result<MemoryId> {
         // Guard: reject oversized images to prevent OOM during ONNX inference
         const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10MB
         if image_data.len() > MAX_IMAGE_BYTES {
@@ -374,34 +381,75 @@ impl EchoEngine {
             ShrimPKError::Embedding("Vision model not available — cannot embed image".into())
         })?;
 
-        // 2. Build entry: vision modality, empty text embedding, vision_embedding populated
+        // 2. Build content and optional text embedding for cross-modal recall
+        let content = description.unwrap_or("[image]").to_string();
+        let text_embedding = if let Some(desc) = description {
+            let mut embedder = self
+                .embedder
+                .lock()
+                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            embedder.embed_text(desc)?
+        } else {
+            Vec::new()
+        };
+
         let mut entry = MemoryEntry::new_with_modality(
-            "[image]".to_string(),
-            Vec::new(), // no text embedding
+            content,
+            text_embedding.clone(),
             source.to_string(),
             Modality::Vision,
         );
         entry.vision_embedding = Some(vision_embedding.clone());
-        let id = entry.id.clone();
 
-        // 3. Add to store + vision LSH (skip text LSH and Bloom)
+        // 3. Auto-label: always memtype:image, plus Tier 1 labels from description
+        let mut labels = vec!["memtype:image".to_string()];
+        if description.is_some() && self.config.use_labels && self.prototypes.is_initialized() && !text_embedding.is_empty() {
+            let desc_labels = crate::labels::generate_tier1_labels(
+                description.unwrap(),
+                &text_embedding,
+                &self.prototypes,
+            );
+            labels.extend(desc_labels);
+        }
+        entry.labels = labels;
+        entry.label_version = 1;
+
+        let id = entry.id.clone();
+        let has_text = !text_embedding.is_empty();
+
+        // 4. Add to store + vision LSH + optionally text LSH and Bloom
         {
             let mut store = self.store.write().await;
             let index = store.add(entry);
 
-            // Insert into vision LSH (NOT text LSH — different dimensionality)
+            // Always insert into vision LSH
             if let Some(ref vlsh) = self.vision_lsh
                 && let Ok(mut lsh) = vlsh.lock()
             {
                 lsh.insert(index as u32, &vision_embedding);
             }
-            // Intentionally skip Bloom filter — Bloom works on text fingerprints
+
+            // If we have a text embedding, also index in text channel for cross-modal recall
+            if has_text {
+                if self.config.use_lsh
+                    && let Ok(mut lsh) = self.text_lsh.lock()
+                {
+                    lsh.insert(index as u32, &text_embedding);
+                }
+                if self.config.use_bloom {
+                    if let Some(desc) = description {
+                        let mut bloom = self.bloom.write().await;
+                        bloom.insert_memory(desc);
+                    }
+                }
+            }
         }
 
         tracing::info!(
             memory_id = %id,
             modality = "vision",
             dim = vision_embedding.len(),
+            cross_modal = has_text,
             "Image memory stored"
         );
 
@@ -2108,7 +2156,7 @@ mod tests {
         // Store an image
         let png_data = create_test_png(32, 32, [255, 0, 0]);
         let image_id = engine
-            .store_image(&png_data, "test")
+            .store_image(&png_data, "test", None)
             .await
             .expect("Should store image");
 
@@ -2144,7 +2192,7 @@ mod tests {
         // Store an image — should NOT insert into Bloom
         let png_data = create_test_png(16, 16, [0, 0, 255]);
         engine
-            .store_image(&png_data, "test")
+            .store_image(&png_data, "test", None)
             .await
             .expect("Should store image");
 
@@ -2193,7 +2241,7 @@ mod tests {
         // Store an image
         let png_data = create_test_png(32, 32, [255, 128, 0]); // orange
         engine
-            .store_image(&png_data, "test")
+            .store_image(&png_data, "test", None)
             .await
             .expect("Should store image");
 
@@ -2231,7 +2279,7 @@ mod tests {
 
         // Store an image (should not interfere with text search)
         let png_data = create_test_png(8, 8, [0, 255, 0]);
-        engine.store_image(&png_data, "test").await.unwrap();
+        engine.store_image(&png_data, "test", None).await.unwrap();
 
         // Text echo should find text memories as before
         let results = engine.echo("programming language", 5).await.unwrap();

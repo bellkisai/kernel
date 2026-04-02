@@ -41,6 +41,8 @@ pub struct StoreImageRequest {
     pub image_base64: String,
     #[serde(default = "default_source")]
     pub source: String,
+    /// Optional text description for cross-modal text→vision recall.
+    pub description: Option<String>,
 }
 
 #[cfg(feature = "speech")]
@@ -446,7 +448,7 @@ pub async fn store_image(
 
     let id = state
         .engine
-        .store_image(&image_bytes, &req.source)
+        .store_image(&image_bytes, &req.source, req.description.as_deref())
         .await
         .map_err(|e| {
             (
