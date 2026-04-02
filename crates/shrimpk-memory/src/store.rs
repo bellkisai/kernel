@@ -256,6 +256,63 @@ impl EchoStore {
         self.label_index.get(label).map_or(0, |v| v.len())
     }
 
+    /// Get the embedding vector at a specific index.
+    pub fn embedding_at(&self, index: usize) -> Option<&[f32]> {
+        self.embeddings.get(index).map(|v| v.as_slice())
+    }
+
+    /// Return all store indices that share at least one label with the given entry,
+    /// grouped by label. Excludes the source entry itself.
+    ///
+    /// Used by `memory_graph` to show connections per label dimension.
+    pub fn connected_by_labels(&self, index: usize) -> HashMap<String, Vec<u32>> {
+        let mut result: HashMap<String, Vec<u32>> = HashMap::new();
+        let labels = self.labels_for(index);
+        let self_idx = index as u32;
+        for label in labels {
+            if let Some(posting) = self.label_index.get(label) {
+                let filtered: Vec<u32> = posting
+                    .iter()
+                    .copied()
+                    .filter(|&idx| idx != self_idx)
+                    .collect();
+                if !filtered.is_empty() {
+                    result.insert(label.clone(), filtered);
+                }
+            }
+        }
+        result
+    }
+
+    /// Return all unique store indices connected to the given entry via labels,
+    /// optionally filtered to a specific label.
+    ///
+    /// Used by `memory_related` for the cosine-only fast path.
+    pub fn connected_indices(&self, index: usize, label_filter: Option<&str>) -> Vec<u32> {
+        let self_idx = index as u32;
+        let mut result: Vec<u32> = Vec::new();
+
+        match label_filter {
+            Some(lbl) => {
+                // Single label lookup
+                if let Some(posting) = self.label_index.get(lbl) {
+                    result.extend(posting.iter().copied().filter(|&idx| idx != self_idx));
+                }
+            }
+            None => {
+                // All labels on this entry
+                for label in self.labels_for(index) {
+                    if let Some(posting) = self.label_index.get(label) {
+                        result.extend(posting.iter().copied().filter(|&idx| idx != self_idx));
+                    }
+                }
+                result.sort_unstable();
+                result.dedup();
+            }
+        }
+        result
+    }
+
     /// One-time bootstrap: apply Tier 1 labels to all unlabeled entries (ADR-015 D7).
     ///
     /// Called after load() when entries with label_version == 0 are detected.
@@ -729,6 +786,83 @@ mod tests {
 
         assert_eq!(normalize(&before), normalize(&store.label_index),
             "After 50 adds + 25 removes, rebuild should match incremental index");
+    }
+
+    // --- Graph navigation tests (KS57) ---
+
+    #[test]
+    fn connected_by_labels_returns_grouped() {
+        let mut store = EchoStore::new();
+        // Entry 0: shares "topic:lang" with entry 1 and entry 2, "domain:work" with entry 2
+        store.add(make_labeled_entry("main", &["topic:lang", "domain:work"]));
+        // Entry 1: shares "topic:lang" with entry 0
+        store.add(make_labeled_entry("peer-a", &["topic:lang"]));
+        // Entry 2: shares both labels with entry 0
+        store.add(make_labeled_entry("peer-b", &["topic:lang", "domain:work"]));
+
+        let grouped = store.connected_by_labels(0);
+
+        // "topic:lang" should contain entries 1, 2 (not 0)
+        let lang = grouped.get("topic:lang").expect("should have topic:lang");
+        assert!(lang.contains(&1), "peer-a should be in topic:lang");
+        assert!(lang.contains(&2), "peer-b should be in topic:lang");
+        assert!(!lang.contains(&0), "source entry should be excluded");
+
+        // "domain:work" should contain entry 2 only (not 0)
+        let work = grouped.get("domain:work").expect("should have domain:work");
+        assert_eq!(work, &vec![2], "only peer-b shares domain:work");
+    }
+
+    #[test]
+    fn connected_indices_with_filter() {
+        let mut store = EchoStore::new();
+        store.add(make_labeled_entry("main", &["topic:lang", "domain:work"]));
+        store.add(make_labeled_entry("lang-only", &["topic:lang"]));
+        store.add(make_labeled_entry("work-only", &["domain:work"]));
+        store.add(make_labeled_entry("both", &["topic:lang", "domain:work"]));
+
+        // Filter to "topic:lang" only — should return entries 1, 3 (not 0, not 2)
+        let result = store.connected_indices(0, Some("topic:lang"));
+        assert!(result.contains(&1), "lang-only should match");
+        assert!(result.contains(&3), "both should match");
+        assert!(!result.contains(&0), "source excluded");
+        assert!(!result.contains(&2), "work-only should not match lang filter");
+    }
+
+    #[test]
+    fn connected_indices_all_labels() {
+        let mut store = EchoStore::new();
+        store.add(make_labeled_entry("main", &["topic:lang", "domain:work"]));
+        store.add(make_labeled_entry("lang-only", &["topic:lang"]));
+        store.add(make_labeled_entry("work-only", &["domain:work"]));
+        store.add(make_labeled_entry("neither", &["topic:other"]));
+
+        // No filter — union across all labels on entry 0
+        let result = store.connected_indices(0, None);
+        assert!(result.contains(&1), "lang-only should match via topic:lang");
+        assert!(result.contains(&2), "work-only should match via domain:work");
+        assert!(!result.contains(&3), "neither should not match");
+        assert!(!result.contains(&0), "source excluded");
+        // Should be deduped
+        let mut sorted = result.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(result.len(), sorted.len(), "result should be deduplicated");
+    }
+
+    #[test]
+    fn embedding_at_valid_index() {
+        let mut store = EchoStore::new();
+        store.add(MemoryEntry::new("a".into(), vec![1.0, 2.0, 3.0], "test".into()));
+        store.add(MemoryEntry::new("b".into(), vec![4.0, 5.0, 6.0], "test".into()));
+
+        let emb0 = store.embedding_at(0).expect("should have embedding at 0");
+        assert_eq!(emb0, &[1.0, 2.0, 3.0]);
+
+        let emb1 = store.embedding_at(1).expect("should have embedding at 1");
+        assert_eq!(emb1, &[4.0, 5.0, 6.0]);
+
+        assert!(store.embedding_at(99).is_none(), "out-of-bounds should return None");
     }
 
     #[test]

@@ -8,8 +8,8 @@
 
 use chrono::Utc;
 use shrimpk_core::{
-    EchoConfig, EchoResult, MemoryEntry, MemoryEntrySummary, MemoryId, MemoryStats, Modality,
-    QueryMode, Result, SensitivityLevel, ShrimPKError,
+    EchoConfig, EchoResult, LabelConnection, MemoryEntry, MemoryEntrySummary, MemoryGraphResult,
+    MemoryId, MemoryStats, Modality, QueryMode, Result, SensitivityLevel, ShrimPKError,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -778,8 +778,24 @@ impl EchoEngine {
         max_results: usize,
         mode: QueryMode,
     ) -> Result<Vec<EchoResult>> {
+        self.echo_with_labels(query, max_results, mode, None).await
+    }
+
+    /// Perform an echo query with explicit channel selection and optional label filter.
+    ///
+    /// When `label_filter` is `Some`, the label classification step is bypassed
+    /// and the provided labels are used directly for candidate retrieval.
+    /// This lets callers (MCP, daemon, CLI) narrow searches by exact labels.
+    #[instrument(skip(self, query, label_filter), fields(query_len = query.len(), max_results, mode = %mode))]
+    pub async fn echo_with_labels(
+        &self,
+        query: &str,
+        max_results: usize,
+        mode: QueryMode,
+        label_filter: Option<&[String]>,
+    ) -> Result<Vec<EchoResult>> {
         match mode {
-            QueryMode::Text => self.echo_text(query, max_results).await,
+            QueryMode::Text => self.echo_text(query, max_results, label_filter).await,
             #[cfg(feature = "vision")]
             QueryMode::Vision => self.echo_vision(query, max_results).await,
             #[cfg(not(feature = "vision"))]
@@ -790,7 +806,7 @@ impl EchoEngine {
             QueryMode::Auto => {
                 // Run text channel (mut needed when vision feature merges results)
                 #[allow(unused_mut)]
-                let mut results = self.echo_text(query, max_results).await?;
+                let mut results = self.echo_text(query, max_results, label_filter).await?;
 
                 // Run vision channel if available
                 #[cfg(feature = "vision")]
@@ -835,7 +851,15 @@ impl EchoEngine {
     /// 1. Embed the query text (MiniLM 384-dim)
     /// 2. Bloom pre-check
     /// 3. LSH/brute-force, rank, Hebbian, recency, rerank
-    async fn echo_text(&self, query: &str, max_results: usize) -> Result<Vec<EchoResult>> {
+    ///
+    /// If `label_filter` is provided, the label classification step is skipped
+    /// and the given labels are used directly for candidate retrieval.
+    async fn echo_text(
+        &self,
+        query: &str,
+        max_results: usize,
+        label_filter: Option<&[String]>,
+    ) -> Result<Vec<EchoResult>> {
         let start = std::time::Instant::now();
 
         // 0. HyDE query expansion: ask LLM for a hypothetical answer, embed that instead
@@ -888,7 +912,15 @@ impl EchoEngine {
         let embeddings = store.all_embeddings();
 
         // 5a. Label-based candidates (ADR-015 D6)
-        let label_candidates: Vec<u32> = if self.config.use_labels && self.prototypes.is_initialized() {
+        //     If caller provided an explicit label filter, use it directly.
+        //     Otherwise, classify the query via prototypes.
+        let label_candidates: Vec<u32> = if let Some(filter) = label_filter {
+            if !filter.is_empty() {
+                store.query_labels(filter)
+            } else {
+                Vec::new()
+            }
+        } else if self.config.use_labels && self.prototypes.is_initialized() {
             let query_labels = crate::labels::classify_query(
                 &effective_query,
                 &query_embedding,
@@ -1146,6 +1178,7 @@ impl EchoEngine {
                     source: entry.source.clone(),
                     echoed_at: now,
                     modality: entry.modality,
+                    labels: entry.labels.clone(),
                 })
             })
             .collect();
@@ -1339,6 +1372,7 @@ impl EchoEngine {
                     source: entry.source.clone(),
                     echoed_at: now,
                     modality: Modality::Vision,
+                    labels: entry.labels.clone(),
                 })
             })
             .collect();
@@ -1523,6 +1557,160 @@ impl EchoEngine {
                 category: e.category,
             })
             .collect()
+    }
+
+    /// Return the label connection graph for a single memory.
+    ///
+    /// For each label on the memory, returns the count and top connected memory IDs
+    /// ranked by cosine similarity to the source memory's embedding.
+    /// Skips the full echo pipeline (LSH, bloom, Hebbian) — pure label index + cosine.
+    #[instrument(skip(self), fields(memory_id = %id))]
+    pub async fn memory_graph(&self, id: &MemoryId, top_per_label: usize) -> Result<MemoryGraphResult> {
+        let store = self.store.read().await;
+        let index = store
+            .index_of(id)
+            .ok_or_else(|| ShrimPKError::Memory(format!("Memory not found: {id}")))?;
+        let entry = store
+            .entry_at(index)
+            .ok_or_else(|| ShrimPKError::Memory(format!("Entry missing at index {index}")))?;
+
+        let content_preview = entry.display_content()[..entry.display_content().len().min(200)].to_string();
+        let labels = entry.labels.clone();
+        let source_embedding = store
+            .embedding_at(index)
+            .ok_or_else(|| ShrimPKError::Memory(format!("No embedding at index {index}")))?;
+
+        // Build connections per label
+        let grouped = store.connected_by_labels(index);
+        let mut connections: Vec<LabelConnection> = Vec::with_capacity(grouped.len());
+
+        for (label, indices) in &grouped {
+            let count = indices.len();
+            // Rank by cosine similarity to source embedding, take top N
+            let mut scored: Vec<(u32, f32)> = indices
+                .iter()
+                .filter_map(|&idx| {
+                    store.embedding_at(idx as usize).map(|emb| {
+                        let sim = similarity::cosine_similarity(source_embedding, emb);
+                        (idx, sim)
+                    })
+                })
+                .collect();
+            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let top_ids: Vec<MemoryId> = scored
+                .iter()
+                .take(top_per_label)
+                .filter_map(|&(idx, _)| store.entry_at(idx as usize).map(|e| e.id.clone()))
+                .collect();
+
+            connections.push(LabelConnection {
+                label: label.clone(),
+                count,
+                top_ids,
+            });
+        }
+
+        // Sort connections by count descending
+        connections.sort_by(|a, b| b.count.cmp(&a.count));
+
+        // Count unique connected memories across all labels
+        let mut all_indices: Vec<u32> = grouped.values().flat_map(|v| v.iter().copied()).collect();
+        all_indices.sort_unstable();
+        all_indices.dedup();
+        let unique_connected = all_indices.len();
+        let total_connected: usize = grouped.values().map(|v| v.len()).sum();
+
+        Ok(MemoryGraphResult {
+            memory_id: id.clone(),
+            content_preview,
+            labels,
+            connections,
+            total_connected,
+            unique_connected,
+        })
+    }
+
+    /// Retrieve memories related to a source memory via shared labels.
+    ///
+    /// **Pipeline skip:** Uses label index directly → cosine-only scoring against
+    /// the source memory's embedding. Skips LSH, bloom, label classification,
+    /// and Hebbian boost. This is the fast path for graph navigation.
+    #[instrument(skip(self), fields(memory_id = %id))]
+    pub async fn memory_related(
+        &self,
+        id: &MemoryId,
+        label_filter: Option<&str>,
+        max_results: usize,
+    ) -> Result<Vec<EchoResult>> {
+        let start = std::time::Instant::now();
+        let store = self.store.read().await;
+        let index = store
+            .index_of(id)
+            .ok_or_else(|| ShrimPKError::Memory(format!("Memory not found: {id}")))?;
+        let source_embedding = store
+            .embedding_at(index)
+            .ok_or_else(|| ShrimPKError::Memory(format!("No embedding at index {index}")))?;
+
+        // Get candidate set from label index (skip LSH, bloom, classification)
+        let candidates = store.connected_indices(index, label_filter);
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Cosine-only scoring against source memory's embedding
+        let candidate_embs: Vec<(usize, &[f32])> = candidates
+            .iter()
+            .filter_map(|&idx| {
+                store
+                    .embedding_at(idx as usize)
+                    .filter(|e| !e.is_empty())
+                    .map(|e| (idx as usize, e))
+            })
+            .collect();
+
+        let scored = similarity::rank_candidates(
+            source_embedding,
+            &candidate_embs,
+            0.0, // no threshold — return all, let caller decide
+        );
+
+        // Build EchoResult vec (no Hebbian, no decay — raw cosine for graph nav)
+        let now = Utc::now();
+        let mut results: Vec<EchoResult> = scored
+            .iter()
+            .take(max_results)
+            .filter_map(|&(idx, score)| {
+                let entry = store.entry_at(idx)?;
+                Some(EchoResult {
+                    memory_id: entry.id.clone(),
+                    content: entry.display_content().to_string(),
+                    similarity: score,
+                    final_score: score as f64,
+                    source: entry.source.clone(),
+                    echoed_at: now,
+                    modality: entry.modality,
+                    labels: entry.labels.clone(),
+                })
+            })
+            .collect();
+
+        results.sort_by(|a, b| {
+            b.final_score
+                .partial_cmp(&a.final_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let elapsed = start.elapsed();
+        tracing::info!(
+            source_id = %id,
+            label_filter = label_filter.unwrap_or("all"),
+            candidates = candidates.len(),
+            results = results.len(),
+            elapsed_ms = elapsed.as_millis(),
+            "Memory related query complete (cosine-only fast path)"
+        );
+
+        Ok(results)
     }
 
     /// Persist the store to disk.

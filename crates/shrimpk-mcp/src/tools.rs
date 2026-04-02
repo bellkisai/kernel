@@ -28,13 +28,14 @@ pub fn all_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "echo".into(),
-            description: "Find memories that resonate with a query. Returns memories ranked by similarity and Hebbian association strength. Supports multimodal search via the modality parameter.".into(),
+            description: "Find memories that resonate with a query. Returns memories ranked by similarity and Hebbian association strength. Supports multimodal search via the modality parameter. Optionally filter by exact labels.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Text to find resonating memories for" },
                     "max_results": { "type": "integer", "description": "Maximum results (default: 10)", "default": 10 },
-                    "modality": { "type": "string", "enum": ["text", "vision", "auto"], "description": "Query mode: 'text' (default), 'vision' (CLIP cross-modal), or 'auto' (all channels)", "default": "text" }
+                    "modality": { "type": "string", "enum": ["text", "vision", "auto"], "description": "Query mode: 'text' (default), 'vision' (CLIP cross-modal), or 'auto' (all channels)", "default": "text" },
+                    "labels": { "type": "array", "items": { "type": "string" }, "description": "Optional label filter — bypass classification, search only memories matching these labels" }
                 },
                 "required": ["query"]
             }),
@@ -91,6 +92,31 @@ pub fn all_tools() -> Vec<ToolDefinition> {
             name: "status".into(),
             description: "Show system status: config tier, disk usage with progress bar, RAM budget, and quantization mode.".into(),
             input_schema: json!({ "type": "object", "properties": {} }),
+        },
+        ToolDefinition {
+            name: "memory_graph".into(),
+            description: "Show the label-graph connections for a memory. Returns which labels it has and the top related memories per label, ranked by cosine similarity.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "memory_id": { "type": "string", "description": "UUID of the source memory" },
+                    "top_per_label": { "type": "integer", "description": "Max related memories per label (default: 3)", "default": 3 }
+                },
+                "required": ["memory_id"]
+            }),
+        },
+        ToolDefinition {
+            name: "memory_related".into(),
+            description: "Find memories related to a source memory via shared labels. Uses cosine-only fast path (skips LSH, Bloom, Hebbian). Optionally filter to a single label.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "memory_id": { "type": "string", "description": "UUID of the source memory" },
+                    "label": { "type": "string", "description": "Optional: filter to a specific label (e.g. 'topic:language')" },
+                    "max_results": { "type": "integer", "description": "Maximum results (default: 10)", "default": 10 }
+                },
+                "required": ["memory_id"]
+            }),
         },
     ];
 
@@ -239,9 +265,14 @@ pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<Strin
         _ => QueryMode::Text,
     };
 
+    // Optional label filter — bypass classification, use exact labels
+    let label_filter: Option<Vec<String>> = args["labels"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+
     let start = Instant::now();
     let results = engine
-        .echo_with_mode(query, max_results, mode)
+        .echo_with_labels(query, max_results, mode, label_filter.as_deref())
         .await
         .map_err(|e| e.to_string())?;
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -256,13 +287,100 @@ pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<Strin
                 "content": r.content,
                 "similarity": (r.similarity * 100.0).round() / 100.0,
                 "final_score": (r.final_score * 100.0).round() / 100.0,
-                "source": r.source
+                "source": r.source,
+                "labels": r.labels
             })
         })
         .collect();
 
     let output = json!({
         "query": query,
+        "results": results_json,
+        "count": results.len(),
+        "elapsed_ms": (elapsed_ms * 10.0).round() / 10.0
+    });
+
+    Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
+}
+
+pub async fn handle_memory_graph(
+    engine: &Arc<EchoEngine>,
+    args: &Value,
+) -> Result<String, String> {
+    let id_str = args["memory_id"]
+        .as_str()
+        .ok_or("Missing required argument: memory_id")?;
+    let uuid = uuid::Uuid::parse_str(id_str).map_err(|e| format!("Invalid UUID: {e}"))?;
+    let id = MemoryId::from_uuid(uuid);
+    let top_per_label = args["top_per_label"].as_u64().unwrap_or(3) as usize;
+
+    let graph = engine
+        .memory_graph(&id, top_per_label)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let connections_json: Vec<Value> = graph
+        .connections
+        .iter()
+        .map(|c| {
+            json!({
+                "label": c.label,
+                "count": c.count,
+                "top_ids": c.top_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
+            })
+        })
+        .collect();
+
+    let output = json!({
+        "memory_id": graph.memory_id.to_string(),
+        "content_preview": graph.content_preview,
+        "labels": graph.labels,
+        "connections": connections_json,
+        "total_connected": graph.total_connected,
+        "unique_connected": graph.unique_connected
+    });
+
+    Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".into()))
+}
+
+pub async fn handle_memory_related(
+    engine: &Arc<EchoEngine>,
+    args: &Value,
+) -> Result<String, String> {
+    let id_str = args["memory_id"]
+        .as_str()
+        .ok_or("Missing required argument: memory_id")?;
+    let uuid = uuid::Uuid::parse_str(id_str).map_err(|e| format!("Invalid UUID: {e}"))?;
+    let id = MemoryId::from_uuid(uuid);
+    let label = args["label"].as_str();
+    let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+
+    let start = Instant::now();
+    let results = engine
+        .memory_related(&id, label, max_results)
+        .await
+        .map_err(|e| e.to_string())?;
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let results_json: Vec<Value> = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            json!({
+                "rank": i + 1,
+                "memory_id": r.memory_id.to_string(),
+                "content": r.content,
+                "similarity": (r.similarity * 100.0).round() / 100.0,
+                "final_score": (r.final_score * 100.0).round() / 100.0,
+                "source": r.source,
+                "labels": r.labels
+            })
+        })
+        .collect();
+
+    let output = json!({
+        "source_memory_id": id_str,
+        "label_filter": label,
         "results": results_json,
         "count": results.len(),
         "elapsed_ms": (elapsed_ms * 10.0).round() / 10.0
@@ -554,9 +672,10 @@ mod tests {
     #[test]
     fn all_tools_returns_expected_count() {
         let count = all_tools().len();
-        // Base: 9 tools. +1 if vision feature, +1 if speech feature.
+        // Base: 11 tools (9 original + memory_graph + memory_related).
+        // +1 if vision feature, +1 if speech feature.
         #[allow(unused_mut)]
-        let mut expected = 9;
+        let mut expected = 11;
         #[cfg(feature = "vision")]
         { expected += 1; }
         #[cfg(feature = "speech")]

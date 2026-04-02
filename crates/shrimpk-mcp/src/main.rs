@@ -218,6 +218,20 @@ async fn proxy_to_daemon(
         }
         "persist" => client.post(format!("{base}/api/persist")).send().await,
         "status" => client.get(format!("{base}/health")).send().await,
+        "memory_graph" => {
+            client
+                .post(format!("{base}/api/memory_graph"))
+                .json(args)
+                .send()
+                .await
+        }
+        "memory_related" => {
+            client
+                .post(format!("{base}/api/memory_related"))
+                .json(args)
+                .send()
+                .await
+        }
         _ => {
             return Some(protocol::ToolCallResult::error(format!(
                 "Unknown tool: {tool_name}"

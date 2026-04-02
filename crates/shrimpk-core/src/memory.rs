@@ -274,6 +274,37 @@ pub struct EchoResult {
     /// Which sensory channel matched this result.
     #[serde(default)]
     pub modality: Modality,
+    /// Labels on this memory (ADR-015). Exposed for graph navigation.
+    #[serde(default)]
+    pub labels: Vec<String>,
+}
+
+/// A label connection in the memory graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelConnection {
+    /// The label string (e.g. "topic:language").
+    pub label: String,
+    /// How many memories share this label.
+    pub count: usize,
+    /// Top memory IDs in this label group, ranked by cosine similarity to the source.
+    pub top_ids: Vec<MemoryId>,
+}
+
+/// Result of a memory graph query — connections from a single memory via labels.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryGraphResult {
+    /// The source memory ID.
+    pub memory_id: MemoryId,
+    /// Preview of the source memory content.
+    pub content_preview: String,
+    /// Labels on the source memory.
+    pub labels: Vec<String>,
+    /// Connections grouped by label.
+    pub connections: Vec<LabelConnection>,
+    /// Total number of connected memories (deduplicated across labels).
+    pub total_connected: usize,
+    /// Total unique connected memories.
+    pub unique_connected: usize,
 }
 
 /// Statistics about the Echo Memory system.

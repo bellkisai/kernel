@@ -71,6 +71,8 @@ struct PyEchoResult {
     final_score: f64,
     #[pyo3(get)]
     source: String,
+    #[pyo3(get)]
+    labels: Vec<String>,
 }
 
 /// Python wrapper for memory stats
@@ -174,6 +176,7 @@ impl EchoMemory {
                     similarity: r.similarity,
                     final_score: r.final_score,
                     source: r.source,
+                    labels: r.labels,
                 })
                 .collect())
         })

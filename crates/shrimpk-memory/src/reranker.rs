@@ -351,6 +351,7 @@ mod tests {
             source: "test".to_string(),
             echoed_at: Utc::now(),
             modality: shrimpk_core::Modality::Text,
+            labels: Vec::new(),
         }
     }
 

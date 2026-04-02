@@ -64,6 +64,7 @@ mod tests {
             source: "test".into(),
             echoed_at: Utc::now(),
             modality: Default::default(),
+            labels: Vec::new(),
         }
     }
 

@@ -33,6 +33,28 @@ pub struct EchoRequest {
     /// Query mode: "text" (default), "vision", or "auto".
     #[serde(default)]
     pub modality: Option<String>,
+    /// Optional label filter — bypass classification, search only memories matching these labels.
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub struct MemoryGraphRequest {
+    pub memory_id: String,
+    #[serde(default = "default_top_per_label")]
+    pub top_per_label: usize,
+}
+
+fn default_top_per_label() -> usize {
+    3
+}
+
+#[derive(Deserialize)]
+pub struct MemoryRelatedRequest {
+    pub memory_id: String,
+    pub label: Option<String>,
+    #[serde(default = "default_max_results")]
+    pub max_results: usize,
 }
 
 #[cfg(feature = "vision")]
@@ -145,7 +167,7 @@ pub async fn echo(
     let start = Instant::now();
     let results = state
         .engine
-        .echo_with_mode(&req.query, req.max_results, mode)
+        .echo_with_labels(&req.query, req.max_results, mode, req.labels.as_deref())
         .await
         .map_err(|e| {
             (
@@ -165,7 +187,8 @@ pub async fn echo(
                 "content": r.content,
                 "similarity": (r.similarity * 100.0).round() / 100.0,
                 "final_score": (r.final_score * 100.0).round() / 100.0,
-                "source": r.source
+                "source": r.source,
+                "labels": r.labels
             })
         })
         .collect();
@@ -427,6 +450,103 @@ pub async fn consolidate(State(state): State<AppState>) -> Json<Value> {
         "facts_extracted": result.facts_extracted,
         "duration_ms": result.duration_ms
     }))
+}
+
+/// POST /api/memory_graph — show label-graph connections for a memory.
+pub async fn memory_graph(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryGraphRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let uuid = uuid::Uuid::parse_str(&req.memory_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Invalid UUID: {e}")})),
+        )
+    })?;
+    let id = MemoryId::from_uuid(uuid);
+
+    let graph = state
+        .engine
+        .memory_graph(&id, req.top_per_label)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    let connections_json: Vec<Value> = graph
+        .connections
+        .iter()
+        .map(|c| {
+            json!({
+                "label": c.label,
+                "count": c.count,
+                "top_ids": c.top_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "memory_id": graph.memory_id.to_string(),
+        "content_preview": graph.content_preview,
+        "labels": graph.labels,
+        "connections": connections_json,
+        "total_connected": graph.total_connected,
+        "unique_connected": graph.unique_connected
+    })))
+}
+
+/// POST /api/memory_related — find memories related via shared labels.
+pub async fn memory_related(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryRelatedRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let uuid = uuid::Uuid::parse_str(&req.memory_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Invalid UUID: {e}")})),
+        )
+    })?;
+    let id = MemoryId::from_uuid(uuid);
+
+    let start = Instant::now();
+    let results = state
+        .engine
+        .memory_related(&id, req.label.as_deref(), req.max_results)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let results_json: Vec<Value> = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            json!({
+                "rank": i + 1,
+                "memory_id": r.memory_id.to_string(),
+                "content": r.content,
+                "similarity": (r.similarity * 100.0).round() / 100.0,
+                "final_score": (r.final_score * 100.0).round() / 100.0,
+                "source": r.source,
+                "labels": r.labels
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "source_memory_id": req.memory_id,
+        "label_filter": req.label,
+        "results": results_json,
+        "count": results.len(),
+        "elapsed_ms": (elapsed_ms * 10.0).round() / 10.0
+    })))
 }
 
 /// POST /api/store_image — store an image as a vision memory.

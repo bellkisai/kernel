@@ -73,6 +73,28 @@ enum Commands {
         /// Query mode: text, vision, or auto
         #[arg(long, default_value = "text")]
         modality: String,
+        /// Filter by exact labels (bypass classification)
+        #[arg(long = "labels", num_args = 1..)]
+        labels: Vec<String>,
+    },
+    /// Show label-graph connections for a memory
+    Graph {
+        /// Memory UUID
+        memory_id: String,
+        /// Max related memories per label
+        #[arg(long, default_value_t = 3)]
+        top_per_label: usize,
+    },
+    /// Find memories related to a source memory via shared labels
+    Related {
+        /// Memory UUID
+        memory_id: String,
+        /// Filter to a specific label
+        #[arg(long)]
+        label: Option<String>,
+        /// Maximum results to return
+        #[arg(long, default_value_t = 10)]
+        max_results: usize,
     },
     /// Show engine statistics
     Stats,
@@ -325,6 +347,95 @@ async fn cmd_echo_json(engine: &EchoEngine, query: &str, max_results: usize) -> 
         .collect();
 
     println!("{}", serde_json::to_string(&json_results)?);
+    Ok(())
+}
+
+async fn cmd_graph(engine: &EchoEngine, id_str: &str, top_per_label: usize) -> anyhow::Result<()> {
+    let uuid = uuid::Uuid::parse_str(id_str)
+        .map_err(|e| anyhow::anyhow!("Invalid UUID \"{id_str}\": {e}"))?;
+    let id = shrimpk_core::MemoryId::from_uuid(uuid);
+
+    let graph = engine.memory_graph(&id, top_per_label).await?;
+
+    println!(
+        "[shrimpk] Memory graph for {}...",
+        &id_str[..id_str.len().min(8)]
+    );
+    println!("  Content: \"{}\"", truncate(&graph.content_preview, 60));
+    println!(
+        "  Labels:  [{}]",
+        graph.labels.join(", ")
+    );
+    println!(
+        "  Connected: {} unique ({} total across labels)",
+        graph.unique_connected, graph.total_connected
+    );
+
+    if graph.connections.is_empty() {
+        println!("  No connections found.");
+    } else {
+        println!();
+        for conn in &graph.connections {
+            let ids: Vec<String> = conn
+                .top_ids
+                .iter()
+                .map(|id| format!("{}...", &id.to_string()[..8]))
+                .collect();
+            println!(
+                "  {} ({} memories) -> [{}]",
+                conn.label,
+                conn.count,
+                ids.join(", ")
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_related(
+    engine: &EchoEngine,
+    id_str: &str,
+    label: Option<&str>,
+    max_results: usize,
+) -> anyhow::Result<()> {
+    let uuid = uuid::Uuid::parse_str(id_str)
+        .map_err(|e| anyhow::anyhow!("Invalid UUID \"{id_str}\": {e}"))?;
+    let id = shrimpk_core::MemoryId::from_uuid(uuid);
+
+    let start = Instant::now();
+    let results = engine.memory_related(&id, label, max_results).await?;
+    let elapsed = start.elapsed();
+
+    if results.is_empty() {
+        println!(
+            "[shrimpk] Related to {}... ({:.1}ms): no matches",
+            &id_str[..id_str.len().min(8)],
+            elapsed.as_secs_f64() * 1000.0
+        );
+        return Ok(());
+    }
+
+    println!(
+        "[shrimpk] Related to {}...{} ({:.1}ms):",
+        &id_str[..id_str.len().min(8)],
+        label
+            .map(|l| format!(" [label: {l}]"))
+            .unwrap_or_default(),
+        elapsed.as_secs_f64() * 1000.0
+    );
+
+    for (i, result) in results.iter().enumerate() {
+        println!(
+            "  #{} [{:.2}] \"{}\" (source: {}, id: {}...)",
+            i + 1,
+            result.similarity,
+            truncate(&result.content, 60),
+            result.source,
+            &result.memory_id.to_string()[..8]
+        );
+    }
+
     Ok(())
 }
 
@@ -881,11 +992,16 @@ async fn main() -> anyhow::Result<()> {
                 max_results,
                 json,
                 modality,
+                labels,
             } => {
+                let mut body = serde_json::json!({"query": query, "max_results": max_results, "modality": modality});
+                if !labels.is_empty() {
+                    body["labels"] = serde_json::json!(labels);
+                }
                 let resp = daemon_post(
                     base,
                     "/api/echo",
-                    &serde_json::json!({"query": query, "max_results": max_results, "modality": modality}),
+                    &body,
                 )
                 .await?;
                 if *json {
@@ -983,6 +1099,35 @@ async fn main() -> anyhow::Result<()> {
                     println!("{resp}");
                 }
             }
+            Commands::Graph {
+                memory_id,
+                top_per_label,
+            } => {
+                let resp = daemon_post(
+                    base,
+                    "/api/memory_graph",
+                    &serde_json::json!({"memory_id": memory_id, "top_per_label": top_per_label}),
+                )
+                .await?;
+                println!("{resp}");
+            }
+            Commands::Related {
+                memory_id,
+                label,
+                max_results,
+            } => {
+                let mut body = serde_json::json!({"memory_id": memory_id, "max_results": max_results});
+                if let Some(lbl) = label {
+                    body["label"] = serde_json::json!(lbl);
+                }
+                let resp = daemon_post(
+                    base,
+                    "/api/memory_related",
+                    &body,
+                )
+                .await?;
+                println!("{resp}");
+            }
             Commands::Config { .. } | Commands::Status => unreachable!(),
         }
         return Ok(());
@@ -1033,18 +1178,26 @@ async fn main() -> anyhow::Result<()> {
             max_results,
             json,
             modality,
+            labels,
         } => {
             let mode = match modality.as_str() {
                 "vision" => shrimpk_core::QueryMode::Vision,
                 "auto" => shrimpk_core::QueryMode::Auto,
                 _ => shrimpk_core::QueryMode::Text,
             };
+            let label_filter: Option<Vec<String>> = if labels.is_empty() {
+                None
+            } else {
+                Some(labels)
+            };
             if json {
                 cmd_echo_json(&engine, &query, max_results).await?
-            } else if mode != shrimpk_core::QueryMode::Text {
-                // In-process supports echo_with_mode
+            } else if mode != shrimpk_core::QueryMode::Text || label_filter.is_some() {
+                // In-process supports echo_with_labels
                 let start = Instant::now();
-                let results = engine.echo_with_mode(&query, max_results, mode).await?;
+                let results = engine
+                    .echo_with_labels(&query, max_results, mode, label_filter.as_deref())
+                    .await?;
                 let elapsed = start.elapsed();
                 if results.is_empty() {
                     println!(
@@ -1091,6 +1244,19 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Detect => {
             anyhow::bail!("Detect requires running daemon. Start daemon first: shrimpk-daemon");
+        }
+        Commands::Graph {
+            memory_id,
+            top_per_label,
+        } => {
+            cmd_graph(&engine, &memory_id, top_per_label).await?;
+        }
+        Commands::Related {
+            memory_id,
+            label,
+            max_results,
+        } => {
+            cmd_related(&engine, &memory_id, label.as_deref(), max_results).await?;
         }
         Commands::Config { .. } | Commands::Status => unreachable!(),
     }
