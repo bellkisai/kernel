@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicollite/tauri-config-schema/main/schema.json",
+  "productName": "ShrimPK Viz",
+  "identifier": "ai.bellkis.shrimpk-viz",
+  "version": "0.1.0",
+  "build": {
+    "frontendDist": "./web/dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ShrimPK — Knowledge Graph",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:11435; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
+  }
+}

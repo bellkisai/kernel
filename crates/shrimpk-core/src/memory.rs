@@ -459,6 +459,86 @@ pub struct MemoryEntrySummary {
     pub importance: f32,
 }
 
+// ---------------------------------------------------------------------------
+// Graph visualization types (KS65)
+// ---------------------------------------------------------------------------
+
+/// A node in the graph visualization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNode {
+    pub id: MemoryId,
+    pub content_preview: String,
+    pub labels: Vec<String>,
+    pub importance: f32,
+    pub category: String,
+    pub novelty: f32,
+}
+
+/// Minimal node preview for cluster listings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNodePreview {
+    pub id: MemoryId,
+    pub content_preview: String,
+}
+
+/// A Hebbian neighbor with edge metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNeighbor {
+    pub id: MemoryId,
+    pub content_preview: String,
+    pub labels: Vec<String>,
+    pub weight: f64,
+    pub relationship: Option<String>,
+    pub cosine_similarity: f32,
+}
+
+/// Result of graph/neighbors query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNeighborsResult {
+    pub node: GraphNode,
+    pub neighbors: Vec<GraphNeighbor>,
+}
+
+/// An edge in the subgraph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphEdge {
+    pub source: MemoryId,
+    pub target: MemoryId,
+    pub weight: f64,
+    pub relationship: Option<String>,
+}
+
+/// Result of graph/subgraph query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSubgraphResult {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+}
+
+/// A label cluster for the Galaxy view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphCluster {
+    pub label: String,
+    pub member_count: usize,
+    pub summary: Option<String>,
+    pub top_members: Vec<GraphNodePreview>,
+}
+
+/// An edge between two label clusters (shared members).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphInterEdge {
+    pub source_label: String,
+    pub target_label: String,
+    pub shared_count: usize,
+}
+
+/// Result of graph/overview query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphOverviewResult {
+    pub clusters: Vec<GraphCluster>,
+    pub inter_edges: Vec<GraphInterEdge>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

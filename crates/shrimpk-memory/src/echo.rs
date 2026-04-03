@@ -8,8 +8,10 @@
 
 use chrono::Utc;
 use shrimpk_core::{
-    EchoConfig, EchoResult, LabelConnection, MemoryEntry, MemoryEntrySummary, MemoryGraphResult,
-    MemoryId, MemoryStats, Modality, QueryMode, Result, SensitivityLevel, ShrimPKError,
+    EchoConfig, EchoResult, GraphCluster, GraphEdge, GraphInterEdge, GraphNeighbor,
+    GraphNeighborsResult, GraphNode, GraphNodePreview, GraphOverviewResult, GraphSubgraphResult,
+    LabelConnection, MemoryEntry, MemoryEntrySummary, MemoryGraphResult, MemoryId, MemoryStats,
+    Modality, QueryMode, Result, SensitivityLevel, ShrimPKError,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -2079,6 +2081,223 @@ impl EchoEngine {
         store.all_summaries().clone()
     }
 
+    // -----------------------------------------------------------------------
+    // Graph visualization endpoints (KS65)
+    // -----------------------------------------------------------------------
+
+    /// Return Hebbian neighbors for a single memory node.
+    ///
+    /// Exposes the co-activation graph edges (typed relationships + weights)
+    /// along with cosine similarity for each neighbor.
+    #[instrument(skip(self), fields(memory_id = %id))]
+    pub async fn graph_neighbors(
+        &self,
+        id: &MemoryId,
+        min_weight: f64,
+        max_results: usize,
+    ) -> Result<GraphNeighborsResult> {
+        let store = self.store.read().await;
+        let index = store
+            .index_of(id)
+            .ok_or_else(|| ShrimPKError::Memory(format!("Memory not found: {id}")))?;
+        let entry = store
+            .entry_at(index)
+            .ok_or_else(|| ShrimPKError::Memory(format!("Entry missing at index {index}")))?;
+        let source_emb = store
+            .embedding_at(index)
+            .ok_or_else(|| ShrimPKError::Memory(format!("No embedding at index {index}")))?;
+
+        let node = GraphNode {
+            id: entry.id.clone(),
+            content_preview: truncate_content(entry.display_content(), 200),
+            labels: entry.labels.clone(),
+            importance: entry.importance,
+            category: format!("{:?}", entry.category),
+            novelty: entry.novelty_score,
+        };
+
+        let hebbian = self.hebbian.read().await;
+        let assocs = hebbian.get_associations_typed(index as u32, min_weight);
+
+        let mut neighbors: Vec<GraphNeighbor> = assocs
+            .iter()
+            .filter_map(|&(neighbor_idx, weight, rel_type)| {
+                let neighbor_entry = store.entry_at(neighbor_idx as usize)?;
+                let neighbor_emb = store.embedding_at(neighbor_idx as usize)?;
+                let cosine = similarity::cosine_similarity(source_emb, neighbor_emb);
+                Some(GraphNeighbor {
+                    id: neighbor_entry.id.clone(),
+                    content_preview: truncate_content(neighbor_entry.display_content(), 200),
+                    labels: neighbor_entry.labels.clone(),
+                    weight,
+                    relationship: rel_type.map(|r| format!("{r:?}")),
+                    cosine_similarity: cosine,
+                })
+            })
+            .collect();
+
+        neighbors.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+        neighbors.truncate(max_results);
+
+        Ok(GraphNeighborsResult { node, neighbors })
+    }
+
+    /// Return a subgraph: given memory IDs, return all nodes + edges between them.
+    ///
+    /// When `include_neighbors` is true, also adds Hebbian neighbors of each
+    /// requested node into the graph (1-hop expansion).
+    #[instrument(skip(self), fields(node_count = ids.len()))]
+    pub async fn graph_subgraph(
+        &self,
+        ids: &[MemoryId],
+        include_neighbors: bool,
+        min_weight: f64,
+    ) -> Result<GraphSubgraphResult> {
+        let store = self.store.read().await;
+        let hebbian = self.hebbian.read().await;
+
+        // Resolve IDs to indices
+        let mut index_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for id in ids {
+            if let Some(idx) = store.index_of(id) {
+                index_set.insert(idx);
+            }
+        }
+
+        // Optionally expand 1-hop neighbors
+        if include_neighbors {
+            let anchors: Vec<usize> = index_set.iter().copied().collect();
+            for idx in anchors {
+                for (neighbor, _weight) in hebbian.get_associations(idx as u32, min_weight) {
+                    index_set.insert(neighbor as usize);
+                }
+            }
+        }
+
+        // Build node list
+        let mut nodes: Vec<GraphNode> = Vec::with_capacity(index_set.len());
+        for &idx in &index_set {
+            if let Some(entry) = store.entry_at(idx) {
+                nodes.push(GraphNode {
+                    id: entry.id.clone(),
+                    content_preview: truncate_content(entry.display_content(), 200),
+                    labels: entry.labels.clone(),
+                    importance: entry.importance,
+                    category: format!("{:?}", entry.category),
+                    novelty: entry.novelty_score,
+                });
+            }
+        }
+
+        // Build edge list (only edges between nodes in the set, with decayed weights)
+        let mut edges: Vec<GraphEdge> = Vec::new();
+        let indices: Vec<usize> = index_set.iter().copied().collect();
+        for (i, &idx_a) in indices.iter().enumerate() {
+            for &idx_b in &indices[i + 1..] {
+                let decayed_weight = hebbian.get_weight(idx_a as u32, idx_b as u32);
+                if decayed_weight > min_weight {
+                    let edge = hebbian.get_edge(idx_a as u32, idx_b as u32);
+                    let entry_a = store.entry_at(idx_a);
+                    let entry_b = store.entry_at(idx_b);
+                    if let (Some(a), Some(b)) = (entry_a, entry_b) {
+                        edges.push(GraphEdge {
+                            source: a.id.clone(),
+                            target: b.id.clone(),
+                            weight: decayed_weight,
+                            relationship: edge.and_then(|e| e.relationship.as_ref().map(|r| format!("{r:?}"))),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(GraphSubgraphResult { nodes, edges })
+    }
+
+    /// Return a high-level cluster overview for the Galaxy view.
+    ///
+    /// Groups memories by label, returns clusters with member counts + summaries,
+    /// plus inter-cluster edges (labels that share members).
+    #[instrument(skip(self))]
+    pub async fn graph_overview(
+        &self,
+        min_members: usize,
+        max_clusters: usize,
+    ) -> Result<GraphOverviewResult> {
+        let store = self.store.read().await;
+
+        // Get labels that meet the minimum member threshold
+        let mut label_clusters = store.labels_with_min_members(min_members);
+        label_clusters.sort_by(|a, b| b.1.cmp(&a.1));
+        label_clusters.truncate(max_clusters);
+
+        // Build cluster info with optional community summary
+        let mut clusters: Vec<GraphCluster> = Vec::with_capacity(label_clusters.len());
+        for (label, member_count) in &label_clusters {
+            let summary = store
+                .get_summary(label)
+                .map(|s| s.summary.clone());
+
+            // Get top members by importance
+            let member_indices = store.query_labels(&[label.clone()]);
+            let mut members_with_importance: Vec<(usize, f32)> = member_indices
+                .iter()
+                .filter_map(|&idx| {
+                    store.entry_at(idx as usize).map(|e| (idx as usize, e.importance))
+                })
+                .collect();
+            members_with_importance.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+            let top_members: Vec<GraphNodePreview> = members_with_importance
+                .iter()
+                .take(5)
+                .filter_map(|&(idx, _)| {
+                    store.entry_at(idx).map(|e| GraphNodePreview {
+                        id: e.id.clone(),
+                        content_preview: truncate_content(e.display_content(), 120),
+                    })
+                })
+                .collect();
+
+            clusters.push(GraphCluster {
+                label: label.clone(),
+                member_count: *member_count,
+                summary,
+                top_members,
+            });
+        }
+
+        // Compute inter-cluster edges (shared members between labels)
+        let mut inter_edges: Vec<GraphInterEdge> = Vec::new();
+        for (i, (label_a, _)) in label_clusters.iter().enumerate() {
+            let members_a: std::collections::HashSet<u32> = store
+                .query_labels(&[label_a.clone()])
+                .into_iter()
+                .collect();
+            for (label_b, _) in &label_clusters[i + 1..] {
+                let members_b: std::collections::HashSet<u32> = store
+                    .query_labels(&[label_b.clone()])
+                    .into_iter()
+                    .collect();
+                let shared = members_a.intersection(&members_b).count();
+                if shared > 0 {
+                    inter_edges.push(GraphInterEdge {
+                        source_label: label_a.clone(),
+                        target_label: label_b.clone(),
+                        shared_count: shared,
+                    });
+                }
+            }
+        }
+
+        inter_edges.sort_by(|a, b| b.shared_count.cmp(&a.shared_count));
+
+        Ok(GraphOverviewResult {
+            clusters,
+            inter_edges,
+        })
+    }
+
     /// Point-in-time echo query (KS63).
     ///
     /// Same as `echo()` but only considers Hebbian edges that were valid at
@@ -3049,5 +3268,162 @@ mod tests {
         assert_eq!(parsed.label, "career");
         assert_eq!(parsed.member_count, 7);
         assert_eq!(parsed.embedding.len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Graph visualization tests (KS65)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn graph_node_serde_roundtrip() {
+        let node = shrimpk_core::GraphNode {
+            id: shrimpk_core::MemoryId::new(),
+            content_preview: "test memory".into(),
+            labels: vec!["topic:test".into()],
+            importance: 0.75,
+            category: "Fact".into(),
+            novelty: 0.5,
+        };
+        let json = serde_json::to_string(&node).unwrap();
+        let parsed: shrimpk_core::GraphNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.content_preview, "test memory");
+        assert_eq!(parsed.importance, 0.75);
+    }
+
+    #[test]
+    fn graph_neighbor_serde_roundtrip() {
+        let neighbor = shrimpk_core::GraphNeighbor {
+            id: shrimpk_core::MemoryId::new(),
+            content_preview: "neighbor".into(),
+            labels: vec![],
+            weight: 0.85,
+            relationship: Some("WorksAt(\"ACME\")".into()),
+            cosine_similarity: 0.72,
+        };
+        let json = serde_json::to_string(&neighbor).unwrap();
+        let parsed: shrimpk_core::GraphNeighbor = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.weight, 0.85);
+        assert!(parsed.relationship.is_some());
+    }
+
+    #[test]
+    fn graph_edge_serde_roundtrip() {
+        let edge = shrimpk_core::GraphEdge {
+            source: shrimpk_core::MemoryId::new(),
+            target: shrimpk_core::MemoryId::new(),
+            weight: 0.42,
+            relationship: None,
+        };
+        let json = serde_json::to_string(&edge).unwrap();
+        let parsed: shrimpk_core::GraphEdge = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.weight, 0.42);
+        assert!(parsed.relationship.is_none());
+    }
+
+    #[test]
+    fn graph_cluster_serde_roundtrip() {
+        let cluster = shrimpk_core::GraphCluster {
+            label: "topic:rust".into(),
+            member_count: 15,
+            summary: Some("Rust programming memories".into()),
+            top_members: vec![shrimpk_core::GraphNodePreview {
+                id: shrimpk_core::MemoryId::new(),
+                content_preview: "first member".into(),
+            }],
+        };
+        let json = serde_json::to_string(&cluster).unwrap();
+        let parsed: shrimpk_core::GraphCluster = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.label, "topic:rust");
+        assert_eq!(parsed.member_count, 15);
+        assert!(parsed.summary.is_some());
+        assert_eq!(parsed.top_members.len(), 1);
+    }
+
+    #[test]
+    fn graph_overview_result_serde_roundtrip() {
+        let overview = shrimpk_core::GraphOverviewResult {
+            clusters: vec![],
+            inter_edges: vec![shrimpk_core::GraphInterEdge {
+                source_label: "topic:a".into(),
+                target_label: "topic:b".into(),
+                shared_count: 5,
+            }],
+        };
+        let json = serde_json::to_string(&overview).unwrap();
+        let parsed: shrimpk_core::GraphOverviewResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.inter_edges.len(), 1);
+        assert_eq!(parsed.inter_edges[0].shared_count, 5);
+    }
+
+    #[test]
+    fn graph_subgraph_result_serde_roundtrip() {
+        let subgraph = shrimpk_core::GraphSubgraphResult {
+            nodes: vec![shrimpk_core::GraphNode {
+                id: shrimpk_core::MemoryId::new(),
+                content_preview: "node A".into(),
+                labels: vec!["topic:test".into()],
+                importance: 0.5,
+                category: "Default".into(),
+                novelty: 0.3,
+            }],
+            edges: vec![],
+        };
+        let json = serde_json::to_string(&subgraph).unwrap();
+        let parsed: shrimpk_core::GraphSubgraphResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.nodes.len(), 1);
+        assert_eq!(parsed.edges.len(), 0);
+    }
+
+    #[test]
+    fn graph_neighbors_result_serde_roundtrip() {
+        let result = shrimpk_core::GraphNeighborsResult {
+            node: shrimpk_core::GraphNode {
+                id: shrimpk_core::MemoryId::new(),
+                content_preview: "center node".into(),
+                labels: vec!["entity:john".into()],
+                importance: 0.9,
+                category: "Identity".into(),
+                novelty: 0.1,
+            },
+            neighbors: vec![],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: shrimpk_core::GraphNeighborsResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.node.content_preview, "center node");
+        assert_eq!(parsed.neighbors.len(), 0);
+    }
+
+    #[test]
+    fn graph_neighbors_result_with_neighbors() {
+        let result = shrimpk_core::GraphNeighborsResult {
+            node: shrimpk_core::GraphNode {
+                id: shrimpk_core::MemoryId::new(),
+                content_preview: "center".into(),
+                labels: vec![],
+                importance: 0.5,
+                category: "Fact".into(),
+                novelty: 0.0,
+            },
+            neighbors: vec![
+                shrimpk_core::GraphNeighbor {
+                    id: shrimpk_core::MemoryId::new(),
+                    content_preview: "neighbor 1".into(),
+                    labels: vec!["topic:a".into()],
+                    weight: 0.9,
+                    relationship: Some("CoActivation".into()),
+                    cosine_similarity: 0.8,
+                },
+                shrimpk_core::GraphNeighbor {
+                    id: shrimpk_core::MemoryId::new(),
+                    content_preview: "neighbor 2".into(),
+                    labels: vec!["topic:b".into()],
+                    weight: 0.3,
+                    relationship: None,
+                    cosine_similarity: 0.4,
+                },
+            ],
+        };
+        assert_eq!(result.neighbors.len(), 2);
+        assert!(result.neighbors[0].weight > result.neighbors[1].weight);
     }
 }

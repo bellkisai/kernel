@@ -246,7 +246,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/detect", get(routes::detect_providers))
         .route("/api/memory_graph", post(routes::memory_graph))
         .route("/api/memory_related", post(routes::memory_related))
-        .route("/api/memory_get", post(routes::memory_get));
+        .route("/api/memory_get", post(routes::memory_get))
+        // Graph visualization (KS65)
+        .route("/api/graph/neighbors", post(routes::graph_neighbors))
+        .route("/api/graph/subgraph", post(routes::graph_subgraph))
+        .route("/api/graph/overview", post(routes::graph_overview));
 
     // Multimodal routes — conditionally compiled
     #[cfg(feature = "vision")]

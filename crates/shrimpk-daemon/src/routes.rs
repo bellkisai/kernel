@@ -99,6 +99,48 @@ pub struct ConfigSetRequest {
     pub value: String,
 }
 
+// Graph visualization requests (KS65)
+
+#[derive(Deserialize)]
+pub struct GraphNeighborsRequest {
+    pub memory_id: String,
+    #[serde(default = "default_min_weight")]
+    pub min_weight: f64,
+    #[serde(default = "default_graph_max_results")]
+    pub max_results: usize,
+}
+
+fn default_min_weight() -> f64 {
+    0.05
+}
+fn default_graph_max_results() -> usize {
+    50
+}
+
+#[derive(Deserialize)]
+pub struct GraphSubgraphRequest {
+    pub memory_ids: Vec<String>,
+    #[serde(default)]
+    pub include_neighbors: bool,
+    #[serde(default = "default_min_weight")]
+    pub min_weight: f64,
+}
+
+#[derive(Deserialize)]
+pub struct GraphOverviewRequest {
+    #[serde(default = "default_overview_min_members")]
+    pub min_members: usize,
+    #[serde(default = "default_overview_max_clusters")]
+    pub max_clusters: usize,
+}
+
+fn default_overview_min_members() -> usize {
+    3
+}
+fn default_overview_max_clusters() -> usize {
+    30
+}
+
 #[derive(Deserialize)]
 pub struct MemoriesQuery {
     #[serde(default = "default_limit")]
@@ -601,6 +643,178 @@ pub async fn memory_get(
         "category": format!("{:?}", entry.category),
         "sensitivity": format!("{:?}", entry.sensitivity),
         "novelty_score": entry.novelty_score
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Graph visualization endpoints (KS65)
+// ---------------------------------------------------------------------------
+
+/// POST /api/graph/neighbors — Hebbian neighbors for a single memory.
+pub async fn graph_neighbors(
+    State(state): State<AppState>,
+    Json(req): Json<GraphNeighborsRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let uuid = uuid::Uuid::parse_str(&req.memory_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Invalid UUID: {e}")})),
+        )
+    })?;
+    let id = MemoryId::from_uuid(uuid);
+
+    let result = state
+        .engine
+        .graph_neighbors(&id, req.min_weight, req.max_results)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))))?;
+
+    let neighbors_json: Vec<Value> = result
+        .neighbors
+        .iter()
+        .map(|n| {
+            json!({
+                "id": n.id.to_string(),
+                "content_preview": n.content_preview,
+                "labels": n.labels,
+                "weight": (n.weight * 1000.0).round() / 1000.0,
+                "relationship": n.relationship,
+                "cosine_similarity": (n.cosine_similarity * 100.0).round() / 100.0
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "node": {
+            "id": result.node.id.to_string(),
+            "content_preview": result.node.content_preview,
+            "labels": result.node.labels,
+            "importance": result.node.importance,
+            "category": result.node.category,
+            "novelty": result.node.novelty
+        },
+        "neighbors": neighbors_json,
+        "count": result.neighbors.len()
+    })))
+}
+
+/// POST /api/graph/subgraph — batch node+edge fetch.
+pub async fn graph_subgraph(
+    State(state): State<AppState>,
+    Json(req): Json<GraphSubgraphRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let ids: Result<Vec<MemoryId>, _> = req
+        .memory_ids
+        .iter()
+        .map(|s| {
+            uuid::Uuid::parse_str(s)
+                .map(MemoryId::from_uuid)
+                .map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": format!("Invalid UUID '{s}': {e}")})),
+                    )
+                })
+        })
+        .collect();
+    let ids = ids?;
+
+    let result = state
+        .engine
+        .graph_subgraph(&ids, req.include_neighbors, req.min_weight)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    let nodes_json: Vec<Value> = result
+        .nodes
+        .iter()
+        .map(|n| {
+            json!({
+                "id": n.id.to_string(),
+                "content_preview": n.content_preview,
+                "labels": n.labels,
+                "importance": n.importance,
+                "category": n.category,
+                "novelty": n.novelty
+            })
+        })
+        .collect();
+
+    let edges_json: Vec<Value> = result
+        .edges
+        .iter()
+        .map(|e| {
+            json!({
+                "source": e.source.to_string(),
+                "target": e.target.to_string(),
+                "weight": (e.weight * 1000.0).round() / 1000.0,
+                "relationship": e.relationship
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "nodes": nodes_json,
+        "edges": edges_json,
+        "node_count": result.nodes.len(),
+        "edge_count": result.edges.len()
+    })))
+}
+
+/// POST /api/graph/overview — cluster graph for Galaxy view.
+pub async fn graph_overview(
+    State(state): State<AppState>,
+    Json(req): Json<GraphOverviewRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let result = state
+        .engine
+        .graph_overview(req.min_members, req.max_clusters)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    let clusters_json: Vec<Value> = result
+        .clusters
+        .iter()
+        .map(|c| {
+            json!({
+                "label": c.label,
+                "member_count": c.member_count,
+                "summary": c.summary,
+                "top_members": c.top_members.iter().map(|m| json!({
+                    "id": m.id.to_string(),
+                    "content_preview": m.content_preview
+                })).collect::<Vec<_>>()
+            })
+        })
+        .collect();
+
+    let inter_edges_json: Vec<Value> = result
+        .inter_edges
+        .iter()
+        .map(|e| {
+            json!({
+                "source_label": e.source_label,
+                "target_label": e.target_label,
+                "shared_count": e.shared_count
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "clusters": clusters_json,
+        "inter_edges": inter_edges_json,
+        "cluster_count": result.clusters.len(),
+        "edge_count": result.inter_edges.len()
     })))
 }
 
