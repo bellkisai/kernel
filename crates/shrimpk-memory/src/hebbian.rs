@@ -60,6 +60,14 @@ pub struct CoActivation {
     /// Typed relationships are set by the consolidator during sleep consolidation.
     #[serde(default)]
     pub relationship: Option<RelationshipType>,
+    /// When this edge became valid (epoch seconds). `None` = valid since creation.
+    /// Set during consolidation when a new typed relationship is established.
+    #[serde(default)]
+    pub valid_from: Option<f64>,
+    /// When this edge expired (epoch seconds). `None` = still valid.
+    /// Set via `set_valid_until()` when a Supersedes edge retires an old relationship.
+    #[serde(default)]
+    pub valid_until: Option<f64>,
 }
 
 /// Sparse co-activation graph implementing Hebbian learning.
@@ -153,6 +161,8 @@ impl HebbianGraph {
             last_activated: now,
             activation_count: 0,
             relationship: None,
+            valid_from: None,
+            valid_until: None,
         });
 
         // Apply exponential decay since last activation
@@ -185,6 +195,8 @@ impl HebbianGraph {
             last_activated: timestamp,
             activation_count: 0,
             relationship: None,
+            valid_from: None,
+            valid_until: None,
         });
 
         let elapsed = timestamp - entry.last_activated;
@@ -348,6 +360,79 @@ impl HebbianGraph {
                 })
             })
             .collect()
+    }
+
+    /// Get associations that are temporally valid at a given point in time (KS63).
+    ///
+    /// Filters out edges where `valid_until < at_time` (expired) or
+    /// `valid_from > at_time` (not yet valid). Edges with `None` validity
+    /// are treated as always-valid (backward compat).
+    pub fn get_valid_associations(
+        &self,
+        id: u32,
+        at_time: f64,
+        min_weight: f64,
+    ) -> Vec<(u32, f64, Option<&RelationshipType>)> {
+        let neighbors = match self.adjacency.get(&id) {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+
+        neighbors
+            .iter()
+            .filter_map(|&neighbor| {
+                let key = Self::key(id, neighbor);
+                self.edges.get(&key).and_then(|co| {
+                    // Temporal validity check
+                    if let Some(until) = co.valid_until {
+                        if at_time > until {
+                            return None; // expired
+                        }
+                    }
+                    if let Some(from) = co.valid_from {
+                        if at_time < from {
+                            return None; // not yet valid
+                        }
+                    }
+                    // Decay weight
+                    let elapsed = at_time - co.last_activated;
+                    let decayed = co.weight * (-self.lambda * elapsed).exp();
+                    if decayed >= min_weight {
+                        Some((neighbor, decayed, co.relationship.as_ref()))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Set the expiry timestamp on an existing edge (KS63).
+    ///
+    /// Called when a Supersedes edge retires an old relationship.
+    /// Returns `true` if the edge existed and was updated.
+    pub fn set_valid_until(&mut self, id_a: u32, id_b: u32, until: f64) -> bool {
+        let key = Self::key(id_a, id_b);
+        if let Some(entry) = self.edges.get_mut(&key) {
+            entry.valid_until = Some(until);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set the start-of-validity timestamp on an existing edge (KS63).
+    ///
+    /// Called when a new typed relationship is established during consolidation.
+    /// Returns `true` if the edge existed and was updated.
+    pub fn set_valid_from(&mut self, id_a: u32, id_b: u32, from: f64) -> bool {
+        let key = Self::key(id_a, id_b);
+        if let Some(entry) = self.edges.get_mut(&key) {
+            entry.valid_from = Some(from);
+            true
+        } else {
+            false
+        }
     }
 
     /// BFS graph traversal from anchor nodes via Hebbian edges (KS62).
@@ -1091,5 +1176,97 @@ mod tests {
         }
         let results = graph.graph_traverse(&[0], 1, 5);
         assert_eq!(results.len(), 5, "Should truncate to max_results");
+    }
+
+    // --- KS63: temporal validity tests ---
+
+    #[test]
+    fn temporal_fields_serde_backward_compat() {
+        // Legacy edge without valid_from/valid_until should deserialize fine
+        let json = r#"{"weight":0.5,"last_activated":1000.0,"activation_count":1}"#;
+        let co: CoActivation = serde_json::from_str(json).unwrap();
+        assert!(co.valid_from.is_none());
+        assert!(co.valid_until.is_none());
+        assert_eq!(co.weight, 0.5);
+    }
+
+    #[test]
+    fn temporal_fields_serde_roundtrip() {
+        let co = CoActivation {
+            weight: 0.8,
+            last_activated: 2000.0,
+            activation_count: 3,
+            relationship: Some(RelationshipType::WorksAt("Acme".into())),
+            valid_from: Some(1000.0),
+            valid_until: Some(3000.0),
+        };
+        let json = serde_json::to_string(&co).unwrap();
+        let co2: CoActivation = serde_json::from_str(&json).unwrap();
+        assert_eq!(co2.valid_from, Some(1000.0));
+        assert_eq!(co2.valid_until, Some(3000.0));
+    }
+
+    #[test]
+    fn set_valid_until_expires_edge() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate(1, 2, 0.5);
+        assert!(graph.set_valid_until(1, 2, 5000.0));
+        let edge = graph.get_edge(1, 2).unwrap();
+        assert_eq!(edge.valid_until, Some(5000.0));
+    }
+
+    #[test]
+    fn set_valid_from_on_edge() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate(3, 4, 0.3);
+        assert!(graph.set_valid_from(3, 4, 1000.0));
+        let edge = graph.get_edge(3, 4).unwrap();
+        assert_eq!(edge.valid_from, Some(1000.0));
+    }
+
+    #[test]
+    fn set_valid_returns_false_for_missing_edge() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        assert!(!graph.set_valid_until(99, 100, 5000.0));
+        assert!(!graph.set_valid_from(99, 100, 1000.0));
+    }
+
+    #[test]
+    fn get_valid_associations_filters_expired() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        let t0 = 1_000_000.0;
+
+        // Create two edges at t0
+        graph.co_activate_at(1, 2, 0.5, t0);
+        graph.co_activate_at(1, 3, 0.5, t0);
+
+        // Expire edge 1-2 at t0 + 100
+        graph.set_valid_until(1, 2, t0 + 100.0);
+
+        // At t0 + 50: both edges valid
+        let at_50 = graph.get_valid_associations(1, t0 + 50.0, 0.0);
+        assert_eq!(at_50.len(), 2, "Both edges should be valid at t0+50");
+
+        // At t0 + 200: edge 1-2 expired
+        let at_200 = graph.get_valid_associations(1, t0 + 200.0, 0.0);
+        assert_eq!(at_200.len(), 1, "Only edge 1-3 should be valid at t0+200");
+        assert_eq!(at_200[0].0, 3);
+    }
+
+    #[test]
+    fn get_valid_associations_filters_not_yet_valid() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        let t0 = 1_000_000.0;
+
+        graph.co_activate_at(1, 2, 0.5, t0);
+        graph.set_valid_from(1, 2, t0 + 500.0);
+
+        // Before valid_from: should NOT appear
+        let before = graph.get_valid_associations(1, t0 + 100.0, 0.0);
+        assert!(before.is_empty(), "Edge should not be valid before valid_from");
+
+        // After valid_from: should appear
+        let after = graph.get_valid_associations(1, t0 + 600.0, 0.0);
+        assert_eq!(after.len(), 1, "Edge should be valid after valid_from");
     }
 }

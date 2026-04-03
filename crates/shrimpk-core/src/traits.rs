@@ -154,6 +154,17 @@ pub trait Consolidator: Send + Sync {
             labels: None,
         }
     }
+
+    /// Summarize a cluster of memories for a given label (KS64 — GraphRAG P4).
+    ///
+    /// Called during consolidation for label clusters with enough members.
+    /// The summary is stored as a `CommunitySummary` and used as a fallback
+    /// when echo queries return weak results.
+    ///
+    /// Default: returns `None` (no-op for consolidators that don't support summarization).
+    fn summarize_cluster(&self, _memories: &[&str], _label: &str) -> Option<String> {
+        None
+    }
 }
 
 #[cfg(test)]

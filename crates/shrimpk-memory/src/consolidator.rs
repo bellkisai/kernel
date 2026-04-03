@@ -247,6 +247,38 @@ impl Consolidator for OllamaConsolidator {
         let content = json["message"]["content"].as_str().unwrap_or("");
         parse_combined_response(content, max_facts)
     }
+
+    fn summarize_cluster(&self, memories: &[&str], label: &str) -> Option<String> {
+        let joined = memories
+            .iter()
+            .enumerate()
+            .map(|(i, m)| format!("{}. {}", i + 1, m))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let prompt = format!(
+            "You are summarizing a cluster of related memories labeled \"{label}\".\n\
+             Write a concise 1-3 sentence summary capturing the key themes and facts.\n\
+             Output ONLY the summary text, nothing else."
+        );
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": joined}
+            ],
+            "stream": false,
+            "options": {"temperature": 0.0, "num_predict": 200}
+        });
+
+        let endpoint = format!("{}/api/chat", self.url.trim_end_matches('/'));
+        let mut resp = self.agent.post(&endpoint).send_json(&body).ok()?;
+        let json: serde_json::Value = resp.body_mut().read_json().ok()?;
+        let content = json["message"]["content"].as_str()?;
+        let trimmed = content.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    }
 }
 
 // ===========================================================================

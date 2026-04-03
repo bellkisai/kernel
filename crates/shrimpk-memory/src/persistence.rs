@@ -795,6 +795,53 @@ fn read_optional_section(
     Ok(cursor)
 }
 
+/// Save community summaries to a sidecar JSON file (KS64).
+///
+/// Stored alongside the SHRM binary as `community_summaries.json`.
+/// Avoids touching the binary format — easier to debug and version independently.
+pub fn save_community_summaries(
+    store: &EchoStore,
+    data_dir: &Path,
+) -> Result<()> {
+    let summaries = store.all_summaries();
+    if summaries.is_empty() {
+        return Ok(());
+    }
+    let path = data_dir.join("community_summaries.json");
+    let json = serde_json::to_string_pretty(summaries).map_err(|e| {
+        ShrimPKError::Persistence(format!("Failed to serialize community summaries: {e}"))
+    })?;
+    std::fs::write(&path, json).map_err(|e| {
+        ShrimPKError::Persistence(format!("Failed to write {}: {e}", path.display()))
+    })?;
+    tracing::debug!(path = %path.display(), count = summaries.len(), "Community summaries saved");
+    Ok(())
+}
+
+/// Load community summaries from the sidecar JSON file (KS64).
+///
+/// Returns an empty map if the file does not exist.
+pub fn load_community_summaries(
+    store: &mut EchoStore,
+    data_dir: &Path,
+) -> Result<()> {
+    let path = data_dir.join("community_summaries.json");
+    if !path.exists() {
+        return Ok(());
+    }
+    let json = std::fs::read_to_string(&path).map_err(|e| {
+        ShrimPKError::Persistence(format!("Failed to read {}: {e}", path.display()))
+    })?;
+    let summaries: std::collections::HashMap<String, shrimpk_core::CommunitySummary> =
+        serde_json::from_str(&json).map_err(|e| {
+            ShrimPKError::Persistence(format!("Failed to parse community summaries: {e}"))
+        })?;
+    let count = summaries.len();
+    *store.summaries_mut() = summaries;
+    tracing::debug!(path = %path.display(), count, "Community summaries loaded");
+    Ok(())
+}
+
 /// Validate a binary store file without loading all data.
 ///
 /// Checks magic bytes, version, and CRC32 checksum(s).
@@ -907,6 +954,7 @@ fn parse_header_v1(data: &[u8]) -> Result<([u8; 4], u32, u32, u64, u64, u32)> {
 mod tests {
     use super::*;
     use shrimpk_core::SensitivityLevel;
+    use tempfile::tempdir;
 
     fn make_entry(content: &str, embedding: Vec<f32>) -> MemoryEntry {
         MemoryEntry::new(content.to_string(), embedding, "test".to_string())
@@ -1871,5 +1919,42 @@ mod tests {
             r.label_version, 0,
             "Legacy entry should load with label_version 0"
         );
+    }
+
+    // --- KS64: community summary persistence tests ---
+
+    #[test]
+    fn community_summary_save_load_roundtrip() {
+        let dir = tempdir().unwrap();
+        let mut store = EchoStore::new();
+
+        let summary = shrimpk_core::CommunitySummary {
+            label: "career".to_string(),
+            summary: "User works as a Rust engineer at a startup.".to_string(),
+            embedding: vec![0.1, 0.2, 0.3],
+            member_count: 8,
+            updated_at: chrono::Utc::now(),
+        };
+        store.set_summary(summary);
+
+        save_community_summaries(&store, dir.path()).expect("save");
+
+        let mut loaded_store = EchoStore::new();
+        load_community_summaries(&mut loaded_store, dir.path()).expect("load");
+
+        let s = loaded_store
+            .get_summary("career")
+            .expect("should find summary after load");
+        assert_eq!(s.member_count, 8);
+        assert!(s.summary.contains("Rust"));
+    }
+
+    #[test]
+    fn community_summary_load_missing_file() {
+        let dir = tempdir().unwrap();
+        let mut store = EchoStore::new();
+        // Should succeed with no summaries loaded
+        load_community_summaries(&mut store, dir.path()).expect("load empty");
+        assert!(store.all_summaries().is_empty());
     }
 }

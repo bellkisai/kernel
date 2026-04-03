@@ -35,7 +35,8 @@ pub fn all_tools() -> Vec<ToolDefinition> {
                     "query": { "type": "string", "description": "Text to find resonating memories for" },
                     "max_results": { "type": "integer", "description": "Maximum results (default: 10)", "default": 10 },
                     "modality": { "type": "string", "enum": ["text", "vision", "auto"], "description": "Query mode: 'text' (default), 'vision' (CLIP cross-modal), or 'auto' (all channels)", "default": "text" },
-                    "labels": { "type": "array", "items": { "type": "string" }, "description": "Optional label filter — bypass classification, search only memories matching these labels" }
+                    "labels": { "type": "array", "items": { "type": "string" }, "description": "Optional label filter — bypass classification, search only memories matching these labels" },
+                    "at_time": { "type": "string", "description": "Optional ISO 8601 timestamp for point-in-time query. Only Hebbian edges valid at this time are used for boosting." }
                 },
                 "required": ["query"]
             }),
@@ -140,6 +141,11 @@ pub fn all_tools() -> Vec<ToolDefinition> {
                 },
                 "required": ["entity"]
             }),
+        },
+        ToolDefinition {
+            name: "community_summaries".into(),
+            description: "List per-label community summaries. These are LLM-generated summaries of memory clusters, useful for getting a high-level overview of what's stored.".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
         },
     ];
 
@@ -297,11 +303,21 @@ pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<Strin
             .collect()
     });
 
+    // Optional point-in-time query (KS63): parse ISO 8601 → epoch seconds
+    let at_time: Option<f64> = args["at_time"]
+        .as_str()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp() as f64);
+
     let start = Instant::now();
-    let results = engine
-        .echo_with_labels(query, max_results, mode, label_filter.as_deref())
-        .await
-        .map_err(|e| e.to_string())?;
+    let results = if let Some(at) = at_time {
+        engine.echo_at(query, max_results, at).await
+    } else {
+        engine
+            .echo_with_labels(query, max_results, mode, label_filter.as_deref())
+            .await
+    }
+    .map_err(|e| e.to_string())?;
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     let results_json: Vec<Value> = results
@@ -477,6 +493,31 @@ pub async fn handle_entity_search(
         "elapsed_ms": (elapsed_ms * 10.0).round() / 10.0
     });
 
+    Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
+}
+
+pub async fn handle_community_summaries(
+    engine: &Arc<EchoEngine>,
+) -> Result<String, String> {
+    let summaries = engine.community_summaries().await;
+    if summaries.is_empty() {
+        return Ok(json!({"summaries": [], "count": 0, "note": "No community summaries yet. They are generated during consolidation for label clusters with enough members."}).to_string());
+    }
+    let summaries_json: Vec<Value> = summaries
+        .iter()
+        .map(|(label, s)| {
+            json!({
+                "label": label,
+                "summary": s.summary,
+                "member_count": s.member_count,
+                "updated_at": s.updated_at.to_rfc3339()
+            })
+        })
+        .collect();
+    let output = json!({
+        "summaries": summaries_json,
+        "count": summaries.len()
+    });
     Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
 }
 
@@ -851,10 +892,10 @@ mod tests {
     #[test]
     fn all_tools_returns_expected_count() {
         let count = all_tools().len();
-        // Base: 13 tools (9 original + memory_graph + memory_related + memory_get + entity_search).
+        // Base: 14 tools (9 original + memory_graph + memory_related + memory_get + entity_search + community_summaries).
         // +1 if vision feature, +1 if speech feature.
         #[allow(unused_mut)]
-        let mut expected = 13;
+        let mut expected = 14;
         #[cfg(feature = "vision")]
         {
             expected += 1;

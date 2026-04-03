@@ -37,6 +37,9 @@ pub struct EchoStore {
     /// Entity name -> store indices. Populated from MemoryEntry.triples during add/load.
     /// Normalized to lowercase for case-insensitive lookup.
     entity_index: HashMap<String, Vec<u32>>,
+    /// Per-label community summaries (KS64 — GraphRAG P4).
+    /// Generated during consolidation for clusters with enough members.
+    community_summaries: HashMap<String, shrimpk_core::CommunitySummary>,
 }
 
 impl EchoStore {
@@ -49,6 +52,7 @@ impl EchoStore {
             parent_children: HashMap::new(),
             label_index: HashMap::new(),
             entity_index: HashMap::new(),
+            community_summaries: HashMap::new(),
         }
     }
 
@@ -321,6 +325,43 @@ impl EchoStore {
     /// Read-only reference to the entity index (for query-time entity detection).
     pub fn entity_index_ref(&self) -> &HashMap<String, Vec<u32>> {
         &self.entity_index
+    }
+
+    // --- Community summaries (KS64) ---
+
+    /// Store or update a community summary for a label.
+    pub fn set_summary(&mut self, summary: shrimpk_core::CommunitySummary) {
+        self.community_summaries
+            .insert(summary.label.clone(), summary);
+    }
+
+    /// Get a community summary by label.
+    pub fn get_summary(&self, label: &str) -> Option<&shrimpk_core::CommunitySummary> {
+        self.community_summaries.get(label)
+    }
+
+    /// Get all community summaries.
+    pub fn all_summaries(&self) -> &HashMap<String, shrimpk_core::CommunitySummary> {
+        &self.community_summaries
+    }
+
+    /// Get mutable reference to all community summaries (for persistence load).
+    pub fn summaries_mut(&mut self) -> &mut HashMap<String, shrimpk_core::CommunitySummary> {
+        &mut self.community_summaries
+    }
+
+    /// Labels with at least `min` members in the label index.
+    pub fn labels_with_min_members(&self, min: usize) -> Vec<(String, usize)> {
+        self.label_index
+            .iter()
+            .filter_map(|(label, indices)| {
+                if indices.len() >= min {
+                    Some((label.clone(), indices.len()))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Get the embedding vector at a specific index.
@@ -1049,5 +1090,81 @@ mod tests {
 
         // Verify embeddings are consistent
         assert_eq!(store.all_embeddings().len(), 2);
+    }
+
+    // --- KS64: Community summary storage tests ---
+
+    #[test]
+    fn community_summary_crud() {
+        let mut store = EchoStore::new();
+        assert!(store.all_summaries().is_empty());
+
+        let summary = shrimpk_core::CommunitySummary {
+            label: "career".to_string(),
+            summary: "User works in tech as a Rust engineer.".to_string(),
+            embedding: vec![0.1, 0.2, 0.3],
+            member_count: 7,
+            updated_at: chrono::Utc::now(),
+        };
+        store.set_summary(summary);
+
+        assert_eq!(store.all_summaries().len(), 1);
+        let s = store.get_summary("career").expect("should find summary");
+        assert_eq!(s.member_count, 7);
+        assert!(s.summary.contains("Rust"));
+    }
+
+    #[test]
+    fn community_summary_update() {
+        let mut store = EchoStore::new();
+        let s1 = shrimpk_core::CommunitySummary {
+            label: "career".to_string(),
+            summary: "v1".to_string(),
+            embedding: vec![],
+            member_count: 5,
+            updated_at: chrono::Utc::now(),
+        };
+        store.set_summary(s1);
+
+        let s2 = shrimpk_core::CommunitySummary {
+            label: "career".to_string(),
+            summary: "v2 updated".to_string(),
+            embedding: vec![],
+            member_count: 10,
+            updated_at: chrono::Utc::now(),
+        };
+        store.set_summary(s2);
+
+        assert_eq!(store.all_summaries().len(), 1);
+        assert_eq!(store.get_summary("career").unwrap().summary, "v2 updated");
+    }
+
+    #[test]
+    fn labels_with_min_members_filters() {
+        let mut store = EchoStore::new();
+        // Add entries with labels
+        for i in 0..6 {
+            let mut entry = MemoryEntry::new(
+                format!("career memory {i}"),
+                vec![0.1; 384],
+                "test".into(),
+            );
+            entry.labels = vec!["career".into()];
+            store.add(entry);
+        }
+        for i in 0..2 {
+            let mut entry = MemoryEntry::new(
+                format!("hobby memory {i}"),
+                vec![0.2; 384],
+                "test".into(),
+            );
+            entry.labels = vec!["hobby".into()];
+            store.add(entry);
+        }
+
+        let eligible = store.labels_with_min_members(5);
+        assert_eq!(eligible.len(), 1);
+        assert_eq!(eligible[0].0, "career");
+        assert_eq!(eligible[0].1, 6);
     }
 }

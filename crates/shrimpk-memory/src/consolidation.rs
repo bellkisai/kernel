@@ -278,6 +278,12 @@ pub fn consolidate(
                             0.5, // moderate strength for extracted relationships
                             rel,
                         );
+                        // Mark temporal start of this relationship (KS63)
+                        let now_secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs_f64();
+                        hebbian.set_valid_from(idx as u32, child_idx, now_secs);
                         result.relationships_created += 1;
                     }
                 }
@@ -286,6 +292,31 @@ pub fn consolidate(
                 // contradicts an older fact about the same entity.
                 let supersedes_pairs = detect_supersedes_pairs(store, &facts, idx);
                 for (old_idx, new_fact_text) in &supersedes_pairs {
+                    let now_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs_f64();
+
+                    // Expire old memory's typed edges (KS63 temporal validity)
+                    // This makes old relationships invisible for point-in-time queries
+                    // after the supersession event.
+                    let old_assocs: Vec<(u32, f64, bool)> = hebbian
+                        .get_associations_typed(*old_idx as u32, 0.0)
+                        .into_iter()
+                        .filter(|(_, _, rel)| matches!(
+                            rel,
+                            Some(RelationshipType::WorksAt(_))
+                            | Some(RelationshipType::LivesIn(_))
+                            | Some(RelationshipType::PrefersTool(_))
+                            | Some(RelationshipType::PartOf(_))
+                            | Some(RelationshipType::Custom(_))
+                        ))
+                        .map(|(n, w, _)| (n, w, false))
+                        .collect();
+                    for (neighbor, _, _) in &old_assocs {
+                        hebbian.set_valid_until(*old_idx as u32, *neighbor, now_secs);
+                    }
+
                     // Edge between old child and new parent
                     hebbian.co_activate_with_relationship(
                         *old_idx as u32,
@@ -293,6 +324,8 @@ pub fn consolidate(
                         0.3,
                         RelationshipType::Supersedes,
                     );
+                    hebbian.set_valid_from(*old_idx as u32, idx as u32, now_secs);
+
                     // ALSO create edge between OLD PARENT and NEW PARENT (KS22).
                     // This ensures the Supersedes demotion fires in Pipe A ranking
                     // (where only parents appear when child_rescue_only is true).
@@ -308,6 +341,7 @@ pub fn consolidate(
                                             0.3,
                                             RelationshipType::Supersedes,
                                         );
+                                        hebbian.set_valid_from(i as u32, idx as u32, now_secs);
                                         break;
                                     }
                                 }
@@ -401,6 +435,68 @@ pub fn consolidate(
                         .or_default()
                         .push(idx as u32);
                 }
+            }
+        }
+    }
+
+    // Step 7: Community summary generation (KS64 — GraphRAG P4)
+    //
+    // For label clusters with enough members, generate a summarization via LLM.
+    // Summaries are stored on the EchoStore and used as fallback when echo queries
+    // return weak results. Max 5 summaries per consolidation cycle to bound latency.
+    if config.community_summaries_enabled {
+        let min_members = config.community_min_members;
+        let eligible: Vec<(String, usize)> = store.labels_with_min_members(min_members);
+
+        let mut summaries_generated = 0usize;
+        for (label, member_count) in &eligible {
+            if summaries_generated >= 5 {
+                break;
+            }
+            // Skip if we already have an up-to-date summary
+            if let Some(existing) = store.get_summary(label) {
+                if existing.member_count == *member_count {
+                    continue;
+                }
+            }
+
+            // Collect up to 20 member contents
+            let member_contents: Vec<&str> = store
+                .query_labels(&[label.clone()])
+                .into_iter()
+                .take(20)
+                .filter_map(|idx| store.entry_at(idx as usize).map(|e| e.content.as_str()))
+                .collect();
+
+            if member_contents.is_empty() {
+                continue;
+            }
+
+            if let Some(summary_text) = consolidator.summarize_cluster(&member_contents, label) {
+                // Embed the summary for cosine matching during echo fallback
+                let summary_embedding = if let Some(emb_mutex) = embedder {
+                    if let Ok(mut emb) = emb_mutex.lock() {
+                        emb.embed_text(&summary_text).unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+
+                store.set_summary(shrimpk_core::CommunitySummary {
+                    label: label.clone(),
+                    summary: summary_text,
+                    embedding: summary_embedding,
+                    member_count: *member_count,
+                    updated_at: Utc::now(),
+                });
+                summaries_generated += 1;
+                tracing::debug!(
+                    label = %label,
+                    members = member_count,
+                    "Community summary generated"
+                );
             }
         }
     }

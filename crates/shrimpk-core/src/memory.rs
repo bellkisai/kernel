@@ -391,6 +391,25 @@ pub struct Triple {
     pub object: String,
 }
 
+/// A community summary for a label cluster (KS64 — GraphRAG P4).
+///
+/// Generated during consolidation for label clusters with enough members.
+/// Used as a fallback in echo queries when no direct results score well,
+/// providing a "global view" answer synthesized from the cluster's contents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommunitySummary {
+    /// The label this summary represents.
+    pub label: String,
+    /// LLM-generated summary of the cluster's contents.
+    pub summary: String,
+    /// Embedding of the summary text (for cosine matching during echo fallback).
+    pub embedding: Vec<f32>,
+    /// Number of memories in this cluster at summarization time.
+    pub member_count: usize,
+    /// When this summary was last generated/updated.
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Statistics about the Echo Memory system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryStats {

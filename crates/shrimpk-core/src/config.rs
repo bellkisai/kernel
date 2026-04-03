@@ -249,6 +249,18 @@ pub struct EchoConfig {
     #[serde(default = "default_graph_rrf_k")]
     pub graph_rrf_k: usize,
 
+    // --- Community Summaries (KS64) ---
+    /// Enable per-label community summary generation during consolidation.
+    #[serde(default = "default_true")]
+    pub community_summaries_enabled: bool,
+    /// Echo final_score threshold below which community summaries are injected.
+    /// Default: 0.25 — only triggers when results are weak.
+    #[serde(default = "default_community_summary_threshold")]
+    pub community_summary_threshold: f32,
+    /// Minimum label cluster size to generate a summary. Default: 5.
+    #[serde(default = "default_community_min_members")]
+    pub community_min_members: usize,
+
     // --- Context Assembly (KS60) ---
     /// Maximum conversation turns to include in proxy context. Default: 20.
     #[serde(default = "default_proxy_max_conversation_turns")]
@@ -278,6 +290,12 @@ fn default_hebbian_half_life() -> f64 {
 }
 fn default_hebbian_prune_threshold() -> f64 {
     0.01
+}
+fn default_community_summary_threshold() -> f32 {
+    0.25
+}
+fn default_community_min_members() -> usize {
+    5
 }
 fn default_graph_max_hops() -> usize {
     2
@@ -381,6 +399,9 @@ impl Default for EchoConfig {
             activation_weight: default_activation_weight(),
             importance_weight: 0.0,
             use_full_actr_history: false,
+            community_summaries_enabled: default_true(),
+            community_summary_threshold: default_community_summary_threshold(),
+            community_min_members: default_community_min_members(),
             graph_traversal_enabled: default_true(),
             graph_max_hops: default_graph_max_hops(),
             graph_rrf_k: default_graph_rrf_k(),
@@ -504,6 +525,9 @@ pub struct FileConfig {
     pub activation_weight: Option<f32>,
     pub importance_weight: Option<f32>,
     pub use_full_actr_history: Option<bool>,
+    pub community_summaries_enabled: Option<bool>,
+    pub community_summary_threshold: Option<f32>,
+    pub community_min_members: Option<usize>,
     pub graph_traversal_enabled: Option<bool>,
     pub graph_max_hops: Option<usize>,
     pub graph_rrf_k: Option<usize>,
@@ -720,6 +744,15 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.use_full_actr_history {
             config.use_full_actr_history = v;
+        }
+        if let Some(v) = fc.community_summaries_enabled {
+            config.community_summaries_enabled = v;
+        }
+        if let Some(v) = fc.community_summary_threshold {
+            config.community_summary_threshold = v;
+        }
+        if let Some(v) = fc.community_min_members {
+            config.community_min_members = v;
         }
         if let Some(v) = fc.graph_traversal_enabled {
             config.graph_traversal_enabled = v;

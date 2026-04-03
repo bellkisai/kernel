@@ -935,7 +935,7 @@ impl EchoEngine {
         label_filter: Option<&[String]>,
     ) -> Result<Vec<EchoResult>> {
         match mode {
-            QueryMode::Text => self.echo_text(query, max_results, label_filter).await,
+            QueryMode::Text => self.echo_text(query, max_results, label_filter, None).await,
             #[cfg(feature = "vision")]
             QueryMode::Vision => self.echo_vision(query, max_results).await,
             #[cfg(not(feature = "vision"))]
@@ -946,7 +946,7 @@ impl EchoEngine {
             QueryMode::Auto => {
                 // Run text channel (mut needed when vision feature merges results)
                 #[allow(unused_mut)]
-                let mut results = self.echo_text(query, max_results, label_filter).await?;
+                let mut results = self.echo_text(query, max_results, label_filter, None).await?;
 
                 // Run vision channel if available
                 #[cfg(feature = "vision")]
@@ -999,6 +999,7 @@ impl EchoEngine {
         query: &str,
         max_results: usize,
         label_filter: Option<&[String]>,
+        at_time: Option<f64>,
     ) -> Result<Vec<EchoResult>> {
         let start = std::time::Instant::now();
 
@@ -1296,50 +1297,62 @@ impl EchoEngine {
         //     Enhanced with typed relationship awareness (KS18 Track 4):
         //     - Supersedes edges: the NEWER memory gets an extra boost (knowledge updates)
         //     - Typed relationships: small extra boost when relationship type is relevant
+        //     When at_time is provided (KS63), use get_valid_associations to filter
+        //     expired/not-yet-valid edges for point-in-time queries.
         let hebbian_boosts: Vec<f64> = {
             let hebbian = self.hebbian.read().await;
             top.iter()
                 .map(|&(idx, _)| {
                     let idx = idx as u32;
                     let mut boost: f64 = 0.0;
-                    // Track demotion separately so it bypasses the positive cap
                     let mut demotion: f64 = 0.0;
 
-                    for &other in top_indices.iter().filter(|&&o| o != idx) {
-                        let weight = hebbian.get_weight(idx, other);
-                        if weight <= 0.0 {
-                            continue;
-                        }
-                        boost += weight;
-
-                        // Typed relationship bonus (KS18) + Supersedes demotion (KS20)
-                        if let Some(rel) = hebbian.get_relationship(idx, other) {
-                            match rel {
-                                // Supersedes: newer memory gets +0.1 boost,
-                                // older (superseded) memory gets -0.15 demotion.
-                                // Net 0.25 score gap pushes updated info above stale.
-                                crate::hebbian::RelationshipType::Supersedes => {
-                                    if idx > other {
-                                        // This node is the newer memory — boost it
-                                        boost += 0.1;
-                                    } else {
-                                        // This node is the OLDER (superseded) memory — demote it.
-                                        // Value configurable via config.supersedes_demotion (KS22).
-                                        demotion -= self.config.supersedes_demotion as f64;
+                    if let Some(at) = at_time {
+                        // Temporal query: only consider edges valid at the given timestamp
+                        let valid_assocs = hebbian.get_valid_associations(idx, at, 0.0);
+                        for (neighbor, weight, rel) in &valid_assocs {
+                            if !top_indices.contains(neighbor) || *neighbor == idx {
+                                continue;
+                            }
+                            boost += weight;
+                            if let Some(r) = rel {
+                                match r {
+                                    crate::hebbian::RelationshipType::Supersedes => {
+                                        if idx > *neighbor {
+                                            boost += 0.1;
+                                        } else {
+                                            demotion -= self.config.supersedes_demotion as f64;
+                                        }
                                     }
+                                    crate::hebbian::RelationshipType::CoActivation => {}
+                                    _ => { boost += 0.05; }
                                 }
-                                // Any typed (non-CoActivation) relationship gets a small
-                                // relevance bonus — these edges carry semantic meaning
-                                // beyond mere co-occurrence.
-                                crate::hebbian::RelationshipType::CoActivation => {}
-                                _ => {
-                                    boost += 0.05;
+                            }
+                        }
+                    } else {
+                        // Standard query: use all edges (existing behavior)
+                        for &other in top_indices.iter().filter(|&&o| o != idx) {
+                            let weight = hebbian.get_weight(idx, other);
+                            if weight <= 0.0 {
+                                continue;
+                            }
+                            boost += weight;
+                            if let Some(rel) = hebbian.get_relationship(idx, other) {
+                                match rel {
+                                    crate::hebbian::RelationshipType::Supersedes => {
+                                        if idx > other {
+                                            boost += 0.1;
+                                        } else {
+                                            demotion -= self.config.supersedes_demotion as f64;
+                                        }
+                                    }
+                                    crate::hebbian::RelationshipType::CoActivation => {}
+                                    _ => { boost += 0.05; }
                                 }
                             }
                         }
                     }
 
-                    // Cap positive Hebbian boost at 0.4. Demotions bypass the cap.
                     boost.min(0.4) + demotion
                 })
                 .collect()
@@ -1430,6 +1443,54 @@ impl EchoEngine {
                     "Reranker applied"
                 );
                 results = reranked;
+            }
+        }
+
+        // 7f. Community summary fallback (KS64): if top result is weak,
+        //     inject best-matching community summary as a fallback result.
+        if self.config.community_summaries_enabled {
+            let threshold = self.config.community_summary_threshold as f64;
+            let top_score = results.first().map(|r| r.final_score).unwrap_or(0.0);
+            if top_score < threshold {
+                let summaries = store.all_summaries();
+                if !summaries.is_empty() {
+                    let mut best_summary: Option<(&str, &str, f32)> = None;
+                    for summary in summaries.values() {
+                        if !summary.embedding.is_empty() {
+                            let sim =
+                                similarity::cosine_similarity(&query_embedding, &summary.embedding);
+                            if best_summary.map_or(true, |(_, _, s)| sim > s) {
+                                best_summary =
+                                    Some((&summary.label, &summary.summary, sim));
+                            }
+                        }
+                    }
+                    if let Some((label, text, sim)) = best_summary {
+                        if sim > 0.1 {
+                            tracing::debug!(
+                                label = %label,
+                                sim,
+                                top_score,
+                                "Community summary fallback injected"
+                            );
+                            results.push(EchoResult {
+                                memory_id: MemoryId::new(),
+                                content: format!("[{}] {}", label, truncate_content(text, 200)),
+                                similarity: sim,
+                                final_score: sim as f64,
+                                source: "community_summary".to_string(),
+                                echoed_at: Utc::now(),
+                                modality: Modality::Text,
+                                labels: vec![label.to_string()],
+                            });
+                            results.sort_by(|a, b| {
+                                b.final_score
+                                    .partial_cmp(&a.final_score)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                        }
+                    }
+                }
             }
         }
 
@@ -2010,6 +2071,31 @@ impl EchoEngine {
         Ok(results)
     }
 
+    /// Get all community summaries (KS64).
+    pub async fn community_summaries(
+        &self,
+    ) -> std::collections::HashMap<String, shrimpk_core::CommunitySummary> {
+        let store = self.store.read().await;
+        store.all_summaries().clone()
+    }
+
+    /// Point-in-time echo query (KS63).
+    ///
+    /// Same as `echo()` but only considers Hebbian edges that were valid at
+    /// `at_timestamp` (epoch seconds). Expired edges (valid_until < at_timestamp)
+    /// and not-yet-valid edges (valid_from > at_timestamp) are filtered out
+    /// during the Hebbian boost pass.
+    #[instrument(skip(self), fields(query = %query, at = at_timestamp))]
+    pub async fn echo_at(
+        &self,
+        query: &str,
+        max_results: usize,
+        at_timestamp: f64,
+    ) -> Result<Vec<EchoResult>> {
+        self.echo_text(query, max_results, None, Some(at_timestamp))
+            .await
+    }
+
     /// Persist the store to disk.
     ///
     /// Saves to `config.data_dir/echo_store.shrm` in binary format.
@@ -2061,6 +2147,9 @@ impl EchoEngine {
             "Hebbian graph persisted"
         );
 
+        // Persist community summaries sidecar (KS64)
+        crate::persistence::save_community_summaries(&store, &self.config.data_dir)?;
+
         Ok(())
     }
 
@@ -2086,7 +2175,12 @@ impl EchoEngine {
         let reformulator = MemoryReformulator::new();
 
         let store_path = config.data_dir.join("echo_store.shrm");
-        let loaded_store = EchoStore::load(&store_path)?;
+        let mut loaded_store = EchoStore::load(&store_path)?;
+
+        // Load community summaries sidecar (KS64)
+        if let Err(e) = crate::persistence::load_community_summaries(&mut loaded_store, &config.data_dir) {
+            tracing::warn!(error = %e, "Failed to load community summaries, continuing without");
+        }
 
         // Rebuild text LSH index from loaded embeddings
         let mut text_lsh = CosineHash::new(config.embedding_dim, 16, 10);
@@ -2929,5 +3023,31 @@ mod tests {
         assert!(config.graph_traversal_enabled);
         assert_eq!(config.graph_max_hops, 2);
         assert_eq!(config.graph_rrf_k, 60);
+    }
+
+    // --- KS64: community summary config defaults ---
+
+    #[test]
+    fn community_summary_config_defaults() {
+        let config = EchoConfig::default();
+        assert!(config.community_summaries_enabled);
+        assert!((config.community_summary_threshold - 0.25).abs() < f32::EPSILON);
+        assert_eq!(config.community_min_members, 5);
+    }
+
+    #[test]
+    fn community_summary_serde_roundtrip() {
+        let summary = shrimpk_core::CommunitySummary {
+            label: "career".into(),
+            summary: "User is a Rust engineer.".into(),
+            embedding: vec![0.1, 0.2, 0.3],
+            member_count: 7,
+            updated_at: chrono::Utc::now(),
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        let parsed: shrimpk_core::CommunitySummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.label, "career");
+        assert_eq!(parsed.member_count, 7);
+        assert_eq!(parsed.embedding.len(), 3);
     }
 }
