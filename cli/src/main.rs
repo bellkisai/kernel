@@ -7,6 +7,8 @@
 //!   shrimpk config show
 //!   shrimpk status
 
+mod tui;
+
 use clap::{Parser, Subcommand};
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -131,6 +133,8 @@ enum Commands {
     Status,
     /// Scan for installed LLM providers
     Detect,
+    /// Explore the memory vault interactively (TUI)
+    Explore,
 }
 
 #[derive(Subcommand)]
@@ -970,6 +974,14 @@ async fn main() -> anyhow::Result<()> {
             cmd_status(&config).await?;
             return Ok(());
         }
+        Commands::Explore => {
+            let config =
+                config::resolve_config().map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+            std::fs::create_dir_all(&config.data_dir)?;
+            eprintln!("[shrimpk] Loading vault...");
+            let engine = EchoEngine::load(config)?;
+            return tui::run_explore(&engine).await;
+        }
         _ => {}
     }
 
@@ -1198,7 +1210,7 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
                 println!("{resp}");
             }
-            Commands::Config { .. } | Commands::Status => unreachable!(),
+            Commands::Config { .. } | Commands::Status | Commands::Explore => unreachable!(),
         }
         return Ok(());
     }
@@ -1331,7 +1343,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Get { memory_id } => {
             cmd_get(&engine, &memory_id).await?;
         }
-        Commands::Config { .. } | Commands::Status => unreachable!(),
+        Commands::Config { .. } | Commands::Status | Commands::Explore => unreachable!(),
     }
 
     Ok(())
