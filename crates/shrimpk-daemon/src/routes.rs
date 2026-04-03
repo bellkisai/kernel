@@ -301,7 +301,10 @@ pub async fn config_show(State(state): State<AppState>) -> Json<Value> {
         "consolidation_provider": c.consolidation_provider,
         "proxy_target": c.proxy_target,
         "proxy_enabled": c.proxy_enabled,
-        "proxy_max_echo_results": c.proxy_max_echo_results
+        "proxy_max_echo_results": c.proxy_max_echo_results,
+        "hebbian_half_life_secs": c.hebbian_half_life_secs,
+        "hebbian_prune_threshold": c.hebbian_prune_threshold,
+        "proxy_max_conversation_turns": c.proxy_max_conversation_turns
     }))
 }
 
@@ -365,6 +368,30 @@ pub async fn config_set(
         }
         "proxy_max_echo_results" => {
             fc.proxy_max_echo_results = Some(req.value.parse().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid integer"})),
+                )
+            })?)
+        }
+        "hebbian_half_life_secs" => {
+            fc.hebbian_half_life_secs = Some(req.value.parse().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid float"})),
+                )
+            })?)
+        }
+        "hebbian_prune_threshold" => {
+            fc.hebbian_prune_threshold = Some(req.value.parse().map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Invalid float"})),
+                )
+            })?)
+        }
+        "proxy_max_conversation_turns" => {
+            fc.proxy_max_conversation_turns = Some(req.value.parse().map_err(|_| {
                 (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": "Invalid integer"})),
@@ -603,7 +630,8 @@ pub async fn debug(State(state): State<AppState>) -> Json<Value> {
             "target": config.proxy_target,
             "enabled": config.proxy_enabled,
             "max_echo_results": config.proxy_max_echo_results,
-            "context_window": config.proxy_context_window
+            "context_window": config.proxy_context_window,
+            "max_conversation_turns": config.proxy_max_conversation_turns
         },
         "model_routes": routes.iter()
             .map(|(k, v)| json!({"model": k, "provider": v}))
@@ -615,7 +643,9 @@ pub async fn debug(State(state): State<AppState>) -> Json<Value> {
             "use_lsh": config.use_lsh,
             "use_bloom": config.use_bloom,
             "similarity_threshold": config.similarity_threshold,
-            "max_disk_bytes": config.max_disk_bytes
+            "max_disk_bytes": config.max_disk_bytes,
+            "hebbian_half_life_secs": config.hebbian_half_life_secs,
+            "hebbian_prune_threshold": config.hebbian_prune_threshold
         },
         "auth_enabled": state.auth_token.is_some()
     }))

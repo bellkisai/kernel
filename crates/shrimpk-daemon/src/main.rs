@@ -204,6 +204,7 @@ async fn main() -> anyhow::Result<()> {
     // Build context assembler for token-budgeted proxy injection
     let context_config = ContextConfig {
         max_echo_results: echo_config.proxy_max_echo_results,
+        max_conversation_turns: echo_config.proxy_max_conversation_turns,
         ..ContextConfig::default()
     };
     let context_assembler = Arc::new(ContextAssembler::new(context_config));

@@ -161,7 +161,7 @@ impl EchoEngine {
             bloom_dirty: Mutex::new(false),
             pii_filter,
             reformulator,
-            hebbian: RwLock::new(HebbianGraph::new(604_800.0, 0.01)),
+            hebbian: RwLock::new(HebbianGraph::new(config.hebbian_half_life_secs, config.hebbian_prune_threshold)),
             config,
             stats: Mutex::new(EchoStats::default()),
             consolidation_handle: Mutex::new(None),
@@ -1905,9 +1905,9 @@ impl EchoEngine {
 
         // Load Hebbian graph from disk
         let hebbian_path = config.data_dir.join("hebbian.json");
-        let hebbian = HebbianGraph::load(&hebbian_path, 604_800.0, 0.01).unwrap_or_else(|e| {
+        let hebbian = HebbianGraph::load(&hebbian_path, config.hebbian_half_life_secs, config.hebbian_prune_threshold).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "Failed to load Hebbian graph, starting fresh");
-            HebbianGraph::new(604_800.0, 0.01)
+            HebbianGraph::new(config.hebbian_half_life_secs, config.hebbian_prune_threshold)
         });
 
         // Rebuild vision LSH from loaded entries' vision_embedding fields

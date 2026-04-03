@@ -224,6 +224,22 @@ pub struct EchoConfig {
     #[serde(default)]
     pub use_full_actr_history: bool,
 
+    // --- Hebbian (KS60) ---
+    /// Hebbian co-activation half-life in seconds. Default: 604800 (7 days).
+    /// Lower values = faster decay = only recent co-activations matter.
+    /// Higher values = longer memory of co-activation patterns.
+    #[serde(default = "default_hebbian_half_life")]
+    pub hebbian_half_life_secs: f64,
+    /// Hebbian edge prune threshold. Edges with decayed weight below this
+    /// are removed during consolidation. Default: 0.01.
+    #[serde(default = "default_hebbian_prune_threshold")]
+    pub hebbian_prune_threshold: f64,
+
+    // --- Context Assembly (KS60) ---
+    /// Maximum conversation turns to include in proxy context. Default: 20.
+    #[serde(default = "default_proxy_max_conversation_turns")]
+    pub proxy_max_conversation_turns: usize,
+
     // --- Multimodal (KS31) ---
     /// Enabled modalities. Default: `[Text]`.
     /// Add `Vision` to enable CLIP image embedding, `Speech` for audio embedding.
@@ -242,6 +258,15 @@ fn default_true() -> bool {
 }
 fn default_activation_weight() -> f32 {
     0.1
+}
+fn default_hebbian_half_life() -> f64 {
+    604_800.0
+}
+fn default_hebbian_prune_threshold() -> f64 {
+    0.01
+}
+fn default_proxy_max_conversation_turns() -> usize {
+    20
 }
 
 fn default_modalities() -> Vec<crate::Modality> {
@@ -336,6 +361,9 @@ impl Default for EchoConfig {
             activation_weight: default_activation_weight(),
             importance_weight: 0.0,
             use_full_actr_history: false,
+            hebbian_half_life_secs: default_hebbian_half_life(),
+            hebbian_prune_threshold: default_hebbian_prune_threshold(),
+            proxy_max_conversation_turns: default_proxy_max_conversation_turns(),
             enabled_modalities: default_modalities(),
             vision_embedding_dim: default_vision_dim(),
             speech_embedding_dim: default_speech_dim(),
@@ -453,6 +481,9 @@ pub struct FileConfig {
     pub activation_weight: Option<f32>,
     pub importance_weight: Option<f32>,
     pub use_full_actr_history: Option<bool>,
+    pub hebbian_half_life_secs: Option<f64>,
+    pub hebbian_prune_threshold: Option<f64>,
+    pub proxy_max_conversation_turns: Option<usize>,
     pub enabled_modalities: Option<Vec<crate::Modality>>,
     pub vision_embedding_dim: Option<usize>,
     pub speech_embedding_dim: Option<usize>,
@@ -523,6 +554,16 @@ fn env_u64(name: &str) -> crate::Result<Option<u64>> {
 }
 
 fn env_f32(name: &str) -> crate::Result<Option<f32>> {
+    match std::env::var(name) {
+        Ok(val) => val
+            .parse()
+            .map(Some)
+            .map_err(|_| crate::ShrimPKError::Config(format!("{name}={val}: invalid float"))),
+        Err(_) => Ok(None),
+    }
+}
+
+fn env_f64(name: &str) -> crate::Result<Option<f64>> {
     match std::env::var(name) {
         Ok(val) => val
             .parse()
@@ -654,6 +695,15 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Some(v) = fc.use_full_actr_history {
             config.use_full_actr_history = v;
         }
+        if let Some(v) = fc.hebbian_half_life_secs {
+            config.hebbian_half_life_secs = v;
+        }
+        if let Some(v) = fc.hebbian_prune_threshold {
+            config.hebbian_prune_threshold = v;
+        }
+        if let Some(v) = fc.proxy_max_conversation_turns {
+            config.proxy_max_conversation_turns = v;
+        }
         if let Some(v) = fc.enabled_modalities {
             config.enabled_modalities = v;
         }
@@ -718,6 +768,12 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         if let Ok(backend) = v.parse::<RerankerBackend>() {
             config.reranker_backend = backend;
         }
+    }
+    if let Some(v) = env_f64("SHRIMPK_HEBBIAN_HALF_LIFE")? {
+        config.hebbian_half_life_secs = v;
+    }
+    if let Some(v) = env_f64("SHRIMPK_HEBBIAN_PRUNE_THRESHOLD")? {
+        config.hebbian_prune_threshold = v;
     }
 
     // Backward compatibility: if reranker_enabled=true but backend=None, default to Llm
