@@ -172,13 +172,22 @@ fn longmemeval_ie_1_profession() {
 
     println!("IE-1 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "Stripe"),
         "Top-3 should mention Stripe. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -202,13 +211,22 @@ fn longmemeval_ie_2_pet() {
 
     println!("IE-2 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "golden retriever"),
         "Top-3 should mention the golden retriever. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -232,13 +250,22 @@ fn longmemeval_ie_3_education() {
 
     println!("IE-3 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "British Columbia"),
         "Top-3 should mention University of British Columbia. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -262,13 +289,22 @@ fn longmemeval_ie_4_allergy() {
 
     println!("IE-4 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "shellfish"),
         "Top-3 should mention shellfish allergy. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -292,13 +328,22 @@ fn longmemeval_ie_5_hobby() {
 
     println!("IE-5 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "jiu-jitsu"),
         "Top-3 should mention Brazilian jiu-jitsu. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -331,12 +376,16 @@ fn longmemeval_msr_1_work_and_language() {
 
     println!("MSR-1 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // Should surface both the language preference memory AND the work context
-    let has_language = top_n_contains(&results, 5, "Rust")
-        || top_n_contains(&results, 5, "Go");
+    let has_language = top_n_contains(&results, 5, "Rust") || top_n_contains(&results, 5, "Go");
     let has_work = top_n_contains(&results, 5, "backend")
         || top_n_contains(&results, 5, "Stripe")
         || top_n_contains(&results, 5, "microservices");
@@ -344,12 +393,20 @@ fn longmemeval_msr_1_work_and_language() {
     assert!(
         has_language,
         "Top-5 should mention a programming language (Rust/Go). Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
     assert!(
         has_work,
         "Top-5 should mention work context (backend/Stripe). Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -374,17 +431,26 @@ fn longmemeval_msr_2_travel_and_language() {
 
     println!("MSR-2 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
-    let has_japanese = top_n_contains(&results, 5, "Japanese")
-        || top_n_contains(&results, 5, "JLPT");
+    let has_japanese =
+        top_n_contains(&results, 5, "Japanese") || top_n_contains(&results, 5, "JLPT");
     let has_tokyo = top_n_contains(&results, 5, "Tokyo");
 
     assert!(
         has_japanese && has_tokyo,
         "Top-5 should mention both Japanese study and Tokyo trip. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -409,18 +475,27 @@ fn longmemeval_msr_3_hobby_and_goal() {
 
     println!("MSR-3 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     let has_training = top_n_contains(&results, 5, "three times a week")
         || top_n_contains(&results, 5, "jiu-jitsu");
-    let has_goal = top_n_contains(&results, 5, "tournament")
-        || top_n_contains(&results, 5, "compete");
+    let has_goal =
+        top_n_contains(&results, 5, "tournament") || top_n_contains(&results, 5, "compete");
 
     assert!(
         has_training && has_goal,
         "Top-5 should surface both training schedule and tournament goal. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -445,7 +520,12 @@ fn longmemeval_msr_4_career_path() {
 
     println!("MSR-4 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     let has_shopify = top_n_contains(&results, 5, "Shopify");
@@ -454,7 +534,11 @@ fn longmemeval_msr_4_career_path() {
     assert!(
         has_shopify && has_stripe,
         "Top-5 should mention both Shopify and Stripe. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -479,11 +563,15 @@ fn longmemeval_msr_5_combined_goals() {
 
     println!("MSR-5 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
-    let has_house = top_n_contains(&results, 5, "house")
-        || top_n_contains(&results, 5, "Oakland");
+    let has_house = top_n_contains(&results, 5, "house") || top_n_contains(&results, 5, "Oakland");
     let has_startup = top_n_contains(&results, 5, "developer tools")
         || top_n_contains(&results, 5, "observability")
         || top_n_contains(&results, 5, "company");
@@ -491,7 +579,11 @@ fn longmemeval_msr_5_combined_goals() {
     assert!(
         has_house || has_startup,
         "Top-5 should surface at least one major life goal. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -537,19 +629,27 @@ fn longmemeval_tr_1_job_timeline() {
 
     println!("TR-1 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // All three jobs should surface in top-5
-    let has_startup = top_n_contains(&results, 5, "2018")
-        || top_n_contains(&results, 5, "startup");
+    let has_startup = top_n_contains(&results, 5, "2018") || top_n_contains(&results, 5, "startup");
     let has_shopify = top_n_contains(&results, 5, "Shopify");
     let has_stripe = top_n_contains(&results, 5, "Stripe");
 
     assert!(
         has_startup && has_shopify && has_stripe,
         "Top-5 should mention all three jobs. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -564,11 +664,17 @@ fn longmemeval_tr_2_recent_events() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("Last month I attended a Rust conference in Berlin", "session_a")
+            .store(
+                "Last month I attended a Rust conference in Berlin",
+                "session_a",
+            )
             .await
             .unwrap();
         engine
-            .store("Last week I gave a talk on observability at the local meetup", "session_b")
+            .store(
+                "Last week I gave a talk on observability at the local meetup",
+                "session_b",
+            )
             .await
             .unwrap();
         engine
@@ -585,7 +691,12 @@ fn longmemeval_tr_2_recent_events() {
 
     println!("TR-2 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // At minimum the most recent event should surface in top-3
@@ -594,7 +705,11 @@ fn longmemeval_tr_2_recent_events() {
             || top_n_contains(&results, 3, "meetup")
             || top_n_contains(&results, 3, "conference"),
         "Top-3 should mention at least one recent tech event. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 
     // All three should be in top-5
@@ -603,14 +718,21 @@ fn longmemeval_tr_2_recent_events() {
         .take(5)
         .filter(|r| {
             let c = r.content.to_lowercase();
-            c.contains("conference") || c.contains("meetup") || c.contains("rustconf") || c.contains("cfp")
+            c.contains("conference")
+                || c.contains("meetup")
+                || c.contains("rustconf")
+                || c.contains("cfp")
         })
         .count();
 
     assert!(
         event_count >= 2,
         "Top-5 should contain at least 2 of 3 tech events. Found {event_count}. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -625,17 +747,26 @@ fn longmemeval_tr_3_temporal_specificity() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("Last year I started learning piano as a complete beginner", "session_old")
+            .store(
+                "Last year I started learning piano as a complete beginner",
+                "session_old",
+            )
             .await
             .unwrap();
         engine
-            .store("Last week I finished learning my first Chopin nocturne on piano", "session_new")
+            .store(
+                "Last week I finished learning my first Chopin nocturne on piano",
+                "session_new",
+            )
             .await
             .unwrap();
 
         // Noise entries to make ranking harder
         engine
-            .store("I enjoy listening to classical music while coding", "session_noise")
+            .store(
+                "I enjoy listening to classical music while coding",
+                "session_noise",
+            )
             .await
             .unwrap();
         engine
@@ -652,19 +783,28 @@ fn longmemeval_tr_3_temporal_specificity() {
 
     println!("TR-3 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // Both piano memories should surface
     let has_beginner = top_n_contains(&results, 5, "beginner")
         || top_n_contains(&results, 5, "started learning piano");
-    let has_chopin = top_n_contains(&results, 5, "Chopin")
-        || top_n_contains(&results, 5, "nocturne");
+    let has_chopin =
+        top_n_contains(&results, 5, "Chopin") || top_n_contains(&results, 5, "nocturne");
 
     assert!(
         has_beginner || has_chopin,
         "Top-5 should mention piano progress. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -695,19 +835,28 @@ fn longmemeval_ku_1_job_change() {
     let results = rt.block_on(async {
         // Old fact
         engine
-            .store("I work as a backend engineer at Google on the Cloud Spanner team", "session_old")
+            .store(
+                "I work as a backend engineer at Google on the Cloud Spanner team",
+                "session_old",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("I enjoy hiking on weekends in the bay area", "session_noise")
+            .store(
+                "I enjoy hiking on weekends in the bay area",
+                "session_noise",
+            )
             .await
             .unwrap();
 
         // Correction (stored later, simulating a new conversation)
         engine
-            .store("I left Google last month. I now work at Meta on the infrastructure team", "session_new")
+            .store(
+                "I left Google last month. I now work at Meta on the infrastructure team",
+                "session_new",
+            )
             .await
             .unwrap();
 
@@ -720,14 +869,23 @@ fn longmemeval_ku_1_job_change() {
 
     println!("KU-1 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // The Meta memory should surface
     assert!(
         top_n_contains(&results, 3, "Meta"),
         "Top-3 should mention Meta (the current employer). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 
     // Both should surface (system doesn't delete old facts, but both are relevant)
@@ -736,7 +894,11 @@ fn longmemeval_ku_1_job_change() {
     assert!(
         has_google && has_meta,
         "Top-5 should surface both old and new employer for context. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -751,15 +913,24 @@ fn longmemeval_ku_2_address_change() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I live in a one-bedroom apartment in downtown Seattle", "session_old")
+            .store(
+                "I live in a one-bedroom apartment in downtown Seattle",
+                "session_old",
+            )
             .await
             .unwrap();
         engine
-            .store("My favorite restaurant is the Thai place on Pike Street in Seattle", "session_noise")
+            .store(
+                "My favorite restaurant is the Thai place on Pike Street in Seattle",
+                "session_noise",
+            )
             .await
             .unwrap();
         engine
-            .store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "session_new")
+            .store(
+                "I just moved to Portland, Oregon and I'm renting a house in the Pearl District",
+                "session_new",
+            )
             .await
             .unwrap();
 
@@ -772,14 +943,23 @@ fn longmemeval_ku_2_address_change() {
 
     println!("KU-2 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // Portland should surface
     assert!(
         top_n_contains(&results, 3, "Portland"),
         "Top-3 should mention Portland (current residence). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -815,21 +995,34 @@ fn longmemeval_ku_3_tech_preference_update() {
 
     println!("KU-3 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // Rust (current) should surface
     assert!(
         top_n_contains(&results, 3, "Rust"),
         "Top-3 should mention Rust (current preference). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 
     // Python (old) should also surface since it's semantically relevant
     assert!(
         top_n_contains(&results, 5, "Python"),
         "Top-5 should also mention Python (for context). Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -853,15 +1046,24 @@ fn longmemeval_pt_1_ide_preference() {
     let results = rt.block_on(async {
         // Preferences evolve over time
         engine
-            .store("I use Sublime Text as my code editor, it's fast and lightweight", "month1")
+            .store(
+                "I use Sublime Text as my code editor, it's fast and lightweight",
+                "month1",
+            )
             .await
             .unwrap();
         engine
-            .store("I switched to VS Code because of the extension ecosystem", "month3")
+            .store(
+                "I switched to VS Code because of the extension ecosystem",
+                "month3",
+            )
             .await
             .unwrap();
         engine
-            .store("I've moved to Neovim with a custom Lua config for maximum speed", "month6")
+            .store(
+                "I've moved to Neovim with a custom Lua config for maximum speed",
+                "month6",
+            )
             .await
             .unwrap();
 
@@ -874,7 +1076,12 @@ fn longmemeval_pt_1_ide_preference() {
 
     println!("PT-1 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // All three should surface as they're all about editors
@@ -885,7 +1092,11 @@ fn longmemeval_pt_1_ide_preference() {
     assert!(
         has_neovim,
         "Top-5 should mention Neovim (most recent preference). Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 
     // At least 2 of 3 editor preferences should surface
@@ -914,11 +1125,17 @@ fn longmemeval_pt_2_dietary_preference() {
             .await
             .unwrap();
         engine
-            .store("I've started reducing meat, mostly eating vegetarian meals now", "mid")
+            .store(
+                "I've started reducing meat, mostly eating vegetarian meals now",
+                "mid",
+            )
             .await
             .unwrap();
         engine
-            .store("I'm fully vegan now, it's been great for my energy levels", "recent")
+            .store(
+                "I'm fully vegan now, it's been great for my energy levels",
+                "recent",
+            )
             .await
             .unwrap();
 
@@ -937,13 +1154,22 @@ fn longmemeval_pt_2_dietary_preference() {
 
     println!("PT-2 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "vegan"),
         "Top-3 should mention vegan (most recent dietary preference). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -962,17 +1188,26 @@ fn longmemeval_pt_3_coffee_preference() {
             .await
             .unwrap();
         engine
-            .store("I switched to espresso-based drinks, usually a latte with whole milk", "month4")
+            .store(
+                "I switched to espresso-based drinks, usually a latte with whole milk",
+                "month4",
+            )
             .await
             .unwrap();
         engine
-            .store("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "month8")
+            .store(
+                "Now I drink pour-over black coffee, no milk no sugar, using a Hario V60",
+                "month8",
+            )
             .await
             .unwrap();
 
         // Additional noise
         engine
-            .store("I like green tea in the afternoon as a lighter caffeine option", "noise")
+            .store(
+                "I like green tea in the afternoon as a lighter caffeine option",
+                "noise",
+            )
             .await
             .unwrap();
 
@@ -985,7 +1220,12 @@ fn longmemeval_pt_3_coffee_preference() {
 
     println!("PT-3 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // The most recent preference should surface
@@ -994,7 +1234,11 @@ fn longmemeval_pt_3_coffee_preference() {
             || top_n_contains(&results, 3, "V60")
             || top_n_contains(&results, 3, "black coffee"),
         "Top-3 should mention current coffee preference (pour-over/V60/black). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1036,14 +1280,22 @@ fn longmemeval_pt_4_os_preference() {
 
     println!("PT-4 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "Arch")
-            || top_n_contains(&results, 3, "Hyprland"),
+        top_n_contains(&results, 3, "Arch") || top_n_contains(&results, 3, "Hyprland"),
         "Top-3 should mention Arch Linux (most recent OS preference). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1490,20 +1742,12 @@ fn longmemeval_full_scorecard() {
     println!();
     println!("=== LONGMEMEVAL SCORECARD ===");
     println!("Total tests:      {total_tests}");
-    println!(
-        "Top-3 accuracy:   {total_strict}/{total_tests} ({strict_pct:.1}%)"
-    );
-    println!(
-        "Top-5 accuracy:   {total_relaxed}/{total_tests} ({relaxed_pct:.1}%)"
-    );
+    println!("Top-3 accuracy:   {total_strict}/{total_tests} ({strict_pct:.1}%)");
+    println!("Top-5 accuracy:   {total_relaxed}/{total_tests} ({relaxed_pct:.1}%)");
     println!();
     println!("Hindsight claims: 91.4% on original LongMemEval");
-    println!(
-        "ShrimPK (top-3):  {strict_pct:.1}%"
-    );
-    println!(
-        "ShrimPK (top-5):  {relaxed_pct:.1}%"
-    );
+    println!("ShrimPK (top-3):  {strict_pct:.1}%");
+    println!("ShrimPK (top-5):  {relaxed_pct:.1}%");
     println!();
 
     // Soft assertion: we expect to hit at least 60% on top-5 (relaxed)
@@ -1567,8 +1811,10 @@ fn run_full_consolidation(engine: &EchoEngine) -> usize {
                 let result = rt.block_on(engine.consolidate_now());
                 println!(
                     "  Consolidation pass {pass}: facts={}, merged={}, pruned={}, duration={}ms",
-                    result.facts_extracted, result.duplicates_merged,
-                    result.hebbian_edges_pruned, result.duration_ms
+                    result.facts_extracted,
+                    result.duplicates_merged,
+                    result.hebbian_edges_pruned,
+                    result.duration_ms
                 );
                 facts += result.facts_extracted;
                 if result.facts_extracted == 0 {
@@ -1639,11 +1885,23 @@ fn longmemeval_consolidated_scorecard() {
     // Query phase — new block_on
     let ie_results = rt.block_on(async {
         let queries = vec![
-            ("IE-1: Profession", "What is my job? Where do I work?", "Stripe"),
+            (
+                "IE-1: Profession",
+                "What is my job? Where do I work?",
+                "Stripe",
+            ),
             ("IE-2: Pet", "Do I have any pets?", "golden retriever"),
-            ("IE-3: Education", "Where did I go to college?", "British Columbia"),
+            (
+                "IE-3: Education",
+                "Where did I go to college?",
+                "British Columbia",
+            ),
             ("IE-4: Allergy", "What am I allergic to?", "shellfish"),
-            ("IE-5: Hobby", "What sports or physical activities do I do?", "jiu-jitsu"),
+            (
+                "IE-5: Hobby",
+                "What sports or physical activities do I do?",
+                "jiu-jitsu",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -1651,9 +1909,19 @@ fn longmemeval_consolidated_scorecard() {
             let r = engine.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             for (i, res) in r.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, res.similarity, res.final_score, &res.content[..res.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    res.similarity,
+                    res.final_score,
+                    &res.content[..res.content.len().min(70)]
+                );
             }
             results.push((hit3, hit5));
         }
@@ -1692,11 +1960,31 @@ fn longmemeval_consolidated_scorecard() {
     run_full_consolidation(&engine2);
     let msr_results = rt2.block_on(async {
         let queries = vec![
-            ("MSR-1: Work+Lang", "What programming languages do I use at work?", "Rust"),
-            ("MSR-2: Travel+Lang", "Have I traveled anywhere related to languages I'm learning?", "Tokyo"),
-            ("MSR-3: Hobby+Goal", "What goals do I have related to my hobbies?", "tournament"),
-            ("MSR-4: Career", "Tell me about my career progression", "Stripe"),
-            ("MSR-5: Life Goals", "What are my big life goals? What am I saving up for?", "house"),
+            (
+                "MSR-1: Work+Lang",
+                "What programming languages do I use at work?",
+                "Rust",
+            ),
+            (
+                "MSR-2: Travel+Lang",
+                "Have I traveled anywhere related to languages I'm learning?",
+                "Tokyo",
+            ),
+            (
+                "MSR-3: Hobby+Goal",
+                "What goals do I have related to my hobbies?",
+                "tournament",
+            ),
+            (
+                "MSR-4: Career",
+                "Tell me about my career progression",
+                "Stripe",
+            ),
+            (
+                "MSR-5: Life Goals",
+                "What are my big life goals? What am I saving up for?",
+                "house",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -1704,7 +1992,11 @@ fn longmemeval_consolidated_scorecard() {
             let r = engine2.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             results.push((hit3, hit5));
         }
         results
@@ -1734,7 +2026,11 @@ fn longmemeval_consolidated_scorecard() {
         let queries = vec![
             ("KU-1: Job Change", "Where do I work now?", "Meta"),
             ("KU-2: Address", "Where do I live now?", "Portland"),
-            ("KU-3: Language", "What programming language do I mainly use?", "Rust"),
+            (
+                "KU-3: Language",
+                "What programming language do I mainly use?",
+                "Rust",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -1742,7 +2038,11 @@ fn longmemeval_consolidated_scorecard() {
             let r = engine3.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             results.push((hit3, hit5));
         }
         results
@@ -1785,9 +2085,19 @@ fn longmemeval_consolidated_scorecard() {
             let r = engine4.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             for (i, res) in r.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, res.similarity, res.final_score, &res.content[..res.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    res.similarity,
+                    res.final_score,
+                    &res.content[..res.content.len().min(70)]
+                );
             }
             results.push((hit3, hit5));
         }
@@ -1796,7 +2106,8 @@ fn longmemeval_consolidated_scorecard() {
     drop(rt4);
 
     // --- SCORECARD ---
-    let all_results: Vec<(bool, bool)> = ie_results.into_iter()
+    let all_results: Vec<(bool, bool)> = ie_results
+        .into_iter()
         .chain(msr_results)
         .chain(ku_results)
         .chain(pt_results)
@@ -1911,11 +2222,23 @@ fn longmemeval_reranker_scorecard() {
     // Query phase
     let ie_results = rt.block_on(async {
         let queries = vec![
-            ("IE-1: Profession", "What is my job? Where do I work?", "Stripe"),
+            (
+                "IE-1: Profession",
+                "What is my job? Where do I work?",
+                "Stripe",
+            ),
             ("IE-2: Pet", "Do I have any pets?", "golden retriever"),
-            ("IE-3: Education", "Where did I go to college?", "British Columbia"),
+            (
+                "IE-3: Education",
+                "Where did I go to college?",
+                "British Columbia",
+            ),
             ("IE-4: Allergy", "What am I allergic to?", "shellfish"),
-            ("IE-5: Hobby", "What sports or physical activities do I do?", "jiu-jitsu"),
+            (
+                "IE-5: Hobby",
+                "What sports or physical activities do I do?",
+                "jiu-jitsu",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -1923,9 +2246,19 @@ fn longmemeval_reranker_scorecard() {
             let r = engine.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             for (i, res) in r.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, res.similarity, res.final_score, &res.content[..res.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    res.similarity,
+                    res.final_score,
+                    &res.content[..res.content.len().min(70)]
+                );
             }
             results.push((hit3, hit5));
         }
@@ -1959,11 +2292,31 @@ fn longmemeval_reranker_scorecard() {
     run_full_consolidation(&engine2);
     let msr_results = rt2.block_on(async {
         let queries = vec![
-            ("MSR-1: Work+Lang", "What programming languages do I use at work?", "Rust"),
-            ("MSR-2: Travel+Lang", "Have I traveled anywhere related to languages I'm learning?", "Tokyo"),
-            ("MSR-3: Hobby+Goal", "What goals do I have related to my hobbies?", "tournament"),
-            ("MSR-4: Career", "Tell me about my career progression", "Stripe"),
-            ("MSR-5: Life Goals", "What are my big life goals? What am I saving up for?", "house"),
+            (
+                "MSR-1: Work+Lang",
+                "What programming languages do I use at work?",
+                "Rust",
+            ),
+            (
+                "MSR-2: Travel+Lang",
+                "Have I traveled anywhere related to languages I'm learning?",
+                "Tokyo",
+            ),
+            (
+                "MSR-3: Hobby+Goal",
+                "What goals do I have related to my hobbies?",
+                "tournament",
+            ),
+            (
+                "MSR-4: Career",
+                "Tell me about my career progression",
+                "Stripe",
+            ),
+            (
+                "MSR-5: Life Goals",
+                "What are my big life goals? What am I saving up for?",
+                "house",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -1971,7 +2324,11 @@ fn longmemeval_reranker_scorecard() {
             let r = engine2.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             results.push((hit3, hit5));
         }
         results
@@ -1999,7 +2356,11 @@ fn longmemeval_reranker_scorecard() {
         let queries = vec![
             ("KU-1: Job Change", "Where do I work now?", "Meta"),
             ("KU-2: Address", "Where do I live now?", "Portland"),
-            ("KU-3: Language", "What programming language do I mainly use?", "Rust"),
+            (
+                "KU-3: Language",
+                "What programming language do I mainly use?",
+                "Rust",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -2007,9 +2368,19 @@ fn longmemeval_reranker_scorecard() {
             let r = engine3.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             for (i, res) in r.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, res.similarity, res.final_score, &res.content[..res.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    res.similarity,
+                    res.final_score,
+                    &res.content[..res.content.len().min(70)]
+                );
             }
             results.push((hit3, hit5));
         }
@@ -2051,9 +2422,19 @@ fn longmemeval_reranker_scorecard() {
             let r = engine4.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             for (i, res) in r.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, res.similarity, res.final_score, &res.content[..res.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    res.similarity,
+                    res.final_score,
+                    &res.content[..res.content.len().min(70)]
+                );
             }
             results.push((hit3, hit5));
         }
@@ -2062,7 +2443,8 @@ fn longmemeval_reranker_scorecard() {
     drop(rt4);
 
     // --- SCORECARD ---
-    let all_results: Vec<(bool, bool)> = ie_results.into_iter()
+    let all_results: Vec<(bool, bool)> = ie_results
+        .into_iter()
         .chain(msr_results)
         .chain(ku_results)
         .chain(pt_results)
@@ -2177,11 +2559,23 @@ fn longmemeval_hyde_scorecard() {
     // Query phase
     let ie_results = rt.block_on(async {
         let queries = vec![
-            ("IE-1: Profession", "What is my job? Where do I work?", "Stripe"),
+            (
+                "IE-1: Profession",
+                "What is my job? Where do I work?",
+                "Stripe",
+            ),
             ("IE-2: Pet", "Do I have any pets?", "golden retriever"),
-            ("IE-3: Education", "Where did I go to college?", "British Columbia"),
+            (
+                "IE-3: Education",
+                "Where did I go to college?",
+                "British Columbia",
+            ),
             ("IE-4: Allergy", "What am I allergic to?", "shellfish"),
-            ("IE-5: Hobby", "What sports or physical activities do I do?", "jiu-jitsu"),
+            (
+                "IE-5: Hobby",
+                "What sports or physical activities do I do?",
+                "jiu-jitsu",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -2189,9 +2583,19 @@ fn longmemeval_hyde_scorecard() {
             let r = engine.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             for (i, res) in r.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, res.similarity, res.final_score, &res.content[..res.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    res.similarity,
+                    res.final_score,
+                    &res.content[..res.content.len().min(70)]
+                );
             }
             results.push((hit3, hit5));
         }
@@ -2227,11 +2631,31 @@ fn longmemeval_hyde_scorecard() {
     run_full_consolidation(&engine2);
     let msr_results = rt2.block_on(async {
         let queries = vec![
-            ("MSR-1: Work+Lang", "What programming languages do I use at work?", "Rust"),
-            ("MSR-2: Travel+Lang", "Have I traveled anywhere related to languages I'm learning?", "Tokyo"),
-            ("MSR-3: Hobby+Goal", "What goals do I have related to my hobbies?", "tournament"),
-            ("MSR-4: Career", "Tell me about my career progression", "Stripe"),
-            ("MSR-5: Life Goals", "What are my big life goals? What am I saving up for?", "house"),
+            (
+                "MSR-1: Work+Lang",
+                "What programming languages do I use at work?",
+                "Rust",
+            ),
+            (
+                "MSR-2: Travel+Lang",
+                "Have I traveled anywhere related to languages I'm learning?",
+                "Tokyo",
+            ),
+            (
+                "MSR-3: Hobby+Goal",
+                "What goals do I have related to my hobbies?",
+                "tournament",
+            ),
+            (
+                "MSR-4: Career",
+                "Tell me about my career progression",
+                "Stripe",
+            ),
+            (
+                "MSR-5: Life Goals",
+                "What are my big life goals? What am I saving up for?",
+                "house",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -2239,7 +2663,11 @@ fn longmemeval_hyde_scorecard() {
             let r = engine2.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             results.push((hit3, hit5));
         }
         results
@@ -2269,7 +2697,11 @@ fn longmemeval_hyde_scorecard() {
         let queries = vec![
             ("KU-1: Job Change", "Where do I work now?", "Meta"),
             ("KU-2: Address", "Where do I live now?", "Portland"),
-            ("KU-3: Language", "What programming language do I mainly use?", "Rust"),
+            (
+                "KU-3: Language",
+                "What programming language do I mainly use?",
+                "Rust",
+            ),
         ];
 
         let mut results = Vec::new();
@@ -2277,7 +2709,11 @@ fn longmemeval_hyde_scorecard() {
             let r = engine3.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             results.push((hit3, hit5));
         }
         results
@@ -2320,9 +2756,19 @@ fn longmemeval_hyde_scorecard() {
             let r = engine4.echo(query, 5).await.expect("echo");
             let hit3 = top_n_contains(&r, 3, needle);
             let hit5 = top_n_contains(&r, 5, needle);
-            println!("{name}: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if hit3 { "PASS" } else { "MISS" },
+                if hit5 { "PASS" } else { "MISS" }
+            );
             for (i, res) in r.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, res.similarity, res.final_score, &res.content[..res.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    res.similarity,
+                    res.final_score,
+                    &res.content[..res.content.len().min(70)]
+                );
             }
             results.push((hit3, hit5));
         }
@@ -2331,7 +2777,8 @@ fn longmemeval_hyde_scorecard() {
     drop(rt4);
 
     // --- SCORECARD ---
-    let all_results: Vec<(bool, bool)> = ie_results.into_iter()
+    let all_results: Vec<(bool, bool)> = ie_results
+        .into_iter()
         .chain(msr_results)
         .chain(ku_results)
         .chain(pt_results)
@@ -2381,7 +2828,8 @@ fn longmemeval_combined_config(data_dir: PathBuf) -> EchoConfig {
              3. No colons, labels, or key-value pairs\n\n\
              Example:\n  The user uses Neovim\n  The user lives in Berlin\n  \
              The user switched to Python from Java\n\n\
-             Max {max_facts} facts. If none found, output NONE.".to_string()
+             Max {max_facts} facts. If none found, output NONE."
+                .to_string(),
         ),
         ..Default::default()
     }
@@ -2394,7 +2842,8 @@ fn longmemeval_combined_scorecard() {
 
     // IE
     let dir = tempdir().expect("temp dir");
-    let engine = EchoEngine::new(longmemeval_combined_config(dir.path().to_path_buf())).expect("init");
+    let engine =
+        EchoEngine::new(longmemeval_combined_config(dir.path().to_path_buf())).expect("init");
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         for text in &[
@@ -2423,25 +2872,43 @@ fn longmemeval_combined_scorecard() {
             "I have a standing desk and use a split ergonomic keyboard",
             "My morning routine is meditation, coffee, then 30 minutes of reading",
             "I run a small Kubernetes cluster at home for side projects",
-        ] { engine.store(text, "profile").await.expect("store"); }
+        ] {
+            engine.store(text, "profile").await.expect("store");
+        }
         ()
     });
     println!("Running consolidation...");
     run_full_consolidation(&engine);
     let ie = rt.block_on(async {
         let q = vec![
-            ("IE-1: Profession", "What is my job? Where do I work?", "Stripe"),
+            (
+                "IE-1: Profession",
+                "What is my job? Where do I work?",
+                "Stripe",
+            ),
             ("IE-2: Pet", "Do I have any pets?", "golden retriever"),
-            ("IE-3: Education", "Where did I go to college?", "British Columbia"),
+            (
+                "IE-3: Education",
+                "Where did I go to college?",
+                "British Columbia",
+            ),
             ("IE-4: Allergy", "What am I allergic to?", "shellfish"),
-            ("IE-5: Hobby", "What sports or physical activities do I do?", "jiu-jitsu"),
+            (
+                "IE-5: Hobby",
+                "What sports or physical activities do I do?",
+                "jiu-jitsu",
+            ),
         ];
         let mut r = Vec::new();
         for (name, query, needle) in &q {
             let res = engine.echo(query, 5).await.expect("echo");
             let h3 = top_n_contains(&res, 3, needle);
             let h5 = top_n_contains(&res, 5, needle);
-            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if h3 { "PASS" } else { "MISS" },
+                if h5 { "PASS" } else { "MISS" }
+            );
             r.push((h3, h5));
         }
         r
@@ -2450,7 +2917,8 @@ fn longmemeval_combined_scorecard() {
 
     // MSR
     let dir2 = tempdir().expect("temp dir");
-    let engine2 = EchoEngine::new(longmemeval_combined_config(dir2.path().to_path_buf())).expect("init");
+    let engine2 =
+        EchoEngine::new(longmemeval_combined_config(dir2.path().to_path_buf())).expect("init");
     let rt2 = tokio::runtime::Runtime::new().unwrap();
     rt2.block_on(async {
         for text in &[
@@ -2464,25 +2932,51 @@ fn longmemeval_combined_scorecard() {
             "I want to compete in a jiu-jitsu tournament by the end of the year",
             "My long-term goal is to start a developer tools company focused on observability",
             "I'm saving for a house in the Oakland Hills area",
-        ] { engine2.store(text, "profile").await.expect("store"); }
+        ] {
+            engine2.store(text, "profile").await.expect("store");
+        }
         ()
     });
     println!("\nRunning MSR consolidation...");
     run_full_consolidation(&engine2);
     let msr = rt2.block_on(async {
         let q = vec![
-            ("MSR-1: Work+Lang", "What programming languages do I use at work?", "Rust"),
-            ("MSR-2: Travel+Lang", "Have I traveled anywhere related to languages I'm learning?", "Tokyo"),
-            ("MSR-3: Hobby+Goal", "What goals do I have related to my hobbies?", "tournament"),
-            ("MSR-4: Career", "Tell me about my career progression", "Stripe"),
-            ("MSR-5: Life Goals", "What are my big life goals? What am I saving up for?", "house"),
+            (
+                "MSR-1: Work+Lang",
+                "What programming languages do I use at work?",
+                "Rust",
+            ),
+            (
+                "MSR-2: Travel+Lang",
+                "Have I traveled anywhere related to languages I'm learning?",
+                "Tokyo",
+            ),
+            (
+                "MSR-3: Hobby+Goal",
+                "What goals do I have related to my hobbies?",
+                "tournament",
+            ),
+            (
+                "MSR-4: Career",
+                "Tell me about my career progression",
+                "Stripe",
+            ),
+            (
+                "MSR-5: Life Goals",
+                "What are my big life goals? What am I saving up for?",
+                "house",
+            ),
         ];
         let mut r = Vec::new();
         for (name, query, needle) in &q {
             let res = engine2.echo(query, 5).await.expect("echo");
             let h3 = top_n_contains(&res, 3, needle);
             let h5 = top_n_contains(&res, 5, needle);
-            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if h3 { "PASS" } else { "MISS" },
+                if h5 { "PASS" } else { "MISS" }
+            );
             r.push((h3, h5));
         }
         r
@@ -2491,7 +2985,8 @@ fn longmemeval_combined_scorecard() {
 
     // KU
     let dir3 = tempdir().expect("temp dir");
-    let engine3 = EchoEngine::new(longmemeval_combined_config(dir3.path().to_path_buf())).expect("init");
+    let engine3 =
+        EchoEngine::new(longmemeval_combined_config(dir3.path().to_path_buf())).expect("init");
     let rt3 = tokio::runtime::Runtime::new().unwrap();
     rt3.block_on(async {
         engine3.store("I work as a backend engineer at Google on the Cloud Spanner team", "old").await.unwrap();
@@ -2509,14 +3004,22 @@ fn longmemeval_combined_scorecard() {
         let q = vec![
             ("KU-1: Job Change", "Where do I work now?", "Meta"),
             ("KU-2: Address", "Where do I live now?", "Portland"),
-            ("KU-3: Language", "What programming language do I mainly use?", "Rust"),
+            (
+                "KU-3: Language",
+                "What programming language do I mainly use?",
+                "Rust",
+            ),
         ];
         let mut r = Vec::new();
         for (name, query, needle) in &q {
             let res = engine3.echo(query, 5).await.expect("echo");
             let h3 = top_n_contains(&res, 3, needle);
             let h5 = top_n_contains(&res, 5, needle);
-            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if h3 { "PASS" } else { "MISS" },
+                if h5 { "PASS" } else { "MISS" }
+            );
             r.push((h3, h5));
         }
         r
@@ -2525,7 +3028,8 @@ fn longmemeval_combined_scorecard() {
 
     // PT
     let dir4 = tempdir().expect("temp dir");
-    let engine4 = EchoEngine::new(longmemeval_combined_config(dir4.path().to_path_buf())).expect("init");
+    let engine4 =
+        EchoEngine::new(longmemeval_combined_config(dir4.path().to_path_buf())).expect("init");
     let rt4 = tokio::runtime::Runtime::new().unwrap();
     rt4.block_on(async {
         engine4.store("I use Sublime Text as my code editor, it's fast and lightweight", "m1").await.unwrap();
@@ -2555,9 +3059,19 @@ fn longmemeval_combined_scorecard() {
             let res = engine4.echo(query, 5).await.expect("echo");
             let h3 = top_n_contains(&res, 3, needle);
             let h5 = top_n_contains(&res, 5, needle);
-            println!("{name}: top3={} top5={}", if h3 {"PASS"} else {"MISS"}, if h5 {"PASS"} else {"MISS"});
+            println!(
+                "{name}: top3={} top5={}",
+                if h3 { "PASS" } else { "MISS" },
+                if h5 { "PASS" } else { "MISS" }
+            );
             for (i, r) in res.iter().take(3).enumerate() {
-                println!("  #{}: sim={:.3} score={:.3} {}", i+1, r.similarity, r.final_score, &r.content[..r.content.len().min(70)]);
+                println!(
+                    "  #{}: sim={:.3} score={:.3} {}",
+                    i + 1,
+                    r.similarity,
+                    r.final_score,
+                    &r.content[..r.content.len().min(70)]
+                );
             }
             r.push((h3, h5));
         }

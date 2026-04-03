@@ -38,6 +38,8 @@ pub struct ConsolidationResult {
     pub supersedes_created: usize,
     /// Number of memories that received Tier 2 labels during this pass (ADR-015).
     pub labels_enriched: usize,
+    /// Number of memories whose importance score was recomputed during this pass.
+    pub importance_recomputed: usize,
     /// Wall-clock duration of the consolidation pass in milliseconds.
     pub duration_ms: u64,
 }
@@ -102,11 +104,66 @@ pub fn consolidate(
     // justified for a background maintenance pass).
     let store_len = store.len();
     if store_len > 1 && store_len <= MAX_STORE_SIZE_FOR_DEDUP {
-        result.duplicates_merged = merge_near_duplicates(store);
+        result.duplicates_merged = merge_near_duplicates(store, config.use_importance);
     }
 
     // Step 4: Decay echo counts on stale memories
     result.echo_counts_decayed = decay_echo_counts(store);
+
+    // Step 4.5: Recompute importance scores
+    //
+    // When use_importance is enabled, walk all entries and recompute the
+    // multi-signal importance score for any entry whose importance_computed_at
+    // is None or older than 1 hour. Uses a rolling mean of the most recent
+    // 50 embeddings as the baseline for the surprise/novelty signal.
+    if config.use_importance {
+        let embeddings_snapshot: Vec<Vec<f32>> = store.all_embeddings().to_vec();
+        let non_empty_embs: Vec<&[f32]> = embeddings_snapshot
+            .iter()
+            .filter(|e| !e.is_empty())
+            .map(|e| e.as_slice())
+            .collect();
+
+        // Rolling mean of last 50 embeddings (for surprise score)
+        let recent_embs: Vec<&[f32]> = non_empty_embs.iter().rev().take(50).copied().collect();
+        let embedding_mean = crate::importance::compute_embedding_mean(&recent_embs);
+        let mean_ref = if embedding_mean.is_empty() {
+            None
+        } else {
+            Some(embedding_mean.as_slice())
+        };
+
+        let now = Utc::now();
+        let stale_threshold = now - Duration::hours(1);
+        let entry_count = store.len();
+
+        for idx in 0..entry_count {
+            let should_recompute = store.entry_at(idx).is_some_and(|entry| {
+                entry
+                    .importance_computed_at
+                    .map(|t| t < stale_threshold)
+                    .unwrap_or(true)
+            });
+
+            if should_recompute {
+                // Snapshot the embedding for this index before borrowing mutably
+                let emb_snapshot = embeddings_snapshot.get(idx).cloned();
+                if let Some(ref emb) = emb_snapshot
+                    && !emb.is_empty()
+                    && let Some(entry) = store.entry_at(idx)
+                {
+                    let new_importance =
+                        crate::importance::compute_importance(entry, emb, mean_ref);
+                    // Now borrow mutably to update
+                    if let Some(entry_mut) = store.entry_at_mut(idx) {
+                        entry_mut.importance = new_importance;
+                        entry_mut.importance_computed_at = Some(now);
+                        result.importance_recomputed += 1;
+                    }
+                }
+            }
+        }
+    }
 
     // Step 5: LLM fact extraction on un-enriched memories (sleep consolidation)
     //
@@ -120,7 +177,7 @@ pub fn consolidate(
     const MAX_ENRICHMENTS_PER_CYCLE: usize = 10;
 
     if consolidator.name() != "noop" {
-        let unenriched: Vec<usize> = (0..store.len())
+        let mut unenriched: Vec<usize> = (0..store.len())
             .filter(|&i| {
                 store.entry_at(i).is_some_and(|e| {
                     !e.enriched
@@ -129,6 +186,23 @@ pub fn consolidate(
                         && e.modality == shrimpk_core::Modality::Text
                 })
             })
+            .collect();
+
+        // When importance scoring is enabled, sort candidates by importance
+        // (descending) so the most important un-enriched memories get
+        // processed first within the per-cycle batch limit.
+        if config.use_importance {
+            unenriched.sort_unstable_by(|&a, &b| {
+                let imp_a = store.entry_at(a).map(|e| e.importance).unwrap_or(0.0);
+                let imp_b = store.entry_at(b).map(|e| e.importance).unwrap_or(0.0);
+                imp_b
+                    .partial_cmp(&imp_a)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+
+        let unenriched: Vec<usize> = unenriched
+            .into_iter()
             .take(MAX_ENRICHMENTS_PER_CYCLE)
             .collect();
 
@@ -195,8 +269,7 @@ pub fn consolidate(
                     // a Hebbian edge between parent and child.
                     if let Some(rel) = detect_relationship(fact) {
                         hebbian.co_activate_with_relationship(
-                            idx as u32,
-                            child_idx,
+                            idx as u32, child_idx,
                             0.5, // moderate strength for extracted relationships
                             rel,
                         );
@@ -261,9 +334,9 @@ pub fn consolidate(
     if config.use_labels {
         let needs_tier2: Vec<usize> = (0..store.len())
             .filter(|&i| {
-                store.entry_at(i).is_some_and(|e| {
-                    e.enriched && e.label_version == 1
-                })
+                store
+                    .entry_at(i)
+                    .is_some_and(|e| e.enriched && e.label_version == 1)
             })
             .take(MAX_ENRICHMENTS_PER_CYCLE)
             .collect();
@@ -275,7 +348,10 @@ pub fn consolidate(
             };
 
             // Skip non-text modality (vision/speech get labels differently)
-            if store.entry_at(idx).is_some_and(|e| e.modality != shrimpk_core::Modality::Text) {
+            if store
+                .entry_at(idx)
+                .is_some_and(|e| e.modality != shrimpk_core::Modality::Text)
+            {
                 continue;
             }
 
@@ -314,7 +390,8 @@ pub fn consolidate(
 
                 // Update label index for new labels
                 for label in &new_labels {
-                    store.label_index_mut()
+                    store
+                        .label_index_mut()
                         .entry(label.clone())
                         .or_default()
                         .push(idx as u32);
@@ -344,11 +421,13 @@ pub fn detect_relationship(fact: &str) -> Option<RelationshipType> {
     let lower = fact.to_lowercase();
 
     // WorksAt patterns: "X works at Y", "X employed at Y", "X joined Y"
-    let works_re = Regex::new(
-        r"(?i)(?:works?\s+at|employed\s+at|joined|works?\s+for|employed\s+by)\s+(.+)"
-    ).ok()?;
+    let works_re =
+        Regex::new(r"(?i)(?:works?\s+at|employed\s+at|joined|works?\s+for|employed\s+by)\s+(.+)")
+            .ok()?;
     if let Some(caps) = works_re.captures(&lower) {
-        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        let entity = caps
+            .get(1)
+            .map(|m| extract_entity(fact, m.start(), m.end()));
         if let Some(e) = entity {
             if !e.is_empty() {
                 return Some(RelationshipType::WorksAt(e));
@@ -358,10 +437,13 @@ pub fn detect_relationship(fact: &str) -> Option<RelationshipType> {
 
     // LivesIn patterns: "X lives in Y", "X moved to Y", "X based in Y"
     let lives_re = Regex::new(
-        r"(?i)(?:lives?\s+in|moved\s+to|based\s+in|relocated\s+to|resides?\s+in)\s+(.+)"
-    ).ok()?;
+        r"(?i)(?:lives?\s+in|moved\s+to|based\s+in|relocated\s+to|resides?\s+in)\s+(.+)",
+    )
+    .ok()?;
     if let Some(caps) = lives_re.captures(&lower) {
-        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        let entity = caps
+            .get(1)
+            .map(|m| extract_entity(fact, m.start(), m.end()));
         if let Some(e) = entity {
             if !e.is_empty() {
                 return Some(RelationshipType::LivesIn(e));
@@ -370,11 +452,12 @@ pub fn detect_relationship(fact: &str) -> Option<RelationshipType> {
     }
 
     // PrefersTool patterns: "X prefers Y", "X uses Y", "X likes Y", "X switched to Y"
-    let pref_re = Regex::new(
-        r"(?i)(?:prefers?\s+|likes?\s+|uses?\s+|switched\s+to\s+|chose\s+)(.+)"
-    ).ok()?;
+    let pref_re =
+        Regex::new(r"(?i)(?:prefers?\s+|likes?\s+|uses?\s+|switched\s+to\s+|chose\s+)(.+)").ok()?;
     if let Some(caps) = pref_re.captures(&lower) {
-        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        let entity = caps
+            .get(1)
+            .map(|m| extract_entity(fact, m.start(), m.end()));
         if let Some(e) = entity {
             if !e.is_empty() {
                 return Some(RelationshipType::PrefersTool(e));
@@ -383,11 +466,12 @@ pub fn detect_relationship(fact: &str) -> Option<RelationshipType> {
     }
 
     // PartOf patterns: "X part of Y", "X belongs to Y", "X member of Y"
-    let part_re = Regex::new(
-        r"(?i)(?:part\s+of|belongs?\s+to|member\s+of|component\s+of)\s+(.+)"
-    ).ok()?;
+    let part_re =
+        Regex::new(r"(?i)(?:part\s+of|belongs?\s+to|member\s+of|component\s+of)\s+(.+)").ok()?;
     if let Some(caps) = part_re.captures(&lower) {
-        let entity = caps.get(1).map(|m| extract_entity(fact, m.start(), m.end()));
+        let entity = caps
+            .get(1)
+            .map(|m| extract_entity(fact, m.start(), m.end()));
         if let Some(e) = entity {
             if !e.is_empty() {
                 return Some(RelationshipType::PartOf(e));
@@ -527,23 +611,31 @@ fn extract_subject(fact: &str) -> String {
 /// Detect and merge near-duplicate memory pairs.
 ///
 /// For each pair of memories, computes cosine similarity. If above 0.95,
-/// the memory with fewer echoes is merged into the one with more echoes.
+/// the loser is merged into the winner. Winner selection:
+/// - When `use_importance` is true: loser = lower importance. Ties broken by
+///   higher store index (newer entry loses). Winner absorbs `max(importance)`.
+/// - Legacy: loser = fewer echo_count.
+///
 /// Content is preserved from the winner; the loser is removed.
 ///
 /// Returns the number of pairs merged.
-fn merge_near_duplicates(store: &mut EchoStore) -> usize {
+fn merge_near_duplicates(store: &mut EchoStore, use_importance: bool) -> usize {
     // Collect IDs and echo counts for all entries, along with their embeddings.
     // We need to work with indices rather than IDs during the comparison pass
     // because we need access to the embeddings array.
     let embeddings: Vec<Vec<f32>> = store.all_embeddings().to_vec();
     let n = embeddings.len();
 
-    // Collect (id, echo_count) for each entry by index
+    // Collect (id, echo_count, importance) for each entry by index
     let entry_info: Vec<_> = (0..n)
-        .filter_map(|i| store.entry_at(i).map(|e| (e.id.clone(), e.echo_count)))
+        .filter_map(|i| {
+            store
+                .entry_at(i)
+                .map(|e| (e.id.clone(), e.echo_count, e.importance))
+        })
         .collect();
 
-    // Find pairs to merge. We collect the ID of the "loser" (fewer echoes).
+    // Find pairs to merge. We collect the ID of the "loser".
     let mut to_remove = Vec::new();
     let mut already_removed = std::collections::HashSet::new();
 
@@ -564,17 +656,34 @@ fn merge_near_duplicates(store: &mut EchoStore) -> usize {
             }
             let sim = similarity::cosine_similarity(&embeddings[i], &embeddings[j]);
             if sim > DUPLICATE_SIMILARITY_THRESHOLD {
-                // Merge: keep the entry with more echo_count
-                let (winner_idx, loser_idx) = if entry_info[i].1 >= entry_info[j].1 {
-                    (i, j)
+                let (winner_idx, loser_idx) = if use_importance {
+                    // Importance-based winner: higher importance wins.
+                    // Break ties by store index: lower index (older) wins.
+                    let imp_i = entry_info[i].2;
+                    let imp_j = entry_info[j].2;
+                    if imp_i > imp_j || (imp_i == imp_j && i < j) {
+                        (i, j)
+                    } else {
+                        (j, i)
+                    }
                 } else {
-                    (j, i)
+                    // Legacy: keep the entry with more echo_count
+                    if entry_info[i].1 >= entry_info[j].1 {
+                        (i, j)
+                    } else {
+                        (j, i)
+                    }
                 };
 
                 // Transfer echo_count from loser to winner (additive)
                 let loser_echo = entry_info[loser_idx].1;
                 if let Some(winner_entry) = store.get_mut(&entry_info[winner_idx].0) {
                     winner_entry.echo_count = winner_entry.echo_count.saturating_add(loser_echo);
+                    // Absorb max importance into winner
+                    if use_importance {
+                        let max_imp = entry_info[winner_idx].2.max(entry_info[loser_idx].2);
+                        winner_entry.importance = max_imp;
+                    }
                 }
 
                 to_remove.push(entry_info[loser_idx].0.clone());
@@ -1123,7 +1232,8 @@ mod tests {
 
     #[test]
     fn detect_switched_to() {
-        let rel = detect_relationship("Team switched to Tauri from Electron").expect("Should detect");
+        let rel =
+            detect_relationship("Team switched to Tauri from Electron").expect("Should detect");
         match rel {
             RelationshipType::PrefersTool(entity) => {
                 assert!(entity.contains("Tauri"), "Got: {entity}");
@@ -1134,7 +1244,8 @@ mod tests {
 
     #[test]
     fn detect_part_of() {
-        let rel = detect_relationship("ShrimPK is part of Bellkis ecosystem").expect("Should detect");
+        let rel =
+            detect_relationship("ShrimPK is part of Bellkis ecosystem").expect("Should detect");
         match rel {
             RelationshipType::PartOf(entity) => {
                 assert!(entity.contains("Bellkis"), "Got: {entity}");
@@ -1186,7 +1297,10 @@ mod tests {
         let rel = detect_relationship("USER WORKS AT OPENAI").expect("Should be case-insensitive");
         match rel {
             RelationshipType::WorksAt(entity) => {
-                assert!(entity.contains("OPENAI"), "Should preserve original case, got: {entity}");
+                assert!(
+                    entity.contains("OPENAI"),
+                    "Should preserve original case, got: {entity}"
+                );
             }
             other => panic!("Expected WorksAt, got {other:?}"),
         }
@@ -1205,13 +1319,19 @@ mod tests {
 
     #[test]
     fn subjects_overlap_same_subject() {
-        assert!(subjects_overlap("Alex works at Google", "Alex works at Meta"));
+        assert!(subjects_overlap(
+            "Alex works at Google",
+            "Alex works at Meta"
+        ));
         assert!(subjects_overlap("User prefers Rust", "User uses Python"));
     }
 
     #[test]
     fn subjects_overlap_different_subject() {
-        assert!(!subjects_overlap("Alex works at Google", "Sarah works at Meta"));
+        assert!(!subjects_overlap(
+            "Alex works at Google",
+            "Sarah works at Meta"
+        ));
         assert!(!subjects_overlap("", "User lives in NYC"));
     }
 
@@ -1258,7 +1378,10 @@ mod tests {
         let new_facts = vec!["Sarah works at Meta".to_string()];
 
         let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
-        assert!(pairs.is_empty(), "Different subjects should not trigger supersedes");
+        assert!(
+            pairs.is_empty(),
+            "Different subjects should not trigger supersedes"
+        );
     }
 
     #[test]

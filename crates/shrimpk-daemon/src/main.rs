@@ -223,9 +223,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Multimodal routes — conditionally compiled
     #[cfg(feature = "vision")]
-    { app = app.route("/api/store_image", post(routes::store_image)); }
+    {
+        app = app.route("/api/store_image", post(routes::store_image));
+    }
     #[cfg(feature = "speech")]
-    { app = app.route("/api/store_audio", post(routes::store_audio)); }
+    {
+        app = app.route("/api/store_audio", post(routes::store_audio));
+    }
 
     let app = app
         // OpenAI-compatible proxy routes

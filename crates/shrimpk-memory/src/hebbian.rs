@@ -816,7 +816,9 @@ mod tests {
         let updated = graph.set_relationship(1, 2, RelationshipType::Supersedes);
         assert!(updated, "Should return true for existing edge");
 
-        let rel = graph.get_relationship(1, 2).expect("Should have relationship");
+        let rel = graph
+            .get_relationship(1, 2)
+            .expect("Should have relationship");
         assert_eq!(*rel, RelationshipType::Supersedes);
     }
 
@@ -887,8 +889,7 @@ mod tests {
 
         graph.save(&path).expect("Should save");
 
-        let loaded =
-            HebbianGraph::load(&path, HALF_LIFE, PRUNE_THRESHOLD).expect("Should load");
+        let loaded = HebbianGraph::load(&path, HALF_LIFE, PRUNE_THRESHOLD).expect("Should load");
 
         // Check typed edges survived
         let rel_12 = loaded

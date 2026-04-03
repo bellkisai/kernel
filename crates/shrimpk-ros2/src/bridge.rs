@@ -54,8 +54,12 @@ impl MessageBridge {
 
         // Resize if either dimension exceeds the cap.
         let img = if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-            let resized =
-                image::imageops::resize(&img, MAX_IMAGE_DIM, MAX_IMAGE_DIM, image::imageops::FilterType::Lanczos3);
+            let resized = image::imageops::resize(
+                &img,
+                MAX_IMAGE_DIM,
+                MAX_IMAGE_DIM,
+                image::imageops::FilterType::Lanczos3,
+            );
             image::DynamicImage::ImageRgb8(resized)
         } else {
             image::DynamicImage::ImageRgb8(img)
@@ -65,9 +69,7 @@ impl MessageBridge {
         img.write_to(&mut png_buf, ImageFormat::Png)
             .map_err(|e| anyhow::anyhow!("PNG encode failed: {e}"))?;
 
-        self.client
-            .store_image(png_buf.get_ref(), label)
-            .await
+        self.client.store_image(png_buf.get_ref(), label).await
     }
 
     /// Forward PCM f32 audio samples to the speech memory channel.

@@ -7,8 +7,8 @@ use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 /// Shared rate limiter state.
@@ -73,15 +73,9 @@ impl RateLimiter {
 
 /// Axum middleware that enforces rate limiting.
 /// Returns HTTP 429 Too Many Requests when the limit is exceeded.
-pub async fn rate_limit_middleware(
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+pub async fn rate_limit_middleware(req: Request, next: Next) -> Result<Response, StatusCode> {
     // Extract the rate limiter from request extensions.
-    let limiter = req
-        .extensions()
-        .get::<RateLimiter>()
-        .cloned();
+    let limiter = req.extensions().get::<RateLimiter>().cloned();
 
     if let Some(limiter) = limiter {
         if !limiter.check() {

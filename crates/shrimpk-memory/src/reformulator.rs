@@ -647,7 +647,10 @@ mod tests {
         let r = MemoryReformulator::new();
         assert_eq!(
             r.reformulate("Last month I attended a Rust conference in Berlin"),
-            Some("Temporal: last month — Last month I attended a Rust conference in Berlin".to_string())
+            Some(
+                "Temporal: last month — Last month I attended a Rust conference in Berlin"
+                    .to_string()
+            )
         );
     }
 

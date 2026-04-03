@@ -37,15 +37,12 @@ pub async fn run(cfg: BridgeConfig, bridge: Arc<MessageBridge>) -> Result<()> {
 
         match topic_cfg.msg_type {
             MsgType::String => {
-                let mut sub = node
-                    .subscribe::<r2r::std_msgs::msg::String>(&name, QosProfile::default())?;
+                let mut sub =
+                    node.subscribe::<r2r::std_msgs::msg::String>(&name, QosProfile::default())?;
                 info!(topic = %name, "subscribed (String)");
                 tokio::spawn(async move {
                     while let Some(msg) = futures_util::StreamExt::next(&mut sub).await {
-                        if let Err(e) = bridge
-                            .handle_string(&msg.data, label.as_deref())
-                            .await
-                        {
+                        if let Err(e) = bridge.handle_string(&msg.data, label.as_deref()).await {
                             error!(topic = %name, err = %e, "handle_string failed");
                         }
                     }
@@ -53,8 +50,8 @@ pub async fn run(cfg: BridgeConfig, bridge: Arc<MessageBridge>) -> Result<()> {
                 });
             }
             MsgType::Image => {
-                let mut sub = node
-                    .subscribe::<r2r::sensor_msgs::msg::Image>(&name, QosProfile::default())?;
+                let mut sub =
+                    node.subscribe::<r2r::sensor_msgs::msg::Image>(&name, QosProfile::default())?;
                 info!(topic = %name, "subscribed (Image)");
                 tokio::spawn(async move {
                     while let Some(msg) = futures_util::StreamExt::next(&mut sub).await {
@@ -73,8 +70,10 @@ pub async fn run(cfg: BridgeConfig, bridge: Arc<MessageBridge>) -> Result<()> {
             }
             MsgType::Audio => {
                 // audio_common_msgs/AudioData carries raw bytes; assume f32 LE PCM at 16 kHz.
-                let mut sub = node
-                    .subscribe::<r2r::audio_common_msgs::msg::AudioData>(&name, QosProfile::default())?;
+                let mut sub = node.subscribe::<r2r::audio_common_msgs::msg::AudioData>(
+                    &name,
+                    QosProfile::default(),
+                )?;
                 info!(topic = %name, "subscribed (Audio)");
                 tokio::spawn(async move {
                     while let Some(msg) = futures_util::StreamExt::next(&mut sub).await {
@@ -99,14 +98,20 @@ pub async fn run(cfg: BridgeConfig, bridge: Arc<MessageBridge>) -> Result<()> {
                 });
             }
             MsgType::Pose => {
-                let mut sub = node
-                    .subscribe::<r2r::geometry_msgs::msg::PoseStamped>(&name, QosProfile::default())?;
+                let mut sub = node.subscribe::<r2r::geometry_msgs::msg::PoseStamped>(
+                    &name,
+                    QosProfile::default(),
+                )?;
                 info!(topic = %name, "subscribed (Pose)");
                 tokio::spawn(async move {
                     while let Some(msg) = futures_util::StreamExt::next(&mut sub).await {
                         let p = &msg.pose.position;
                         let frame = &msg.header.frame_id;
-                        let fid = if frame.is_empty() { None } else { Some(frame.as_str()) };
+                        let fid = if frame.is_empty() {
+                            None
+                        } else {
+                            Some(frame.as_str())
+                        };
                         if let Err(e) = bridge
                             .handle_pose(p.x, p.y, p.z, fid, label.as_deref())
                             .await

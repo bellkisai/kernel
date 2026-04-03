@@ -902,7 +902,9 @@ fn run_formulation_test(
     let mut score_matrix: Vec<Vec<f32>> = Vec::new();
 
     for variant in formulations {
-        let mem_emb = embedder.embed_text(variant.text).expect("embed memory variant");
+        let mem_emb = embedder
+            .embed_text(variant.text)
+            .expect("embed memory variant");
         let mut row: Vec<f32> = Vec::new();
         for &query in queries {
             let query_emb = embedder.embed_text(query).expect("embed query");

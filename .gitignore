@@ -54,3 +54,19 @@ __pycache__/
 
 # ONNX model files
 *.onnx
+
+# Internal sprint research docs (belong in docs-repo, not public kernel)
+docs/KS*
+docs/S*-*
+
+# ShrimPK local data
+.shrimpk/
+*.shrm
+
+# Wix installer artifacts
+*.msi
+*.wixobj
+*.wixpdb
+
+# Lock files from model downloads (Cargo.lock already excluded above)
+*.lock

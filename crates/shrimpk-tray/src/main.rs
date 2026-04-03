@@ -54,7 +54,10 @@ fn ensure_daemon_running() {
         .unwrap_or_default();
 
     if !daemon_path.exists() {
-        eprintln!("[shrimpk-tray] daemon binary not found at {:?}", daemon_path);
+        eprintln!(
+            "[shrimpk-tray] daemon binary not found at {:?}",
+            daemon_path
+        );
         return;
     }
 
@@ -181,7 +184,10 @@ fn copy_port_to_clipboard() {
     #[cfg(target_os = "linux")]
     {
         let _ = Command::new("sh")
-            .args(["-c", &format!("printf '{DAEMON_PORT}' | xclip -selection clipboard")])
+            .args([
+                "-c",
+                &format!("printf '{DAEMON_PORT}' | xclip -selection clipboard"),
+            ])
             .output();
     }
 }

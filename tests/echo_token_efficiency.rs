@@ -952,7 +952,9 @@ async fn context_quality_comparison() {
         // Embed all three: manual context, echo context, ideal context
         let emb_manual = embedder.embed_text(manual_context).expect("embed manual");
         let emb_echo = embedder.embed_text(&echo_context).expect("embed echo");
-        let emb_ideal = embedder.embed_text(scenario.ideal_context).expect("embed ideal");
+        let emb_ideal = embedder
+            .embed_text(scenario.ideal_context)
+            .expect("embed ideal");
 
         // Cosine similarity: manual vs ideal, echo vs ideal
         let sim_manual_ideal = cosine_similarity(&emb_manual, &emb_ideal);

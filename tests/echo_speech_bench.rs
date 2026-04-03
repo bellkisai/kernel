@@ -8,8 +8,8 @@
 #[cfg(feature = "speech")]
 mod bench {
     use shrimpk_core::{EchoConfig, Modality};
-    use shrimpk_memory::speech::SpeechEmbedder;
     use shrimpk_memory::EchoEngine;
+    use shrimpk_memory::speech::SpeechEmbedder;
     use std::time::Instant;
     use tempfile::tempdir;
 
@@ -17,9 +17,7 @@ mod bench {
     fn sine_wave(freq_hz: f32, duration_secs: f32, sample_rate: u32) -> Vec<f32> {
         let n = (sample_rate as f32 * duration_secs) as usize;
         (0..n)
-            .map(|i| {
-                (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate as f32).sin()
-            })
+            .map(|i| (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate as f32).sin())
             .collect()
     }
 
@@ -174,7 +172,9 @@ mod bench {
         ];
 
         // Warmup with first clip
-        let _ = engine.store_audio(&clips[0].1, 16_000, "bench-warmup", None).await;
+        let _ = engine
+            .store_audio(&clips[0].1, 16_000, "bench-warmup", None)
+            .await;
 
         let n = 20;
         let start = Instant::now();

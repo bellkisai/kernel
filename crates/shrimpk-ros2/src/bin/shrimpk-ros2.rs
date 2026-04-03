@@ -54,8 +54,8 @@ async fn main() -> Result<()> {
     // Minimal tracing setup — INFO by default, override with RUST_LOG.
     // Use EnvFilter with a default directive to avoid unsafe set_var.
     use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("shrimpk_ros2=info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("shrimpk_ros2=info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let args = Args::parse();
@@ -177,23 +177,25 @@ async fn dispatch_replay_entry(bridge: &MessageBridge, entry: &ReplayEntry) -> R
                 .context("ReplayEntry.payload.rgb_bytes_base64 must be a string")?;
             let width = entry.payload["width"]
                 .as_u64()
-                .context("ReplayEntry.payload.width must be an integer")? as u32;
+                .context("ReplayEntry.payload.width must be an integer")?
+                as u32;
             let height = entry.payload["height"]
                 .as_u64()
-                .context("ReplayEntry.payload.height must be an integer")? as u32;
+                .context("ReplayEntry.payload.height must be an integer")?
+                as u32;
             use base64::Engine as _;
             let rgb_bytes = base64::engine::general_purpose::STANDARD
                 .decode(b64)
                 .context("Invalid base64 in rgb_bytes_base64")?;
-            bridge.handle_image_rgb(&rgb_bytes, width, height, label).await
+            bridge
+                .handle_image_rgb(&rgb_bytes, width, height, label)
+                .await
         }
         MsgType::Audio => {
             let samples = entry.payload["samples"]
                 .as_array()
                 .context("ReplayEntry.payload.samples must be an array")?;
-            let sample_rate = entry.payload["sample_rate"]
-                .as_u64()
-                .unwrap_or(16_000) as u32;
+            let sample_rate = entry.payload["sample_rate"].as_u64().unwrap_or(16_000) as u32;
             let pcm: Vec<f32> = samples
                 .iter()
                 .map(|v| v.as_f64().unwrap_or(0.0) as f32)

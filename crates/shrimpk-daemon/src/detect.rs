@@ -62,7 +62,7 @@ async fn probe_one(
     let url = format!("http://127.0.0.1:{port}{path}");
     let resp = tokio::time::timeout(PROBE_TIMEOUT, client.get(&url).send())
         .await
-        .ok()?  // timeout
+        .ok()? // timeout
         .ok()?; // request error
 
     if !resp.status().is_success() {
@@ -71,7 +71,7 @@ async fn probe_one(
 
     let body = tokio::time::timeout(PROBE_TIMEOUT, resp.text())
         .await
-        .ok()?  // timeout
+        .ok()? // timeout
         .ok()?; // read error
 
     let models = parse_models(&body, probe_type);
@@ -143,7 +143,9 @@ pub fn build_model_routes(providers: &[DetectedProvider]) -> HashMap<String, Str
     for provider in providers {
         for model in &provider.models {
             // First provider to claim a model name wins
-            routes.entry(model.clone()).or_insert_with(|| provider.url.clone());
+            routes
+                .entry(model.clone())
+                .or_insert_with(|| provider.url.clone());
         }
     }
     routes
@@ -159,14 +161,16 @@ mod tests {
 
     #[test]
     fn parse_ollama_tags() {
-        let body = r#"{"models":[{"name":"gemma3:1b","size":123},{"name":"llama3.2:latest","size":456}]}"#;
+        let body =
+            r#"{"models":[{"name":"gemma3:1b","size":123},{"name":"llama3.2:latest","size":456}]}"#;
         let models = parse_models(body, ProbeType::OllamaTags);
         assert_eq!(models, vec!["gemma3:1b", "llama3.2:latest"]);
     }
 
     #[test]
     fn parse_openai_models() {
-        let body = r#"{"data":[{"id":"gpt-4","object":"model"},{"id":"mistral-7b","object":"model"}]}"#;
+        let body =
+            r#"{"data":[{"id":"gpt-4","object":"model"},{"id":"mistral-7b","object":"model"}]}"#;
         let models = parse_models(body, ProbeType::OpenAiModels);
         assert_eq!(models, vec!["gpt-4", "mistral-7b"]);
     }
@@ -207,9 +211,15 @@ mod tests {
         ];
 
         let routes = build_model_routes(&providers);
-        assert_eq!(routes.get("shared-model").unwrap(), "http://127.0.0.1:11434");
+        assert_eq!(
+            routes.get("shared-model").unwrap(),
+            "http://127.0.0.1:11434"
+        );
         assert_eq!(routes.get("ollama-only").unwrap(), "http://127.0.0.1:11434");
-        assert_eq!(routes.get("lmstudio-only").unwrap(), "http://127.0.0.1:1234");
+        assert_eq!(
+            routes.get("lmstudio-only").unwrap(),
+            "http://127.0.0.1:1234"
+        );
     }
 
     #[test]

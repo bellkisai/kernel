@@ -452,13 +452,14 @@ fn label_benchmark_100k_comparison() {
     for round in 0..5 {
         for (i, (query, _category)) in queries.iter().enumerate() {
             let start = Instant::now();
-            let results = rt.block_on(async {
-                engine_on.echo(query, 5).await.expect("echo")
-            });
+            let results = rt.block_on(async { engine_on.echo(query, 5).await.expect("echo") });
             let ms = start.elapsed().as_secs_f64() * 1000.0;
             latencies_on.push(ms);
             if round == 0 {
-                println!("  Q{i:02}: {ms:6.2}ms | {query} | {} results", results.len());
+                println!(
+                    "  Q{i:02}: {ms:6.2}ms | {query} | {} results",
+                    results.len()
+                );
             }
         }
     }
@@ -501,13 +502,14 @@ fn label_benchmark_100k_comparison() {
     for round in 0..5 {
         for (i, (query, _category)) in queries.iter().enumerate() {
             let start = Instant::now();
-            let results = rt2.block_on(async {
-                engine_off.echo(query, 5).await.expect("echo")
-            });
+            let results = rt2.block_on(async { engine_off.echo(query, 5).await.expect("echo") });
             let ms = start.elapsed().as_secs_f64() * 1000.0;
             latencies_off.push(ms);
             if round == 0 {
-                println!("  Q{i:02}: {ms:6.2}ms | {query} | {} results", results.len());
+                println!(
+                    "  Q{i:02}: {ms:6.2}ms | {query} | {} results",
+                    results.len()
+                );
             }
         }
     }
@@ -527,8 +529,12 @@ fn label_benchmark_100k_comparison() {
     println!("=== COMPARISON ===");
     println!("======================================================================");
     println!("                    P50         P95         P99         Store Time");
-    println!("  Labels ON:     {p50_on:7.2}ms    {p95_on:7.2}ms    {p99_on:7.2}ms    {store_time_on:.1}s");
-    println!("  Labels OFF:    {p50_off:7.2}ms    {p95_off:7.2}ms    {p99_off:7.2}ms    {store_time_off:.1}s");
+    println!(
+        "  Labels ON:     {p50_on:7.2}ms    {p95_on:7.2}ms    {p99_on:7.2}ms    {store_time_on:.1}s"
+    );
+    println!(
+        "  Labels OFF:    {p50_off:7.2}ms    {p95_off:7.2}ms    {p99_off:7.2}ms    {store_time_off:.1}s"
+    );
 
     let speedup = if p50_on > 0.0 { p50_off / p50_on } else { 0.0 };
     println!("  Speedup:       {speedup:.1}x");
@@ -580,7 +586,10 @@ fn label_benchmark_1k_smoke() {
         let start = Instant::now();
         let results = rt.block_on(async { engine.echo(query, 5).await.expect("echo") });
         let ms = start.elapsed().as_secs_f64() * 1000.0;
-        println!("  {ms:6.2}ms | {category:12} | {query} | {} results", results.len());
+        println!(
+            "  {ms:6.2}ms | {category:12} | {query} | {} results",
+            results.len()
+        );
     }
 
     drop(rt);

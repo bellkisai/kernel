@@ -165,7 +165,9 @@ pub async fn chat_completions(
     if body_size > 1_048_576 {
         return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
-            Json(json!({"error": {"message": "Request body too large (max 1MB)", "type": "proxy_error"}}))
+            Json(
+                json!({"error": {"message": "Request body too large (max 1MB)", "type": "proxy_error"}}),
+            ),
         ));
     }
 
@@ -210,7 +212,7 @@ pub async fn chat_completions(
                 state.config.proxy_context_window,
                 system_prompt.as_deref(),
                 &echo_results,
-                &[],           // no RAG chunks in proxy
+                &[], // no RAG chunks in proxy
                 &conversation,
                 &user_msg,
             );
@@ -242,10 +244,7 @@ pub async fn chat_completions(
             .cloned()
             .unwrap_or_else(|| state.config.proxy_target.clone())
     };
-    let backend_url = format!(
-        "{}/v1/chat/completions",
-        backend_base.trim_end_matches('/')
-    );
+    let backend_url = format!("{}/v1/chat/completions", backend_base.trim_end_matches('/'));
 
     // 6. Forward to backend
     if is_streaming {

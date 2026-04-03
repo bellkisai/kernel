@@ -239,7 +239,9 @@ pub async fn list_memories(
                 "source": e.source,
                 "echo_count": e.echo_count,
                 "sensitivity": format!("{:?}", e.sensitivity),
-                "category": format!("{:?}", e.category)
+                "category": format!("{:?}", e.category),
+                "novelty_score": e.novelty_score,
+                "importance": e.importance
             })
         })
         .collect();
@@ -411,9 +413,7 @@ pub async fn persist(
 }
 
 /// GET /api/detect — re-scan for local LLM providers and update routing table.
-pub async fn detect_providers(
-    State(state): State<AppState>,
-) -> Json<Value> {
+pub async fn detect_providers(State(state): State<AppState>) -> Json<Value> {
     let providers = crate::detect::detect_providers(&state.http_client).await;
     let new_routes = crate::detect::build_model_routes(&providers);
     let total_models: usize = providers.iter().map(|p| p.models.len()).sum();
@@ -474,12 +474,7 @@ pub async fn memory_graph(
         .engine
         .memory_graph(&id, req.top_per_label)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": e.to_string()})),
-            )
-        })?;
+        .map_err(|e| (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))))?;
 
     let connections_json: Vec<Value> = graph
         .connections
@@ -521,12 +516,7 @@ pub async fn memory_related(
         .engine
         .memory_related(&id, req.label.as_deref(), req.max_results)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": e.to_string()})),
-            )
-        })?;
+        .map_err(|e| (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))))?;
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     let results_json: Vec<Value> = results
@@ -571,12 +561,7 @@ pub async fn memory_get(
         .engine
         .memory_get(&id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": e.to_string()})),
-            )
-        })?;
+        .map_err(|e| (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))))?;
 
     Ok(Json(json!({
         "memory_id": entry.id.to_string(),
@@ -663,7 +648,12 @@ pub async fn store_audio(
 
     let id = state
         .engine
-        .store_audio(&pcm_f32, req.sample_rate, &req.source, req.description.as_deref())
+        .store_audio(
+            &pcm_f32,
+            req.sample_rate,
+            &req.source,
+            req.description.as_deref(),
+        )
         .await
         .map_err(|e| {
             (

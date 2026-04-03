@@ -64,7 +64,7 @@ pub struct SpeechConfig {
 #[cfg(feature = "speech")]
 mod inner {
     use super::*;
-    use ort::session::{builder::GraphOptimizationLevel, Session};
+    use ort::session::{Session, builder::GraphOptimizationLevel};
     use ort::value::Tensor;
 
     // Whisper mel-spectrogram constants (standard Whisper preprocessing)
@@ -96,16 +96,14 @@ mod inner {
     /// Uses `hf-hub`'s built-in caching — files are stored in the HF Hub cache
     /// (typically `~/.cache/huggingface/hub/`).
     fn ensure_model(repo_id: &str, filename: &str) -> Result<std::path::PathBuf> {
-        use hf_hub::{api::sync::Api, Repo, RepoType};
+        use hf_hub::{Repo, RepoType, api::sync::Api};
 
         let api = Api::new().map_err(|e| {
             ShrimPKError::Embedding(format!("Failed to create HF Hub API client: {e}"))
         })?;
         let repo = api.repo(Repo::new(repo_id.to_string(), RepoType::Model));
         let path = repo.get(filename).map_err(|e| {
-            ShrimPKError::Embedding(format!(
-                "Failed to download {filename} from {repo_id}: {e}"
-            ))
+            ShrimPKError::Embedding(format!("Failed to download {filename} from {repo_id}: {e}"))
         })?;
         Ok(path)
     }
@@ -138,9 +136,8 @@ mod inner {
             .iter()
             .enumerate()
             .map(|(i, &s)| {
-                let w = 0.5
-                    * (1.0
-                        - (2.0 * std::f32::consts::PI * i as f32 / (n as f32 - 1.0)).cos());
+                let w =
+                    0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n as f32 - 1.0)).cos());
                 s * w
             })
             .collect()
@@ -321,7 +318,10 @@ mod inner {
             if let Some(speaker_path) = &config.speaker_model_path {
                 match build_session(std::path::Path::new(speaker_path)) {
                     Ok(session) => {
-                        tracing::info!(path = speaker_path, "ECAPA-TDNN session loaded from config path");
+                        tracing::info!(
+                            path = speaker_path,
+                            "ECAPA-TDNN session loaded from config path"
+                        );
                         embedder.speaker_session = Some(session);
                     }
                     Err(e) => {
@@ -444,22 +444,21 @@ mod inner {
         /// (`feats`, shape `[1, n_frames, 80]`), NOT raw waveform. The model
         /// outputs `embs` with shape `[1, 512]`.
         fn run_speaker(&mut self, pcm_16k: &[f32]) -> Result<Vec<f32>> {
-            let session = self.speaker_session.as_mut().ok_or_else(|| {
-                ShrimPKError::Embedding("ECAPA-TDNN session not loaded".into())
-            })?;
+            let session = self
+                .speaker_session
+                .as_mut()
+                .ok_or_else(|| ShrimPKError::Embedding("ECAPA-TDNN session not loaded".into()))?;
 
             // Compute Kaldi-style FBank features: [n_frames, 80] flat
             let fbank = compute_fbank_flat(pcm_16k);
             let n_frames = fbank.len() / N_MELS;
 
             // Build input tensor [1, n_frames, 80]
-            let input_tensor = Tensor::<f32>::from_array((
-                [1usize, n_frames, N_MELS],
-                fbank.into_boxed_slice(),
-            ))
-            .map_err(|e| {
-                ShrimPKError::Embedding(format!("ECAPA-TDNN input tensor failed: {e}"))
-            })?;
+            let input_tensor =
+                Tensor::<f32>::from_array(([1usize, n_frames, N_MELS], fbank.into_boxed_slice()))
+                    .map_err(|e| {
+                    ShrimPKError::Embedding(format!("ECAPA-TDNN input tensor failed: {e}"))
+                })?;
 
             // Run inference — input name is "feats", output is "embs"
             let outputs = session
@@ -503,9 +502,7 @@ mod inner {
                 [1usize, N_MELS, N_FRAMES],
                 mel_flat.into_boxed_slice(),
             ))
-            .map_err(|e| {
-                ShrimPKError::Embedding(format!("Whisper mel tensor failed: {e}"))
-            })?;
+            .map_err(|e| ShrimPKError::Embedding(format!("Whisper mel tensor failed: {e}")))?;
 
             let outputs = session
                 .run(ort::inputs!["input_features" => input_tensor])
@@ -519,11 +516,9 @@ mod inner {
                 .next()
                 .ok_or_else(|| ShrimPKError::Embedding("Whisper encoder: no output".into()))?;
 
-            let (shape, flat) = output_val
-                .try_extract_tensor::<f32>()
-                .map_err(|e| {
-                    ShrimPKError::Embedding(format!("Whisper encoder extract failed: {e}"))
-                })?;
+            let (shape, flat) = output_val.try_extract_tensor::<f32>().map_err(|e| {
+                ShrimPKError::Embedding(format!("Whisper encoder extract failed: {e}"))
+            })?;
 
             // Mean-pool over time dimension to produce [hidden_dim]
             // Shape is [batch, time_steps, hidden_dim] or [time_steps, hidden_dim]
@@ -779,7 +774,12 @@ mod tests {
     fn stub_returns_feature_error() {
         let result = SpeechEmbedder::new().embed_pcm(&vec![0.0f32; 100], 16000);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Speech feature not enabled"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Speech feature not enabled")
+        );
     }
 
     // --- Feature tests ---

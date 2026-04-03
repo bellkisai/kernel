@@ -13,12 +13,14 @@
 //! ## Phase 1 (KS1)
 //! Flat brute-force similarity. Phase 2 adds LSH, Bloom filters, Hebbian learning.
 
+pub mod activation;
 pub mod bloom;
 pub mod consolidation;
 pub mod consolidator;
 pub mod echo;
 pub mod embedder;
 pub mod hebbian;
+pub mod importance;
 pub mod labels;
 pub mod lsh;
 pub mod persistence;
@@ -32,9 +34,11 @@ pub mod speech;
 pub mod store;
 
 // Re-export the main types
-pub use consolidation::{detect_relationship, ConsolidationResult};
+pub use activation::{actr_ol_activation, power_law_decay};
+pub use consolidation::{ConsolidationResult, detect_relationship};
 pub use echo::EchoEngine;
 pub use hebbian::{HebbianGraph, RelationshipType};
+pub use importance::{compute_embedding_mean, compute_importance};
 pub use pii::PiiFilter;
 pub use reformulator::MemoryReformulator;
 pub use shrimpk_core::{

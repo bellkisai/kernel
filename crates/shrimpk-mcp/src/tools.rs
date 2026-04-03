@@ -225,7 +225,8 @@ pub async fn handle_store_image(engine: &Arc<EchoEngine>, args: &Value) -> Resul
 
     Ok(serde_json::to_string_pretty(&json!({
         "memory_id": id.to_string()
-    })).unwrap())
+    }))
+    .unwrap())
 }
 
 #[cfg(feature = "speech")]
@@ -261,7 +262,8 @@ pub async fn handle_store_audio(engine: &Arc<EchoEngine>, args: &Value) -> Resul
 
     Ok(serde_json::to_string_pretty(&json!({
         "memory_id": id.to_string()
-    })).unwrap())
+    }))
+    .unwrap())
 }
 
 pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
@@ -277,9 +279,11 @@ pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<Strin
     };
 
     // Optional label filter — bypass classification, use exact labels
-    let label_filter: Option<Vec<String>> = args["labels"]
-        .as_array()
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+    let label_filter: Option<Vec<String>> = args["labels"].as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    });
 
     let start = Instant::now();
     let results = engine
@@ -314,10 +318,7 @@ pub async fn handle_echo(engine: &Arc<EchoEngine>, args: &Value) -> Result<Strin
     Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
 }
 
-pub async fn handle_memory_graph(
-    engine: &Arc<EchoEngine>,
-    args: &Value,
-) -> Result<String, String> {
+pub async fn handle_memory_graph(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
     let id_str = args["memory_id"]
         .as_str()
         .ok_or("Missing required argument: memory_id")?;
@@ -400,10 +401,7 @@ pub async fn handle_memory_related(
     Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
 }
 
-pub async fn handle_memory_get(
-    engine: &Arc<EchoEngine>,
-    args: &Value,
-) -> Result<String, String> {
+pub async fn handle_memory_get(engine: &Arc<EchoEngine>, args: &Value) -> Result<String, String> {
     let id_str = args["memory_id"]
         .as_str()
         .ok_or("Missing required argument: memory_id")?;
@@ -508,12 +506,13 @@ pub async fn handle_dump(
         let id_str = entry.id.to_string();
         let id_short = &id_str[..id_str.len().min(8)];
         lines.push(format!(
-            "  {} \"{}\" (source: {}, echoed: {}x, category: {:?})",
+            "  {} \"{}\" (source: {}, echoed: {}x, category: {:?}, importance: {:.2})",
             id_short,
             truncate(&entry.content, 50),
             entry.source,
             entry.echo_count,
             entry.category,
+            entry.importance,
         ));
     }
 
@@ -581,7 +580,10 @@ pub fn handle_config_show(config: &EchoConfig) -> Result<String, String> {
             "  {:25} {:>15}  {}",
             "consolidation_provider",
             &config.consolidation_provider,
-            source("SHRIMPK_CONSOLIDATION_PROVIDER", fc.consolidation_provider.is_some())
+            source(
+                "SHRIMPK_CONSOLIDATION_PROVIDER",
+                fc.consolidation_provider.is_some()
+            )
         ),
         format!(
             "  {:25} {:>15}  {}",
@@ -599,7 +601,73 @@ pub fn handle_config_show(config: &EchoConfig) -> Result<String, String> {
             "  {:25} {:>15}  {}",
             "max_facts_per_memory",
             config.max_facts_per_memory,
-            if fc.max_facts_per_memory.is_some() { "file" } else { "auto" }
+            if fc.max_facts_per_memory.is_some() {
+                "file"
+            } else {
+                "auto"
+            }
+        ),
+        String::new(),
+        "  Intelligence Engine:".to_string(),
+        format!(
+            "  {:25} {:>15}  {}",
+            "use_power_law_decay",
+            config.use_power_law_decay,
+            if fc.use_power_law_decay.is_some() {
+                "file"
+            } else {
+                "auto"
+            }
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "use_importance",
+            config.use_importance,
+            if fc.use_importance.is_some() {
+                "file"
+            } else {
+                "auto"
+            }
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "use_actr_activation",
+            config.use_actr_activation,
+            if fc.use_actr_activation.is_some() {
+                "file"
+            } else {
+                "auto"
+            }
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "activation_weight",
+            format!("{:.2}", config.activation_weight),
+            if fc.activation_weight.is_some() {
+                "file"
+            } else {
+                "auto"
+            }
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "importance_weight",
+            format!("{:.2}", config.importance_weight),
+            if fc.importance_weight.is_some() {
+                "file"
+            } else {
+                "auto"
+            }
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "use_full_actr_history",
+            config.use_full_actr_history,
+            if fc.use_full_actr_history.is_some() {
+                "file"
+            } else {
+                "auto"
+            }
         ),
     ];
 
@@ -639,6 +707,24 @@ pub fn handle_config_set(args: &Value) -> Result<String, String> {
         "consolidation_provider" => fc.consolidation_provider = Some(value.to_string()),
         "max_facts_per_memory" => {
             fc.max_facts_per_memory = Some(value.parse().map_err(|_| "Invalid integer")?)
+        }
+        "use_power_law_decay" => {
+            fc.use_power_law_decay = Some(value.parse().map_err(|_| "Invalid boolean")?)
+        }
+        "use_importance" => {
+            fc.use_importance = Some(value.parse().map_err(|_| "Invalid boolean")?)
+        }
+        "use_actr_activation" => {
+            fc.use_actr_activation = Some(value.parse().map_err(|_| "Invalid boolean")?)
+        }
+        "activation_weight" => {
+            fc.activation_weight = Some(value.parse().map_err(|_| "Invalid float")?)
+        }
+        "importance_weight" => {
+            fc.importance_weight = Some(value.parse().map_err(|_| "Invalid float")?)
+        }
+        "use_full_actr_history" => {
+            fc.use_full_actr_history = Some(value.parse().map_err(|_| "Invalid boolean")?)
         }
         other => return Err(format!("Unknown config key: \"{other}\"")),
     }
@@ -716,9 +802,13 @@ mod tests {
         #[allow(unused_mut)]
         let mut expected = 12;
         #[cfg(feature = "vision")]
-        { expected += 1; }
+        {
+            expected += 1;
+        }
         #[cfg(feature = "speech")]
-        { expected += 1; }
+        {
+            expected += 1;
+        }
         assert_eq!(count, expected);
     }
 

@@ -204,8 +204,27 @@ pub struct EchoConfig {
     #[serde(default)]
     pub reranker_backend: RerankerBackend,
 
-    // --- Multimodal (KS31) ---
+    // --- Intelligence scoring (KS50) ---
+    /// Enable ACT-R Optimized Learning activation (replaces recency_boost).
+    #[serde(default)]
+    pub use_actr_activation: bool,
+    /// Enable FSRS power-law decay (replaces exponential).
+    #[serde(default = "default_true")]
+    pub use_power_law_decay: bool,
+    /// Enable importance scoring for consolidation priority.
+    #[serde(default = "default_true")]
+    pub use_importance: bool,
+    /// Weight of ACT-R activation term in scoring formula.
+    #[serde(default = "default_activation_weight")]
+    pub activation_weight: f32,
+    /// Weight of importance boost in scoring formula (0.0 = consolidation only).
+    #[serde(default)]
+    pub importance_weight: f32,
+    /// Enable full ACT-R retrieval history (Vec<u32> ring buffer). Future.
+    #[serde(default)]
+    pub use_full_actr_history: bool,
 
+    // --- Multimodal (KS31) ---
     /// Enabled modalities. Default: `[Text]`.
     /// Add `Vision` to enable CLIP image embedding, `Speech` for audio embedding.
     #[serde(default = "default_modalities")]
@@ -216,6 +235,13 @@ pub struct EchoConfig {
     /// Embedding dimension for speech channel. Default: 640 (ECAPA-TDNN 256 + Whisper-tiny 384).
     #[serde(default = "default_speech_dim")]
     pub speech_embedding_dim: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_activation_weight() -> f32 {
+    0.1
 }
 
 fn default_modalities() -> Vec<crate::Modality> {
@@ -304,6 +330,12 @@ impl Default for EchoConfig {
             query_expansion_enabled: false,
             reranker_enabled: false,
             reranker_backend: RerankerBackend::None,
+            use_actr_activation: false,
+            use_power_law_decay: default_true(),
+            use_importance: default_true(),
+            activation_weight: default_activation_weight(),
+            importance_weight: 0.0,
+            use_full_actr_history: false,
             enabled_modalities: default_modalities(),
             vision_embedding_dim: default_vision_dim(),
             speech_embedding_dim: default_speech_dim(),
@@ -415,6 +447,12 @@ pub struct FileConfig {
     pub query_expansion_enabled: Option<bool>,
     pub reranker_enabled: Option<bool>,
     pub reranker_backend: Option<RerankerBackend>,
+    pub use_actr_activation: Option<bool>,
+    pub use_power_law_decay: Option<bool>,
+    pub use_importance: Option<bool>,
+    pub activation_weight: Option<f32>,
+    pub importance_weight: Option<f32>,
+    pub use_full_actr_history: Option<bool>,
     pub enabled_modalities: Option<Vec<crate::Modality>>,
     pub vision_embedding_dim: Option<usize>,
     pub speech_embedding_dim: Option<usize>,
@@ -597,6 +635,24 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.reranker_backend {
             config.reranker_backend = v;
+        }
+        if let Some(v) = fc.use_actr_activation {
+            config.use_actr_activation = v;
+        }
+        if let Some(v) = fc.use_power_law_decay {
+            config.use_power_law_decay = v;
+        }
+        if let Some(v) = fc.use_importance {
+            config.use_importance = v;
+        }
+        if let Some(v) = fc.activation_weight {
+            config.activation_weight = v;
+        }
+        if let Some(v) = fc.importance_weight {
+            config.importance_weight = v;
+        }
+        if let Some(v) = fc.use_full_actr_history {
+            config.use_full_actr_history = v;
         }
         if let Some(v) = fc.enabled_modalities {
             config.enabled_modalities = v;
@@ -1068,10 +1124,7 @@ mod tests {
             reranker_backend: RerankerBackend::None,
             ..Default::default()
         };
-        assert_eq!(
-            config.effective_reranker_backend(),
-            RerankerBackend::None
-        );
+        assert_eq!(config.effective_reranker_backend(), RerankerBackend::None);
     }
 
     #[test]

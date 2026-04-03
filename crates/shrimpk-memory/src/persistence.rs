@@ -119,6 +119,18 @@ pub struct MemoryMeta {
     /// Novelty score at store time (0.0 to 1.0).
     #[serde(default)]
     pub novelty_score: f32,
+    /// Multi-signal importance score (0.0-1.0).
+    #[serde(default)]
+    pub importance: f32,
+    /// Cached ACT-R base-level activation (OL approximation).
+    #[serde(default)]
+    pub activation_cache: f32,
+    /// When importance was last computed (for staleness detection).
+    #[serde(default)]
+    pub importance_computed_at: Option<DateTime<Utc>>,
+    /// Retrieval timestamps as seconds since UNIX epoch (ring buffer, cap 16).
+    #[serde(default)]
+    pub retrieval_history_secs: Vec<u32>,
 }
 
 impl MemoryMeta {
@@ -143,6 +155,10 @@ impl MemoryMeta {
             labels: entry.labels.clone(),
             label_version: entry.label_version,
             novelty_score: entry.novelty_score,
+            importance: entry.importance,
+            activation_cache: entry.activation_cache,
+            importance_computed_at: entry.importance_computed_at,
+            retrieval_history_secs: entry.retrieval_history_secs.clone(),
         }
     }
 
@@ -169,6 +185,10 @@ impl MemoryMeta {
             labels: self.labels,
             label_version: self.label_version,
             novelty_score: self.novelty_score,
+            importance: self.importance,
+            activation_cache: self.activation_cache,
+            importance_computed_at: self.importance_computed_at,
+            retrieval_history_secs: self.retrieval_history_secs,
         }
     }
 }
@@ -230,8 +250,8 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
         0
     };
 
-    let flags: u8 = if has_vision { FLAG_HAS_VISION } else { 0 }
-        | if has_speech { FLAG_HAS_SPEECH } else { 0 };
+    let flags: u8 =
+        if has_vision { FLAG_HAS_VISION } else { 0 } | if has_speech { FLAG_HAS_SPEECH } else { 0 };
 
     // Atomic write: write to .tmp file, then rename (F-06 fix)
     let tmp_path = path.with_extension("shrm.tmp");
@@ -568,7 +588,9 @@ fn load_binary_v2(data: &[u8]) -> Result<EchoStore> {
 
     // --- Read metadata JSON section ---
     if cursor + 4 > data.len() {
-        return Err(ShrimPKError::Persistence("Truncated metadata length".into()));
+        return Err(ShrimPKError::Persistence(
+            "Truncated metadata length".into(),
+        ));
     }
     let meta_len = u32::from_le_bytes(
         data[cursor..cursor + 4]
@@ -578,7 +600,9 @@ fn load_binary_v2(data: &[u8]) -> Result<EchoStore> {
     cursor += 4;
 
     if cursor + meta_len + 4 > data.len() {
-        return Err(ShrimPKError::Persistence("Truncated metadata section".into()));
+        return Err(ShrimPKError::Persistence(
+            "Truncated metadata section".into(),
+        ));
     }
     let meta_bytes = &data[cursor..cursor + meta_len];
     cursor += meta_len;
@@ -617,7 +641,9 @@ fn load_binary_v2(data: &[u8]) -> Result<EchoStore> {
     // --- Read text embeddings section + CRC ---
     let text_section_bytes = count * text_dim * 4;
     if cursor + text_section_bytes + 4 > data.len() {
-        return Err(ShrimPKError::Persistence("Truncated text embedding section".into()));
+        return Err(ShrimPKError::Persistence(
+            "Truncated text embedding section".into(),
+        ));
     }
 
     let text_slice = &data[cursor..cursor + text_section_bytes];
@@ -1223,16 +1249,24 @@ mod tests {
 
     /// Helper: create entry with vision embedding.
     fn make_vision_entry(content: &str, text_emb: Vec<f32>, vision_emb: Vec<f32>) -> MemoryEntry {
-        let mut entry =
-            MemoryEntry::new_with_modality(content.into(), text_emb, "test".into(), Modality::Vision);
+        let mut entry = MemoryEntry::new_with_modality(
+            content.into(),
+            text_emb,
+            "test".into(),
+            Modality::Vision,
+        );
         entry.vision_embedding = Some(vision_emb);
         entry
     }
 
     /// Helper: create entry with speech embedding.
     fn make_speech_entry(content: &str, text_emb: Vec<f32>, speech_emb: Vec<f32>) -> MemoryEntry {
-        let mut entry =
-            MemoryEntry::new_with_modality(content.into(), text_emb, "test".into(), Modality::Speech);
+        let mut entry = MemoryEntry::new_with_modality(
+            content.into(),
+            text_emb,
+            "test".into(),
+            Modality::Speech,
+        );
         entry.speech_embedding = Some(speech_emb);
         entry
     }
@@ -1325,7 +1359,10 @@ mod tests {
                 let expected_vis = vec![(i as f32) * 10.0; 4];
                 assert_eq!(r.vision_embedding, Some(expected_vis), "entry {i} vision");
             } else {
-                assert!(r.vision_embedding.is_none(), "entry {i} should have no vision");
+                assert!(
+                    r.vision_embedding.is_none(),
+                    "entry {i} should have no vision"
+                );
             }
         }
     }
@@ -1501,7 +1538,12 @@ mod tests {
 
         let result = load_binary(&path);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Text CRC32 mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Text CRC32 mismatch")
+        );
     }
 
     // 9. CRC corruption in vision section -> error
@@ -1527,7 +1569,12 @@ mod tests {
 
         let result = load_binary(&path);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("vision CRC32 mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("vision CRC32 mismatch")
+        );
     }
 
     // 10. Bitmap correctness: 100 entries, 30 with vision
@@ -1569,7 +1616,10 @@ mod tests {
                 assert!(r.vision_embedding.is_some(), "entry {i} should have vision");
                 vision_count += 1;
             } else {
-                assert!(r.vision_embedding.is_none(), "entry {i} should NOT have vision");
+                assert!(
+                    r.vision_embedding.is_none(),
+                    "entry {i} should NOT have vision"
+                );
             }
         }
         assert_eq!(vision_count, 30);
@@ -1660,8 +1710,7 @@ mod tests {
             let mut entry = make_entry(&format!("m{i}"), text_emb);
 
             if i % 5 == 0 {
-                entry.vision_embedding =
-                    Some((0..vis_dim).map(|j| (i * 100 + j) as f32).collect());
+                entry.vision_embedding = Some((0..vis_dim).map(|j| (i * 100 + j) as f32).collect());
                 entry.modality = Modality::Vision;
             }
             if i % 7 == 0 {
@@ -1686,8 +1735,14 @@ mod tests {
             let r = loaded.get(id).unwrap();
             assert_eq!(orig.content, r.content, "content mismatch at {i}");
             assert_eq!(orig.embedding, r.embedding, "text emb mismatch at {i}");
-            assert_eq!(orig.vision_embedding, r.vision_embedding, "vis emb mismatch at {i}");
-            assert_eq!(orig.speech_embedding, r.speech_embedding, "speech emb mismatch at {i}");
+            assert_eq!(
+                orig.vision_embedding, r.vision_embedding,
+                "vis emb mismatch at {i}"
+            );
+            assert_eq!(
+                orig.speech_embedding, r.speech_embedding,
+                "speech emb mismatch at {i}"
+            );
             assert_eq!(orig.modality, r.modality, "modality mismatch at {i}");
         }
     }
@@ -1803,7 +1858,13 @@ mod tests {
         let loaded = load_binary(&path).expect("load");
 
         let r = loaded.get(&id).expect("should find entry");
-        assert!(r.labels.is_empty(), "Legacy entry should load with empty labels");
-        assert_eq!(r.label_version, 0, "Legacy entry should load with label_version 0");
+        assert!(
+            r.labels.is_empty(),
+            "Legacy entry should load with empty labels"
+        );
+        assert_eq!(
+            r.label_version, 0,
+            "Legacy entry should load with label_version 0"
+        );
     }
 }

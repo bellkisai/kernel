@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::instrument;
 
+use crate::activation;
 use crate::bloom::TopicFilter;
 use crate::consolidation::{self, ConsolidationResult};
 use crate::consolidator;
@@ -262,10 +263,9 @@ impl EchoEngine {
         //    - Otherwise original text (semantic meaning preserved)
         let embed_text = reformulated.as_deref().unwrap_or(text);
         let embedding = {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
             embedder.embed_text(embed_text)?
         };
 
@@ -281,11 +281,7 @@ impl EchoEngine {
 
         // 3b. Tier 1 label generation (ADR-015 D4)
         if self.config.use_labels && self.prototypes.is_initialized() {
-            let labels = crate::labels::generate_tier1_labels(
-                text,
-                &embedding,
-                &self.prototypes,
-            );
+            let labels = crate::labels::generate_tier1_labels(text, &embedding, &self.prototypes);
             if !labels.is_empty() {
                 entry.labels = labels;
                 entry.label_version = 1;
@@ -323,7 +319,9 @@ impl EchoEngine {
                         .filter(|e| !e.is_empty())
                         .map(|emb| similarity::cosine_similarity(&embedding, emb))
                         .collect();
-                    sims.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+                    sims.sort_unstable_by(|a, b| {
+                        b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
+                    });
                     sims.into_iter().take(20).next().unwrap_or(0.0)
                 };
 
@@ -437,10 +435,9 @@ impl EchoEngine {
 
         // 1. Embed image with CLIP
         let vision_embedding = {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
             embedder.embed_image(image_data)?
         };
 
@@ -451,10 +448,9 @@ impl EchoEngine {
         // 2. Build content and optional text embedding for cross-modal recall
         let content = description.unwrap_or("[image]").to_string();
         let text_embedding = if let Some(desc) = description {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
             embedder.embed_text(desc)?
         } else {
             Vec::new()
@@ -470,7 +466,11 @@ impl EchoEngine {
 
         // 3. Auto-label: always memtype:image, plus Tier 1 labels from description
         let mut labels = vec!["memtype:image".to_string()];
-        if description.is_some() && self.config.use_labels && self.prototypes.is_initialized() && !text_embedding.is_empty() {
+        if description.is_some()
+            && self.config.use_labels
+            && self.prototypes.is_initialized()
+            && !text_embedding.is_empty()
+        {
             let desc_labels = crate::labels::generate_tier1_labels(
                 description.unwrap(),
                 &text_embedding,
@@ -576,26 +576,22 @@ impl EchoEngine {
 
         // 1. Embed audio with speech stack
         let speech_embedding = {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
             embedder.embed_audio(pcm_f32, sample_rate)?
         };
 
         let speech_embedding = speech_embedding.ok_or_else(|| {
-            ShrimPKError::Embedding(
-                "Speech models not available — cannot embed audio".into(),
-            )
+            ShrimPKError::Embedding("Speech models not available — cannot embed audio".into())
         })?;
 
         // 2. Build content and optional text embedding for cross-modal recall
         let content = description.unwrap_or("[audio]").to_string();
         let text_embedding = if let Some(desc) = description {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
             embedder.embed_text(desc)?
         } else {
             Vec::new()
@@ -611,7 +607,11 @@ impl EchoEngine {
 
         // 3. Auto-label: always memtype:audio, plus Tier 1 labels from description
         let mut labels = vec!["memtype:audio".to_string()];
-        if description.is_some() && self.config.use_labels && self.prototypes.is_initialized() && !text_embedding.is_empty() {
+        if description.is_some()
+            && self.config.use_labels
+            && self.prototypes.is_initialized()
+            && !text_embedding.is_empty()
+        {
             let desc_labels = crate::labels::generate_tier1_labels(
                 description.unwrap(),
                 &text_embedding,
@@ -716,10 +716,9 @@ impl EchoEngine {
         let embed_text = reformulated.as_deref().unwrap_or(text);
 
         let (text_embedding, vision_embedding, speech_embedding) = {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
 
             let text_emb = embedder.embed_text(embed_text)?;
 
@@ -944,10 +943,9 @@ impl EchoEngine {
 
         // 1. Embed the (possibly expanded) query
         let query_embedding = {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
             embedder.embed_text(&effective_query)?
         };
 
@@ -988,11 +986,8 @@ impl EchoEngine {
                 Vec::new()
             }
         } else if self.config.use_labels && self.prototypes.is_initialized() {
-            let query_labels = crate::labels::classify_query(
-                &effective_query,
-                &query_embedding,
-                &self.prototypes,
-            );
+            let query_labels =
+                crate::labels::classify_query(&effective_query, &query_embedding, &self.prototypes);
             if !query_labels.is_empty() {
                 store.query_labels(&query_labels)
             } else {
@@ -1013,9 +1008,8 @@ impl EchoEngine {
         };
 
         // 5c. Merge + dedup (OR semantics: union of label and LSH candidates)
-        let mut merged: Vec<u32> = Vec::with_capacity(
-            label_candidates.len() + lsh_candidates.len(),
-        );
+        let mut merged: Vec<u32> =
+            Vec::with_capacity(label_candidates.len() + lsh_candidates.len());
         merged.extend_from_slice(&label_candidates);
         merged.extend_from_slice(&lsh_candidates);
         merged.sort_unstable();
@@ -1068,17 +1062,13 @@ impl EchoEngine {
         // 5b. Split pipeline: Pipe A (above threshold) + Pipe B (near-miss child rescue)
         //     Use half-threshold to capture near-misses for potential child rescue.
         let near_miss_threshold = self.config.similarity_threshold * 0.5;
-        let all_ranked = similarity::rank_candidates(
-            &query_embedding,
-            &candidates,
-            near_miss_threshold,
-        );
+        let all_ranked =
+            similarity::rank_candidates(&query_embedding, &candidates, near_miss_threshold);
 
         let threshold = self.config.similarity_threshold;
         let child_rescue_only = self.config.child_rescue_only;
-        let (pipe_a, pipe_b): (Vec<(usize, f32)>, Vec<(usize, f32)>) = all_ranked
-            .into_iter()
-            .partition(|&(idx, score)| {
+        let (pipe_a, pipe_b): (Vec<(usize, f32)>, Vec<(usize, f32)>) =
+            all_ranked.into_iter().partition(|&(idx, score)| {
                 if score < threshold {
                     return false; // below threshold → Pipe B
                 }
@@ -1229,19 +1219,52 @@ impl EchoEngine {
                 // Apply category-aware decay: older memories score lower (F-02 fix)
                 let age_secs = (now - entry.created_at).num_seconds().max(0) as f64;
                 let half_life = entry.category.half_life_secs();
-                let decay = (-age_secs * std::f64::consts::LN_2 / half_life).exp();
 
-                // Recency boost (KS18 Track 3): newer memories get a small advantage.
-                // Formula: recency_weight / (1.0 + days_since_stored)
-                // At default 0.05: day 0 = +0.05, day 7 = +0.006, day 30 = +0.002.
-                let days_since_stored = age_secs / 86400.0;
-                let recency_boost = recency_weight / (1.0 + days_since_stored);
+                // Decay: power-law or exponential (feature-flagged)
+                let decay = if self.config.use_power_law_decay {
+                    let stability = entry.category.stability_days();
+                    activation::power_law_decay(age_secs, stability) as f32
+                } else {
+                    // Legacy exponential decay
+                    (-age_secs * std::f64::consts::LN_2 / half_life).exp() as f32
+                };
+
+                // Activation: ACT-R OL or recency_boost (feature-flagged)
+                let activation_term = if self.config.use_actr_activation {
+                    let d = entry.category.actr_decay_d();
+                    let act = activation::actr_ol_activation(
+                        entry.echo_count,
+                        entry.created_at,
+                        entry.last_echoed,
+                        d,
+                    );
+                    self.config.activation_weight * act as f32
+                } else {
+                    // Legacy recency boost (KS18 Track 3): newer memories get a small advantage.
+                    // Formula: recency_weight / (1.0 + days_since_stored)
+                    // At default 0.05: day 0 = +0.05, day 7 = +0.006, day 30 = +0.002.
+                    let days_since_stored = age_secs / 86400.0;
+                    (recency_weight / (1.0 + days_since_stored)) as f32
+                };
+
+                // Importance boost (if enabled and weight > 0)
+                let importance_boost =
+                    if self.config.use_importance && self.config.importance_weight > 0.0 {
+                        self.config.importance_weight * entry.importance
+                    } else {
+                        0.0
+                    };
+
+                let sim = score as f64;
+                let hebbian_boost = boost;
+                let final_score = (sim + hebbian_boost + importance_boost as f64) * decay as f64
+                    + activation_term as f64;
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
                     content: truncate_content(entry.display_content(), 200),
                     similarity: score,
-                    final_score: (score as f64 + boost + recency_boost) * decay,
+                    final_score,
                     source: entry.source.clone(),
                     echoed_at: now,
                     modality: entry.modality,
@@ -1318,10 +1341,9 @@ impl EchoEngine {
 
         // 1. Embed query with CLIP text encoder
         let query_embedding = {
-            let mut embedder = self
-                .embedder
-                .lock()
-                .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+            let mut embedder = self.embedder.lock().map_err(|e| {
+                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+            })?;
             embedder.embed_text_for_vision(query)?
         };
 
@@ -1623,6 +1645,7 @@ impl EchoEngine {
                 sensitivity: e.sensitivity,
                 category: e.category,
                 novelty_score: e.novelty_score,
+                importance: e.importance,
             })
             .collect()
     }
@@ -1633,7 +1656,11 @@ impl EchoEngine {
     /// ranked by cosine similarity to the source memory's embedding.
     /// Skips the full echo pipeline (LSH, bloom, Hebbian) — pure label index + cosine.
     #[instrument(skip(self), fields(memory_id = %id))]
-    pub async fn memory_graph(&self, id: &MemoryId, top_per_label: usize) -> Result<MemoryGraphResult> {
+    pub async fn memory_graph(
+        &self,
+        id: &MemoryId,
+        top_per_label: usize,
+    ) -> Result<MemoryGraphResult> {
         let store = self.store.read().await;
         let index = store
             .index_of(id)
@@ -1642,7 +1669,8 @@ impl EchoEngine {
             .entry_at(index)
             .ok_or_else(|| ShrimPKError::Memory(format!("Entry missing at index {index}")))?;
 
-        let content_preview = entry.display_content()[..entry.display_content().len().min(200)].to_string();
+        let content_preview =
+            entry.display_content()[..entry.display_content().len().min(200)].to_string();
         let labels = entry.labels.clone();
         let source_embedding = store
             .embedding_at(index)
@@ -1976,7 +2004,11 @@ impl EchoEngine {
             return 0;
         }
         let mut store = self.store.write().await;
-        let unlabeled = store.all_entries().iter().filter(|e| e.label_version == 0).count();
+        let unlabeled = store
+            .all_entries()
+            .iter()
+            .filter(|e| e.label_version == 0)
+            .count();
         if unlabeled == 0 {
             tracing::debug!("No unlabeled entries, skipping bootstrap");
             return 0;
@@ -2277,7 +2309,10 @@ mod tests {
 
         // Store old fact
         engine
-            .store("I work as an engineer at Google on the Cloud team", "old_session")
+            .store(
+                "I work as an engineer at Google on the Cloud team",
+                "old_session",
+            )
             .await
             .expect("Should store old");
 
@@ -2291,7 +2326,10 @@ mod tests {
 
         // Store new correction (created_at = now, so recency boost is maximal)
         engine
-            .store("I left Google. I now work at Meta on the infrastructure team", "new_session")
+            .store(
+                "I left Google. I now work at Meta on the infrastructure team",
+                "new_session",
+            )
             .await
             .expect("Should store new");
 
@@ -2401,10 +2439,8 @@ mod tests {
         use shrimpk_core::QueryMode;
 
         let mut config = test_config();
-        config.enabled_modalities = vec![
-            shrimpk_core::Modality::Text,
-            shrimpk_core::Modality::Vision,
-        ];
+        config.enabled_modalities =
+            vec![shrimpk_core::Modality::Text, shrimpk_core::Modality::Vision];
         config.similarity_threshold = 0.05; // low threshold for cross-modal
 
         let engine = EchoEngine::new(config).expect("Should init");
@@ -2438,10 +2474,8 @@ mod tests {
 
         let mut config = test_config();
         config.use_bloom = true;
-        config.enabled_modalities = vec![
-            shrimpk_core::Modality::Text,
-            shrimpk_core::Modality::Vision,
-        ];
+        config.enabled_modalities =
+            vec![shrimpk_core::Modality::Text, shrimpk_core::Modality::Vision];
 
         let engine = EchoEngine::new(config).expect("Should init");
 
@@ -2480,17 +2514,18 @@ mod tests {
         use shrimpk_core::QueryMode;
 
         let mut config = test_config();
-        config.enabled_modalities = vec![
-            shrimpk_core::Modality::Text,
-            shrimpk_core::Modality::Vision,
-        ];
+        config.enabled_modalities =
+            vec![shrimpk_core::Modality::Text, shrimpk_core::Modality::Vision];
         config.similarity_threshold = 0.05;
 
         let engine = EchoEngine::new(config).expect("Should init");
 
         // Store a text memory
         engine
-            .store("The sunset was beautiful with red and orange colors", "test")
+            .store(
+                "The sunset was beautiful with red and orange colors",
+                "test",
+            )
             .await
             .expect("Should store text");
 
@@ -2516,10 +2551,8 @@ mod tests {
     async fn text_echo_unchanged_with_vision_entries() {
         // Storing vision entries should not affect text-only echo
         let mut config = test_config();
-        config.enabled_modalities = vec![
-            shrimpk_core::Modality::Text,
-            shrimpk_core::Modality::Vision,
-        ];
+        config.enabled_modalities =
+            vec![shrimpk_core::Modality::Text, shrimpk_core::Modality::Vision];
 
         let engine = EchoEngine::new(config).expect("Should init");
 

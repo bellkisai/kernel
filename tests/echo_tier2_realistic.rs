@@ -94,56 +94,171 @@ fn sam_lifecycle() -> Vec<(&'static str, &'static str)> {
     vec![
         // === Session 1 (Day 1): Personal basics ===
         ("My name is Sam Torres, I'm 29 years old", "session1_day1"),
-        ("I live in a one-bedroom apartment in Oakland, California", "session1_day1"),
-        ("I work as a frontend developer at Figma on their design tools team", "session1_day1"),
-        ("I have a tabby cat named Mochi who is 3 years old", "session1_day1"),
-        ("I grew up in Sacramento and got my CS degree from UC Davis in 2019", "session1_day1"),
-        ("My parents still live in Sacramento, I visit them once a month", "session1_day1"),
-
+        (
+            "I live in a one-bedroom apartment in Oakland, California",
+            "session1_day1",
+        ),
+        (
+            "I work as a frontend developer at Figma on their design tools team",
+            "session1_day1",
+        ),
+        (
+            "I have a tabby cat named Mochi who is 3 years old",
+            "session1_day1",
+        ),
+        (
+            "I grew up in Sacramento and got my CS degree from UC Davis in 2019",
+            "session1_day1",
+        ),
+        (
+            "My parents still live in Sacramento, I visit them once a month",
+            "session1_day1",
+        ),
         // === Session 2 (Day 3): Work context ===
-        ("My team at Figma works on the real-time collaboration features like multiplayer cursors and live comments", "session2_day3"),
-        ("We use TypeScript and React for the frontend with a custom WebGL renderer for the canvas", "session2_day3"),
-        ("I'm currently working on improving the performance of multiplayer editing for large files", "session2_day3"),
-        ("My manager is Lisa Chen and our team has 6 engineers including me", "session2_day3"),
-        ("We do two-week sprints and I'm the on-call rotation lead this month", "session2_day3"),
-        ("Our biggest competitor is Penpot and the team watches their releases closely", "session2_day3"),
-        ("I sit in the 4th floor open office area next to the coffee station", "session2_day3"),
-
+        (
+            "My team at Figma works on the real-time collaboration features like multiplayer cursors and live comments",
+            "session2_day3",
+        ),
+        (
+            "We use TypeScript and React for the frontend with a custom WebGL renderer for the canvas",
+            "session2_day3",
+        ),
+        (
+            "I'm currently working on improving the performance of multiplayer editing for large files",
+            "session2_day3",
+        ),
+        (
+            "My manager is Lisa Chen and our team has 6 engineers including me",
+            "session2_day3",
+        ),
+        (
+            "We do two-week sprints and I'm the on-call rotation lead this month",
+            "session2_day3",
+        ),
+        (
+            "Our biggest competitor is Penpot and the team watches their releases closely",
+            "session2_day3",
+        ),
+        (
+            "I sit in the 4th floor open office area next to the coffee station",
+            "session2_day3",
+        ),
         // === Session 3 (Day 7): Personal preferences ===
-        ("I use VS Code with the Dracula theme and Vim keybindings for all my coding", "session3_day7"),
-        ("I'm vegetarian and love cooking Indian food at home, especially daal and paneer tikka masala", "session3_day7"),
-        ("I run 5K three times a week, usually in the morning before work around Lake Merritt", "session3_day7"),
-        ("I take BART to the Figma office in San Francisco, about a 35-minute commute each way", "session3_day7"),
-        ("I'm reading Designing Data-Intensive Applications by Martin Kleppmann, about halfway through", "session3_day7"),
-        ("I drink oat milk lattes, usually grab one from Blue Bottle Coffee near the office", "session3_day7"),
-        ("I play acoustic guitar in the evenings, mostly folk and indie songs", "session3_day7"),
-
+        (
+            "I use VS Code with the Dracula theme and Vim keybindings for all my coding",
+            "session3_day7",
+        ),
+        (
+            "I'm vegetarian and love cooking Indian food at home, especially daal and paneer tikka masala",
+            "session3_day7",
+        ),
+        (
+            "I run 5K three times a week, usually in the morning before work around Lake Merritt",
+            "session3_day7",
+        ),
+        (
+            "I take BART to the Figma office in San Francisco, about a 35-minute commute each way",
+            "session3_day7",
+        ),
+        (
+            "I'm reading Designing Data-Intensive Applications by Martin Kleppmann, about halfway through",
+            "session3_day7",
+        ),
+        (
+            "I drink oat milk lattes, usually grab one from Blue Bottle Coffee near the office",
+            "session3_day7",
+        ),
+        (
+            "I play acoustic guitar in the evenings, mostly folk and indie songs",
+            "session3_day7",
+        ),
         // === Session 4 (Day 14): Work update ===
-        ("We shipped the new real-time collaboration engine last week and got great user feedback on performance improvements", "session4_day14"),
-        ("I've been learning Rust on the side, working through the Rust Book and building a small CLI tool", "session4_day14"),
-        ("Lisa asked me to lead the new plugin API project starting next sprint, it's a big opportunity", "session4_day14"),
-        ("I got a new 32-inch 4K LG monitor and a standing desk from Autonomous for my home office", "session4_day14"),
-        ("Our team is hiring two more engineers and I'm helping conduct technical interviews", "session4_day14"),
-        ("I signed up for a half marathon in June, so I'm increasing my running distance gradually", "session4_day14"),
-
+        (
+            "We shipped the new real-time collaboration engine last week and got great user feedback on performance improvements",
+            "session4_day14",
+        ),
+        (
+            "I've been learning Rust on the side, working through the Rust Book and building a small CLI tool",
+            "session4_day14",
+        ),
+        (
+            "Lisa asked me to lead the new plugin API project starting next sprint, it's a big opportunity",
+            "session4_day14",
+        ),
+        (
+            "I got a new 32-inch 4K LG monitor and a standing desk from Autonomous for my home office",
+            "session4_day14",
+        ),
+        (
+            "Our team is hiring two more engineers and I'm helping conduct technical interviews",
+            "session4_day14",
+        ),
+        (
+            "I signed up for a half marathon in June, so I'm increasing my running distance gradually",
+            "session4_day14",
+        ),
         // === Session 5 (Day 30): Preference changes ===
-        ("I switched from VS Code to Neovim with a custom Lua config, took me two weeks to set up but I love it", "session5_day30"),
-        ("I had to stop running because of a knee injury from over-training for the half marathon", "session5_day30"),
-        ("I started doing yoga three times a week at CorePower instead of running, it's easier on my joints", "session5_day30"),
-        ("I've gotten into sourdough baking, made my first decent loaf last weekend after three failed attempts", "session5_day30"),
-        ("I finished DDIA and now I'm reading The Pragmatic Programmer, finding it really practical", "session5_day30"),
-        ("I started biking to work instead of taking BART, got a used Trek road bike for the commute", "session5_day30"),
-        ("I'm learning Japanese on Duolingo, about 30 days into my streak now", "session5_day30"),
-
+        (
+            "I switched from VS Code to Neovim with a custom Lua config, took me two weeks to set up but I love it",
+            "session5_day30",
+        ),
+        (
+            "I had to stop running because of a knee injury from over-training for the half marathon",
+            "session5_day30",
+        ),
+        (
+            "I started doing yoga three times a week at CorePower instead of running, it's easier on my joints",
+            "session5_day30",
+        ),
+        (
+            "I've gotten into sourdough baking, made my first decent loaf last weekend after three failed attempts",
+            "session5_day30",
+        ),
+        (
+            "I finished DDIA and now I'm reading The Pragmatic Programmer, finding it really practical",
+            "session5_day30",
+        ),
+        (
+            "I started biking to work instead of taking BART, got a used Trek road bike for the commute",
+            "session5_day30",
+        ),
+        (
+            "I'm learning Japanese on Duolingo, about 30 days into my streak now",
+            "session5_day30",
+        ),
         // === Session 6 (Day 60): Major life updates ===
-        ("I left Figma last month and joined Vercel as a senior frontend engineer on the Next.js team", "session6_day60"),
-        ("I moved from Oakland to San Francisco, got an apartment in the Mission District to be closer to work", "session6_day60"),
-        ("Jordan and I started dating three weeks ago, we met at the SF Rust meetup", "session6_day60"),
-        ("At Vercel I'm working on Next.js server components and the edge runtime", "session6_day60"),
-        ("I adopted a second cat, a black kitten named Pixel, Mochi is adjusting to having a sibling", "session6_day60"),
-        ("I passed my Rust skills assessment and I'm now contributing to an open source Rust project on weekends", "session6_day60"),
-        ("I switched to making pour-over coffee at home with a Chemex after visiting a specialty roaster", "session6_day60"),
-        ("My new commute is a 15-minute bike ride which is way better than the 35-minute BART from Oakland", "session6_day60"),
+        (
+            "I left Figma last month and joined Vercel as a senior frontend engineer on the Next.js team",
+            "session6_day60",
+        ),
+        (
+            "I moved from Oakland to San Francisco, got an apartment in the Mission District to be closer to work",
+            "session6_day60",
+        ),
+        (
+            "Jordan and I started dating three weeks ago, we met at the SF Rust meetup",
+            "session6_day60",
+        ),
+        (
+            "At Vercel I'm working on Next.js server components and the edge runtime",
+            "session6_day60",
+        ),
+        (
+            "I adopted a second cat, a black kitten named Pixel, Mochi is adjusting to having a sibling",
+            "session6_day60",
+        ),
+        (
+            "I passed my Rust skills assessment and I'm now contributing to an open source Rust project on weekends",
+            "session6_day60",
+        ),
+        (
+            "I switched to making pour-over coffee at home with a Chemex after visiting a specialty roaster",
+            "session6_day60",
+        ),
+        (
+            "My new commute is a 15-minute bike ride which is way better than the 35-minute BART from Oakland",
+            "session6_day60",
+        ),
     ]
 }
 
@@ -191,7 +306,6 @@ fn tier2_queries() -> Vec<QueryCase> {
             query: "What neighborhood do I live in?",
             needles: vec!["Mission"],
         },
-
         // === MSR: Multi-Session Reasoning (5) — Cross-session connections ===
         QueryCase {
             name: "MSR-1: Skills for Job",
@@ -223,7 +337,6 @@ fn tier2_queries() -> Vec<QueryCase> {
             query: "How has my living situation affected my commute?",
             needles: vec!["Mission", "bike", "15-minute"],
         },
-
         // === TR: Temporal Reasoning (5) — Time-ordered recall ===
         QueryCase {
             name: "TR-1: Job Change",
@@ -255,7 +368,6 @@ fn tier2_queries() -> Vec<QueryCase> {
             query: "What's the timeline of my career so far?",
             needles: vec!["Figma", "Vercel"],
         },
-
         // === KU: Knowledge Update (5) — Most recent info surfaces ===
         QueryCase {
             name: "KU-1: Current Editor",
@@ -287,7 +399,6 @@ fn tier2_queries() -> Vec<QueryCase> {
             query: "What exercise do I do regularly?",
             needles: vec!["yoga"],
         },
-
         // === PT: Preference Tracking (5) — Evolving preferences ===
         QueryCase {
             name: "PT-1: Current Tech Stack",
@@ -366,7 +477,10 @@ fn print_scorecard(config_label: &str, results: &[TestResult]) {
     let categories = ["IE", "MSR", "TR", "KU", "PT"];
 
     println!("\n  [{config_label}] SCORECARD");
-    println!("  {:<30} | {:>5} | {:>5} | {:>6}", "Category", "Top-3", "Top-5", "Avg ms");
+    println!(
+        "  {:<30} | {:>5} | {:>5} | {:>6}",
+        "Category", "Top-3", "Top-5", "Avg ms"
+    );
     println!("  {}", "-".repeat(60));
 
     for cat in &categories {
@@ -463,9 +577,7 @@ fn tier2_realistic_user_simulation() {
 
         for case in &queries {
             let start = Instant::now();
-            let results = rt.block_on(async {
-                engine.echo(case.query, 5).await.expect("echo")
-            });
+            let results = rt.block_on(async { engine.echo(case.query, 5).await.expect("echo") });
             let latency_ms = start.elapsed().as_millis();
 
             let hit3 = any_needle_in_top_n(&results, 3, &case.needles);
@@ -528,9 +640,7 @@ fn tier2_realistic_user_simulation() {
     println!("  Memories stored: {}", memories.len());
     println!("  Queries: {}", queries.len());
     println!("  Categories: IE(5) MSR(5) TR(5) KU(5) PT(5)");
-    println!(
-        "  Noise level: Organic (no artificial noise, all memories are real user data)"
-    );
+    println!("  Noise level: Organic (no artificial noise, all memories are real user data)");
     println!("\n=== TIER 2 BENCHMARK COMPLETE ===");
 }
 

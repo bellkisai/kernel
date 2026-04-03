@@ -4,7 +4,7 @@
 //! installation required.
 
 use shrimpk_ros2::{
-    bridge::{pose_to_text, MessageBridge},
+    bridge::{MessageBridge, pose_to_text},
     client::DaemonClient,
     config::{BridgeConfig, MsgType, TopicConfig},
 };
@@ -165,7 +165,9 @@ fn image_resize_applied_for_large_images() {
     let dyn_img = DynamicImage::ImageRgb8(resized);
 
     let mut buf = Cursor::new(Vec::new());
-    dyn_img.write_to(&mut buf, ImageFormat::Png).expect("encode");
+    dyn_img
+        .write_to(&mut buf, ImageFormat::Png)
+        .expect("encode");
 
     let decoded = image::load_from_memory(buf.get_ref()).expect("decode");
     assert_eq!(decoded.width(), cap);
@@ -218,7 +220,12 @@ fn bridge_constructs_without_panic() {
 
 #[test]
 fn msg_type_serde_all_variants() {
-    let variants = [MsgType::String, MsgType::Image, MsgType::Audio, MsgType::Pose];
+    let variants = [
+        MsgType::String,
+        MsgType::Image,
+        MsgType::Audio,
+        MsgType::Pose,
+    ];
     for v in &variants {
         let j = serde_json::to_string(v).expect("serialize");
         let back: MsgType = serde_json::from_str(&j).expect("deserialize");

@@ -63,13 +63,18 @@ fn pipeline_stage_timing_10k() {
     println!("Storing 10K memories...");
     rt.block_on(async {
         for i in 0..10_000 {
-            engine.store(&generate_memory(i), "bench").await.expect("store");
+            engine
+                .store(&generate_memory(i), "bench")
+                .await
+                .expect("store");
         }
     });
     println!("Stored 10K memories.\n");
 
     // Warm up embedding model
-    rt.block_on(async { let _ = engine.echo("warmup", 1).await; });
+    rt.block_on(async {
+        let _ = engine.echo("warmup", 1).await;
+    });
 
     // Time just the embedding step (no echo, just embed)
     let queries = [
@@ -111,10 +116,15 @@ fn pipeline_stage_timing_10k() {
 
     rt2.block_on(async {
         for i in 0..10_000 {
-            engine2.store(&generate_memory(i), "bench").await.expect("store");
+            engine2
+                .store(&generate_memory(i), "bench")
+                .await
+                .expect("store");
         }
     });
-    rt2.block_on(async { let _ = engine2.echo("warmup", 1).await; });
+    rt2.block_on(async {
+        let _ = engine2.echo("warmup", 1).await;
+    });
 
     println!("\nFull echo timing (10K, labels OFF):");
     let mut echo_off: Vec<f64> = Vec::new();
@@ -175,12 +185,17 @@ fn threshold_sweep_10k() {
         // Store 10K
         rt.block_on(async {
             for i in 0..10_000 {
-                engine.store(&generate_memory(i), "bench").await.expect("store");
+                engine
+                    .store(&generate_memory(i), "bench")
+                    .await
+                    .expect("store");
             }
         });
 
         // Warm up
-        rt.block_on(async { let _ = engine.echo("warmup", 1).await; });
+        rt.block_on(async {
+            let _ = engine.echo("warmup", 1).await;
+        });
 
         // Measure
         let mut latencies: Vec<f64> = Vec::new();
@@ -200,8 +215,14 @@ fn threshold_sweep_10k() {
 
         // Note: we can't change the threshold at runtime yet (it's in LabelPrototypes)
         // This test establishes the baseline at default threshold
-        println!("  {threshold:.2}     | {p50:7.2}  | {p95:7.2}  | {avg_results:10.1}  | default={}",
-            if (threshold - 0.55_f64).abs() < 0.01 { "<-- current" } else { "" });
+        println!(
+            "  {threshold:.2}     | {p50:7.2}  | {p95:7.2}  | {avg_results:10.1}  | default={}",
+            if (threshold - 0.55_f64).abs() < 0.01 {
+                "<-- current"
+            } else {
+                ""
+            }
+        );
 
         drop(rt);
         drop(engine);

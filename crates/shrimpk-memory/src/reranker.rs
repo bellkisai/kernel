@@ -62,11 +62,7 @@ static CROSS_ENCODER: std::sync::LazyLock<Mutex<Option<TextRerank>>> =
 ///
 /// Returns `Some(reranked_results)` on success, `None` on failure or if disabled.
 /// The caller should keep the original ordering when `None` is returned.
-pub fn rerank(
-    config: &EchoConfig,
-    query: &str,
-    results: &[EchoResult],
-) -> Option<Vec<EchoResult>> {
+pub fn rerank(config: &EchoConfig, query: &str, results: &[EchoResult]) -> Option<Vec<EchoResult>> {
     match config.effective_reranker_backend() {
         RerankerBackend::None => None,
         RerankerBackend::Llm => rerank_with_llm(config, query, results),
@@ -87,10 +83,7 @@ pub fn rerank(
 /// Typical latency: 5-15ms for 10 documents (vs ~2s for LLM reranker).
 ///
 /// Returns `Some(reranked_results)` on success, `None` on failure.
-pub fn rerank_with_cross_encoder(
-    query: &str,
-    results: &[EchoResult],
-) -> Option<Vec<EchoResult>> {
+pub fn rerank_with_cross_encoder(query: &str, results: &[EchoResult]) -> Option<Vec<EchoResult>> {
     if results.is_empty() {
         return None;
     }

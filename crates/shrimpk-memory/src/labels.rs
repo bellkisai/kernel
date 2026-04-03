@@ -130,52 +130,155 @@ impl LabelPrototypes {
 fn prototype_definitions() -> (Vec<String>, Vec<String>) {
     let definitions = vec![
         // topic: subject domains
-        ("topic:career", "career, employment, job, work position, company, hiring, promotion, salary, interview, resume, professional development"),
-        ("topic:language", "language, languages, learning a language, studying a language, vocabulary, grammar, fluency, bilingual, translation, duolingo, rosetta stone"),
-        ("topic:education", "education, school, university, college, class, classroom, lecture, studying, homework, degree, academic, course, teaching, student, professor, exam, grade"),
-        ("topic:health", "health, medical, doctor, hospital, illness, medicine, treatment, diagnosis, symptoms, wellness, mental health, therapy"),
-        ("topic:fitness", "fitness, exercise, running, gym, workout, yoga, training, marathon, cycling, swimming, sports, physical activity, stretching"),
-        ("topic:housing", "housing, apartment, house, home, rent, mortgage, moving, relocation, neighborhood, real estate, roommate, lease"),
-        ("topic:food", "food, cooking, restaurant, recipe, cuisine, meal, baking, diet, nutrition, vegetarian, kitchen, chef, eating"),
-        ("topic:music", "music, instrument, guitar, piano, singing, concert, band, song, playlist, album, genre, musician, melody"),
-        ("topic:technology", "technology, programming, software, code, developer, computer, app, framework, library, algorithm, debugging, API, database, system"),
-        ("topic:finance", "finance, money, budget, savings, investment, bank, credit, debt, tax, expense, income, financial planning"),
-        ("topic:travel", "travel, trip, vacation, destination, flight, hotel, tourism, sightseeing, abroad, passport, backpacking, adventure"),
-        ("topic:relationships", "relationships, partner, dating, family, friends, social, love, marriage, breakup, connection, communication"),
-        ("topic:hobby", "hobby, craft, art, painting, photography, gardening, reading, collecting, woodworking, knitting, creative pursuit"),
-        ("topic:entertainment", "entertainment, movie, film, television, show, series, streaming, gaming, video game, book, novel, podcast"),
-        ("topic:pets", "pets, cat, dog, animal, veterinarian, adoption, puppy, kitten, fish, bird, pet care, feeding"),
-
+        (
+            "topic:career",
+            "career, employment, job, work position, company, hiring, promotion, salary, interview, resume, professional development",
+        ),
+        (
+            "topic:language",
+            "language, languages, learning a language, studying a language, vocabulary, grammar, fluency, bilingual, translation, duolingo, rosetta stone",
+        ),
+        (
+            "topic:education",
+            "education, school, university, college, class, classroom, lecture, studying, homework, degree, academic, course, teaching, student, professor, exam, grade",
+        ),
+        (
+            "topic:health",
+            "health, medical, doctor, hospital, illness, medicine, treatment, diagnosis, symptoms, wellness, mental health, therapy",
+        ),
+        (
+            "topic:fitness",
+            "fitness, exercise, running, gym, workout, yoga, training, marathon, cycling, swimming, sports, physical activity, stretching",
+        ),
+        (
+            "topic:housing",
+            "housing, apartment, house, home, rent, mortgage, moving, relocation, neighborhood, real estate, roommate, lease",
+        ),
+        (
+            "topic:food",
+            "food, cooking, restaurant, recipe, cuisine, meal, baking, diet, nutrition, vegetarian, kitchen, chef, eating",
+        ),
+        (
+            "topic:music",
+            "music, instrument, guitar, piano, singing, concert, band, song, playlist, album, genre, musician, melody",
+        ),
+        (
+            "topic:technology",
+            "technology, programming, software, code, developer, computer, app, framework, library, algorithm, debugging, API, database, system",
+        ),
+        (
+            "topic:finance",
+            "finance, money, budget, savings, investment, bank, credit, debt, tax, expense, income, financial planning",
+        ),
+        (
+            "topic:travel",
+            "travel, trip, vacation, destination, flight, hotel, tourism, sightseeing, abroad, passport, backpacking, adventure",
+        ),
+        (
+            "topic:relationships",
+            "relationships, partner, dating, family, friends, social, love, marriage, breakup, connection, communication",
+        ),
+        (
+            "topic:hobby",
+            "hobby, craft, art, painting, photography, gardening, reading, collecting, woodworking, knitting, creative pursuit",
+        ),
+        (
+            "topic:entertainment",
+            "entertainment, movie, film, television, show, series, streaming, gaming, video game, book, novel, podcast",
+        ),
+        (
+            "topic:pets",
+            "pets, cat, dog, animal, veterinarian, adoption, puppy, kitten, fish, bird, pet care, feeding",
+        ),
         // domain: life areas
-        ("domain:work", "work, office, professional, business, meeting, deadline, project, team, manager, colleague, workplace, corporate"),
-        ("domain:life", "personal life, daily routine, lifestyle, home life, household, chores, errands, family time, weekend, evening"),
-        ("domain:social", "social, friends, gathering, party, community, event, meetup, networking, hangout, celebration"),
-        ("domain:health", "health, wellness, self-care, medical, doctor visit, mental health, therapy, sleep, recovery, rest"),
-        ("domain:creative", "creative, art, design, writing, music, craft, invention, expression, imagination, artistic"),
-
+        (
+            "domain:work",
+            "work, office, professional, business, meeting, deadline, project, team, manager, colleague, workplace, corporate",
+        ),
+        (
+            "domain:life",
+            "personal life, daily routine, lifestyle, home life, household, chores, errands, family time, weekend, evening",
+        ),
+        (
+            "domain:social",
+            "social, friends, gathering, party, community, event, meetup, networking, hangout, celebration",
+        ),
+        (
+            "domain:health",
+            "health, wellness, self-care, medical, doctor visit, mental health, therapy, sleep, recovery, rest",
+        ),
+        (
+            "domain:creative",
+            "creative, art, design, writing, music, craft, invention, expression, imagination, artistic",
+        ),
         // action: verb concepts
-        ("action:learning", "learning, studying, practicing, training, course, tutorial, skill development, taking a class, researching, reading about, lesson, workshop"),
-        ("action:building", "building, creating, developing, coding, constructing, making, implementing, engineering, architecting, designing"),
-        ("action:planning", "planning, scheduling, organizing, preparing, strategizing, roadmap, timeline, goal setting, future, agenda"),
-        ("action:moving", "moving, relocating, changing address, new apartment, packing, unpacking, settling in, neighborhood change"),
-        ("action:exercising", "exercising, running, working out, training, gym session, yoga, cycling, swimming, physical activity"),
-        ("action:leading", "leading, managing, supervising, directing, organizing team, delegation, mentoring, coordinating, decision making"),
-
+        (
+            "action:learning",
+            "learning, studying, practicing, training, course, tutorial, skill development, taking a class, researching, reading about, lesson, workshop",
+        ),
+        (
+            "action:building",
+            "building, creating, developing, coding, constructing, making, implementing, engineering, architecting, designing",
+        ),
+        (
+            "action:planning",
+            "planning, scheduling, organizing, preparing, strategizing, roadmap, timeline, goal setting, future, agenda",
+        ),
+        (
+            "action:moving",
+            "moving, relocating, changing address, new apartment, packing, unpacking, settling in, neighborhood change",
+        ),
+        (
+            "action:exercising",
+            "exercising, running, working out, training, gym session, yoga, cycling, swimming, physical activity",
+        ),
+        (
+            "action:leading",
+            "leading, managing, supervising, directing, organizing team, delegation, mentoring, coordinating, decision making",
+        ),
         // temporal: time signals
-        ("temporal:current", "currently, right now, at the moment, these days, presently, today, this week, this month"),
-        ("temporal:past", "used to, previously, before, in the past, formerly, back then, years ago, when I was"),
-        ("temporal:future", "plan to, going to, will, want to, hope to, considering, thinking about, next year, someday"),
-        ("temporal:recurring", "every day, every week, every morning, regularly, routine, habit, always, usually, typically, each time"),
-
+        (
+            "temporal:current",
+            "currently, right now, at the moment, these days, presently, today, this week, this month",
+        ),
+        (
+            "temporal:past",
+            "used to, previously, before, in the past, formerly, back then, years ago, when I was",
+        ),
+        (
+            "temporal:future",
+            "plan to, going to, will, want to, hope to, considering, thinking about, next year, someday",
+        ),
+        (
+            "temporal:recurring",
+            "every day, every week, every morning, regularly, routine, habit, always, usually, typically, each time",
+        ),
         // memtype: memory classification (renamed from modality: to avoid Modality enum collision)
-        ("memtype:preference", "prefer, like, love, enjoy, favorite, choice, rather, better, best, always choose, always use"),
-        ("memtype:fact", "fact, is, has, was born, lives, works at, name is, age is, located in, known as"),
-        ("memtype:goal", "goal, want to, aim, aspire, target, objective, plan to achieve, dream, ambition, working toward"),
-        ("memtype:habit", "habit, routine, every day, always do, regular practice, ritual, pattern, custom, tendency"),
-
+        (
+            "memtype:preference",
+            "prefer, like, love, enjoy, favorite, choice, rather, better, best, always choose, always use",
+        ),
+        (
+            "memtype:fact",
+            "fact, is, has, was born, lives, works at, name is, age is, located in, known as",
+        ),
+        (
+            "memtype:goal",
+            "goal, want to, aim, aspire, target, objective, plan to achieve, dream, ambition, working toward",
+        ),
+        (
+            "memtype:habit",
+            "habit, routine, every day, always do, regular practice, ritual, pattern, custom, tendency",
+        ),
         // sentiment: emotional valence
-        ("sentiment:positive", "great, love, happy, excited, wonderful, amazing, enjoy, fantastic, thrilled, grateful, perfect, awesome"),
-        ("sentiment:negative", "bad, hate, frustrated, annoyed, disappointed, terrible, struggle, difficult, problem, worried, stressed, upset"),
+        (
+            "sentiment:positive",
+            "great, love, happy, excited, wonderful, amazing, enjoy, fantastic, thrilled, grateful, perfect, awesome",
+        ),
+        (
+            "sentiment:negative",
+            "bad, hate, frustrated, annoyed, disappointed, terrible, struggle, difficult, problem, worried, stressed, upset",
+        ),
     ];
 
     let labels: Vec<String> = definitions.iter().map(|(l, _)| l.to_string()).collect();
@@ -207,23 +310,65 @@ pub fn generate_tier1_labels(
 
     // 2. Rule-based temporal detection
     let lower = content.to_lowercase();
-    if contains_any(&lower, &["every day", "every week", "every morning", "every night", "routine", "always", "usually", "regularly"]) {
+    if contains_any(
+        &lower,
+        &[
+            "every day",
+            "every week",
+            "every morning",
+            "every night",
+            "routine",
+            "always",
+            "usually",
+            "regularly",
+        ],
+    ) {
         push_unique(&mut labels, "temporal:recurring");
     }
-    if contains_any(&lower, &["used to", "previously", "back then", "in the past", "formerly"]) {
+    if contains_any(
+        &lower,
+        &[
+            "used to",
+            "previously",
+            "back then",
+            "in the past",
+            "formerly",
+        ],
+    ) {
         push_unique(&mut labels, "temporal:past");
     }
-    if contains_any(&lower, &["plan to", "going to", "want to", "hope to", "considering", "next year"]) {
+    if contains_any(
+        &lower,
+        &[
+            "plan to",
+            "going to",
+            "want to",
+            "hope to",
+            "considering",
+            "next year",
+        ],
+    ) {
         push_unique(&mut labels, "temporal:future");
     }
-    if contains_any(&lower, &["right now", "currently", "these days", "at the moment", "this week"]) {
+    if contains_any(
+        &lower,
+        &[
+            "right now",
+            "currently",
+            "these days",
+            "at the moment",
+            "this week",
+        ],
+    ) {
         push_unique(&mut labels, "temporal:current");
     }
 
     // 3. Simple entity extraction — capitalized multi-char words not at sentence start
     // This is a lightweight heuristic; Tier 2 (GLiNER) will provide precise NER.
     for (i, word) in content.split_whitespace().enumerate() {
-        if i == 0 { continue; } // skip sentence-start capitalization
+        if i == 0 {
+            continue;
+        } // skip sentence-start capitalization
         let clean = word.trim_matches(|c: char| !c.is_alphanumeric());
         if clean.len() >= 2
             && clean.chars().next().is_some_and(|c| c.is_uppercase())
@@ -259,7 +404,10 @@ pub fn classify_query(
     if contains_any(&lower, &["learn", "study", "class", "course", "school"]) {
         push_unique(&mut labels, "action:learning");
     }
-    if contains_any(&lower, &["work", "job", "career", "project", "office", "company"]) {
+    if contains_any(
+        &lower,
+        &["work", "job", "career", "project", "office", "company"],
+    ) {
         push_unique(&mut labels, "domain:work");
     }
     if contains_any(&lower, &["exercise", "run", "workout", "gym", "fitness"]) {
@@ -283,7 +431,10 @@ pub fn classify_query(
     if contains_any(&lower, &["travel", "trip", "visit", "vacation"]) {
         push_unique(&mut labels, "topic:travel");
     }
-    if contains_any(&lower, &["code", "program", "tech", "software", "editor", "framework"]) {
+    if contains_any(
+        &lower,
+        &["code", "program", "tech", "software", "editor", "framework"],
+    ) {
         push_unique(&mut labels, "topic:technology");
     }
     if contains_any(&lower, &["read", "book", "reading"]) {
@@ -318,12 +469,51 @@ fn push_unique(labels: &mut Vec<String>, label: &str) {
 fn is_common_word(word: &str) -> bool {
     matches!(
         word,
-        "I" | "The" | "A" | "An" | "My" | "We" | "They" | "He" | "She"
-            | "It" | "This" | "That" | "But" | "And" | "Or" | "So" | "If"
-            | "In" | "On" | "At" | "To" | "For" | "Of" | "With" | "Is"
-            | "Was" | "Are" | "Am" | "Do" | "Did" | "Has" | "Have" | "Had"
-            | "Not" | "No" | "Yes" | "Just" | "Now" | "Then" | "Also"
-            | "About" | "After" | "Before" | "Because" | "When" | "Where"
+        "I" | "The"
+            | "A"
+            | "An"
+            | "My"
+            | "We"
+            | "They"
+            | "He"
+            | "She"
+            | "It"
+            | "This"
+            | "That"
+            | "But"
+            | "And"
+            | "Or"
+            | "So"
+            | "If"
+            | "In"
+            | "On"
+            | "At"
+            | "To"
+            | "For"
+            | "Of"
+            | "With"
+            | "Is"
+            | "Was"
+            | "Are"
+            | "Am"
+            | "Do"
+            | "Did"
+            | "Has"
+            | "Have"
+            | "Had"
+            | "Not"
+            | "No"
+            | "Yes"
+            | "Just"
+            | "Now"
+            | "Then"
+            | "Also"
+            | "About"
+            | "After"
+            | "Before"
+            | "Because"
+            | "When"
+            | "Where"
     )
 }
 
@@ -367,7 +557,11 @@ mod tests {
     #[test]
     fn prototype_definitions_complete() {
         let (labels, descriptions) = prototype_definitions();
-        assert!(labels.len() >= 35, "Should have >= 35 prototypes, got {}", labels.len());
+        assert!(
+            labels.len() >= 35,
+            "Should have >= 35 prototypes, got {}",
+            labels.len()
+        );
         assert_eq!(labels.len(), descriptions.len());
 
         // All labels have a prefix
@@ -376,7 +570,14 @@ mod tests {
         }
 
         // All 7 dimensions represented
-        let prefixes: Vec<&str> = vec!["topic:", "domain:", "action:", "temporal:", "memtype:", "sentiment:"];
+        let prefixes: Vec<&str> = vec![
+            "topic:",
+            "domain:",
+            "action:",
+            "temporal:",
+            "memtype:",
+            "sentiment:",
+        ];
         for prefix in prefixes {
             assert!(
                 labels.iter().any(|l| l.starts_with(prefix)),
@@ -402,11 +603,7 @@ mod tests {
     #[test]
     fn tier1_rule_based_temporal_past() {
         let protos = mock_prototypes();
-        let labels = generate_tier1_labels(
-            "I used to live in Tokyo",
-            &vec![0.0; 384],
-            &protos,
-        );
+        let labels = generate_tier1_labels("I used to live in Tokyo", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "temporal:past"),
             "Should detect 'used to' as temporal:past, got: {labels:?}"
@@ -434,11 +631,7 @@ mod tests {
     #[test]
     fn tier1_skips_common_words() {
         let protos = mock_prototypes();
-        let labels = generate_tier1_labels(
-            "The quick Brown fox",
-            &vec![0.0; 384],
-            &protos,
-        );
+        let labels = generate_tier1_labels("The quick Brown fox", &vec![0.0; 384], &protos);
         assert!(
             !labels.iter().any(|l| l == "entity:the"),
             "Should skip common word 'The', got: {labels:?}"
@@ -461,11 +654,7 @@ mod tests {
     #[test]
     fn query_classification_tier_a_keywords() {
         let protos = mock_prototypes();
-        let labels = classify_query(
-            "what languages am I learning?",
-            &vec![0.0; 384],
-            &protos,
-        );
+        let labels = classify_query("what languages am I learning?", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "topic:language"),
             "Should match 'languages' keyword, got: {labels:?}"

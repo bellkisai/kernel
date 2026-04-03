@@ -67,6 +67,44 @@ impl MemoryCategory {
             Self::Default => 7.0 * 86400.0,        // 7 days
         }
     }
+
+    /// Importance weight for this category (levels-of-processing theory).
+    pub fn importance_weight(&self) -> f32 {
+        match self {
+            Self::Identity => 1.0,
+            Self::Preference => 0.8,
+            Self::Fact => 0.6,
+            Self::ActiveProject => 0.5,
+            Self::Default => 0.3,
+            Self::Conversation => 0.1,
+        }
+    }
+
+    /// ACT-R decay parameter d for this category.
+    pub fn actr_decay_d(&self) -> f64 {
+        match self {
+            Self::Identity => 0.3,
+            Self::Preference => 0.4,
+            Self::Fact | Self::ActiveProject | Self::Default => 0.5,
+            Self::Conversation => 0.7,
+        }
+    }
+
+    /// FSRS stability in days (S = half_life / 1.73).
+    pub fn stability_days(&self) -> f64 {
+        self.half_life_secs() / 86400.0 / 1.73
+    }
+}
+
+/// Source weight for importance scoring (encoding depth proxy).
+pub fn source_weight(source: &str) -> f32 {
+    match source {
+        "document" | "file" | "code" => 1.0,
+        "claude-code" | "mcp" => 0.7,
+        "conversation" | "cli" => 0.5,
+        "enrichment" | "child" => 0.0,
+        _ => 0.3,
+    }
 }
 
 /// Modality of a stored memory — which sensory channel produced it.
@@ -205,6 +243,18 @@ pub struct MemoryEntry {
     /// Higher = more novel/unique. Used for consolidation priority.
     #[serde(default)]
     pub novelty_score: f32,
+    /// Multi-signal importance score (0.0-1.0). Recomputed during consolidation.
+    #[serde(default)]
+    pub importance: f32,
+    /// Cached ACT-R base-level activation (OL approximation).
+    #[serde(default)]
+    pub activation_cache: f32,
+    /// When importance was last computed (for staleness detection).
+    #[serde(default)]
+    pub importance_computed_at: Option<DateTime<Utc>>,
+    /// Retrieval timestamps as seconds since UNIX epoch (ring buffer, cap 16). Future: full BLA.
+    #[serde(default)]
+    pub retrieval_history_secs: Vec<u32>,
 }
 
 impl MemoryEntry {
@@ -230,6 +280,10 @@ impl MemoryEntry {
             labels: Vec::new(),
             label_version: 0,
             novelty_score: 0.0,
+            importance: 0.0,
+            activation_cache: 0.0,
+            importance_computed_at: None,
+            retrieval_history_secs: Vec::new(),
         }
     }
 
@@ -356,6 +410,9 @@ pub struct MemoryEntrySummary {
     /// Novelty score at store time (0.0 to 1.0).
     #[serde(default)]
     pub novelty_score: f32,
+    /// Multi-signal importance score (0.0-1.0).
+    #[serde(default)]
+    pub importance: f32,
 }
 
 #[cfg(test)]
@@ -540,13 +597,20 @@ mod tests {
     #[test]
     fn label_fields_serde_roundtrip() {
         let mut entry = MemoryEntry::new("test".into(), vec![1.0], "test".into());
-        entry.labels = vec!["topic:language".into(), "entity:rust".into(), "domain:work".into()];
+        entry.labels = vec![
+            "topic:language".into(),
+            "entity:rust".into(),
+            "domain:work".into(),
+        ];
         entry.label_version = 2;
 
         let json = serde_json::to_string(&entry).unwrap();
         let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.labels, vec!["topic:language", "entity:rust", "domain:work"]);
+        assert_eq!(
+            deserialized.labels,
+            vec!["topic:language", "entity:rust", "domain:work"]
+        );
         assert_eq!(deserialized.label_version, 2);
     }
 
@@ -562,8 +626,14 @@ mod tests {
             "last_echoed":null,"echo_count":0
         }"#;
         let entry: MemoryEntry = serde_json::from_str(json).unwrap();
-        assert!(entry.labels.is_empty(), "Legacy JSON should deserialize to empty labels");
-        assert_eq!(entry.label_version, 0, "Legacy JSON should deserialize to label_version 0");
+        assert!(
+            entry.labels.is_empty(),
+            "Legacy JSON should deserialize to empty labels"
+        );
+        assert_eq!(
+            entry.label_version, 0,
+            "Legacy JSON should deserialize to label_version 0"
+        );
     }
 
     #[test]

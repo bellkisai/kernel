@@ -367,10 +367,7 @@ async fn cmd_graph(engine: &EchoEngine, id_str: &str, top_per_label: usize) -> a
         &id_str[..id_str.len().min(8)]
     );
     println!("  Content: \"{}\"", truncate(&graph.content_preview, 60));
-    println!(
-        "  Labels:  [{}]",
-        graph.labels.join(", ")
-    );
+    println!("  Labels:  [{}]", graph.labels.join(", "));
     println!(
         "  Connected: {} unique ({} total across labels)",
         graph.unique_connected, graph.total_connected
@@ -424,9 +421,7 @@ async fn cmd_related(
     println!(
         "[shrimpk] Related to {}...{} ({:.1}ms):",
         &id_str[..id_str.len().min(8)],
-        label
-            .map(|l| format!(" [label: {l}]"))
-            .unwrap_or_default(),
+        label.map(|l| format!(" [label: {l}]")).unwrap_or_default(),
         elapsed.as_secs_f64() * 1000.0
     );
 
@@ -576,7 +571,11 @@ async fn cmd_dump(engine: &EchoEngine, config: &EchoConfig) -> anyhow::Result<()
 }
 
 /// Export memories as Markdown files (Obsidian-compatible).
-async fn cmd_dump_md(engine: &EchoEngine, config: &EchoConfig, output_dir: Option<&str>) -> anyhow::Result<()> {
+async fn cmd_dump_md(
+    engine: &EchoEngine,
+    config: &EchoConfig,
+    output_dir: Option<&str>,
+) -> anyhow::Result<()> {
     let stats = engine.stats().await;
     if stats.total_memories == 0 {
         println!("[shrimpk] No memories to export.");
@@ -624,7 +623,14 @@ fn export_memories_md(entries: &[serde_json::Value], output_dir: &str) -> anyhow
         let labels_yaml = if labels.is_empty() {
             "[]".to_string()
         } else {
-            format!("[{}]", labels.iter().map(|l| format!("\"{}\"", l)).collect::<Vec<_>>().join(", "))
+            format!(
+                "[{}]",
+                labels
+                    .iter()
+                    .map(|l| format!("\"{}\"", l))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         };
 
         let md = format!(
@@ -813,7 +819,10 @@ fn cmd_config_show(config: &EchoConfig) {
         "  {:25} {:>15}  {}",
         "consolidation_provider",
         &config.consolidation_provider,
-        source("SHRIMPK_CONSOLIDATION_PROVIDER", fc.consolidation_provider.is_some())
+        source(
+            "SHRIMPK_CONSOLIDATION_PROVIDER",
+            fc.consolidation_provider.is_some()
+        )
     );
     println!(
         "  {:25} {:>15}  {}",
@@ -831,7 +840,11 @@ fn cmd_config_show(config: &EchoConfig) {
         "  {:25} {:>15}  {}",
         "max_facts_per_memory",
         config.max_facts_per_memory,
-        if fc.max_facts_per_memory.is_some() { "file" } else { "auto" }
+        if fc.max_facts_per_memory.is_some() {
+            "file"
+        } else {
+            "auto"
+        }
     );
 }
 
@@ -986,7 +999,11 @@ async fn main() -> anyhow::Result<()> {
                     println!("{resp}");
                 }
             }
-            Commands::StoreImage { path, source, description } => {
+            Commands::StoreImage {
+                path,
+                source,
+                description,
+            } => {
                 let image_bytes = std::fs::read(path)
                     .map_err(|e| anyhow::anyhow!("Failed to read image file: {e}"))?;
                 let image_b64 = base64_encode(&image_bytes);
@@ -994,15 +1011,15 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(desc) = description {
                     body["description"] = serde_json::json!(desc);
                 }
-                let resp = daemon_post(
-                    base,
-                    "/api/store_image",
-                    &body,
-                )
-                .await?;
+                let resp = daemon_post(base, "/api/store_image", &body).await?;
                 println!("{resp}");
             }
-            Commands::StoreAudio { path, sample_rate, source, description } => {
+            Commands::StoreAudio {
+                path,
+                sample_rate,
+                source,
+                description,
+            } => {
                 let audio_bytes = std::fs::read(path)
                     .map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
                 let audio_b64 = base64_encode(&audio_bytes);
@@ -1010,12 +1027,7 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(desc) = description {
                     body["description"] = serde_json::json!(desc);
                 }
-                let resp = daemon_post(
-                    base,
-                    "/api/store_audio",
-                    &body,
-                )
-                .await?;
+                let resp = daemon_post(base, "/api/store_audio", &body).await?;
                 println!("{resp}");
             }
             Commands::Echo {
@@ -1029,12 +1041,7 @@ async fn main() -> anyhow::Result<()> {
                 if !labels.is_empty() {
                     body["labels"] = serde_json::json!(labels);
                 }
-                let resp = daemon_post(
-                    base,
-                    "/api/echo",
-                    &body,
-                )
-                .await?;
+                let resp = daemon_post(base, "/api/echo", &body).await?;
                 if *json {
                     // Extract just the results array for clean JSON output
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&resp) {
@@ -1065,19 +1072,43 @@ async fn main() -> anyhow::Result<()> {
                 let resp = daemon_get(base, "/api/stats").await?;
                 if let Ok(s) = serde_json::from_str::<serde_json::Value>(&resp) {
                     println!("[shrimpk] Stats:");
-                    println!("  Memories:          {}", format_number(s["total_memories"].as_u64().unwrap_or(0) as usize));
-                    println!("  Max capacity:      {}", format_number(s["max_capacity"].as_u64().unwrap_or(0) as usize));
-                    println!("  Index size:        {}", format_bytes(s["index_size_bytes"].as_u64().unwrap_or(0)));
-                    println!("  RAM usage:         {}", format_bytes(s["ram_usage_bytes"].as_u64().unwrap_or(0)));
-                    println!("  Disk usage:        {}", format_bytes(s["disk_usage_bytes"].as_u64().unwrap_or(0)));
-                    println!("  Echo queries:      {}", s["total_echo_queries"].as_u64().unwrap_or(0));
-                    println!("  Avg echo latency:  {:.2}ms", s["avg_echo_latency_ms"].as_f64().unwrap_or(0.0));
+                    println!(
+                        "  Memories:          {}",
+                        format_number(s["total_memories"].as_u64().unwrap_or(0) as usize)
+                    );
+                    println!(
+                        "  Max capacity:      {}",
+                        format_number(s["max_capacity"].as_u64().unwrap_or(0) as usize)
+                    );
+                    println!(
+                        "  Index size:        {}",
+                        format_bytes(s["index_size_bytes"].as_u64().unwrap_or(0))
+                    );
+                    println!(
+                        "  RAM usage:         {}",
+                        format_bytes(s["ram_usage_bytes"].as_u64().unwrap_or(0))
+                    );
+                    println!(
+                        "  Disk usage:        {}",
+                        format_bytes(s["disk_usage_bytes"].as_u64().unwrap_or(0))
+                    );
+                    println!(
+                        "  Echo queries:      {}",
+                        s["total_echo_queries"].as_u64().unwrap_or(0)
+                    );
+                    println!(
+                        "  Avg echo latency:  {:.2}ms",
+                        s["avg_echo_latency_ms"].as_f64().unwrap_or(0.0)
+                    );
                     let vc = s["vision_count"].as_u64().unwrap_or(0);
                     let sc = s["speech_count"].as_u64().unwrap_or(0);
                     if vc > 0 || sc > 0 {
                         println!();
                         println!("  Channels:");
-                        println!("    Text:    {}", format_number(s["text_count"].as_u64().unwrap_or(0) as usize));
+                        println!(
+                            "    Text:    {}",
+                            format_number(s["text_count"].as_u64().unwrap_or(0) as usize)
+                        );
                         println!("    Vision:  {}", format_number(vc as usize));
                         println!("    Speech:  {}", format_number(sc as usize));
                     }
@@ -1092,7 +1123,8 @@ async fn main() -> anyhow::Result<()> {
             Commands::Dump { format, output_dir } => {
                 let resp = daemon_get(base, "/api/memories?limit=10000").await?;
                 if format == "md" {
-                    let entries: Vec<serde_json::Value> = serde_json::from_str(&resp).unwrap_or_default();
+                    let entries: Vec<serde_json::Value> =
+                        serde_json::from_str(&resp).unwrap_or_default();
                     let dir = output_dir.as_deref().unwrap_or("shrimpk-export");
                     export_memories_md(&entries, dir)?;
                 } else {
@@ -1107,7 +1139,9 @@ async fn main() -> anyhow::Result<()> {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&resp) {
                     let total_providers = parsed["total_providers"].as_u64().unwrap_or(0);
                     let total_models = parsed["total_models"].as_u64().unwrap_or(0);
-                    println!("[shrimpk] Provider scan: {total_providers} provider(s), {total_models} model(s)");
+                    println!(
+                        "[shrimpk] Provider scan: {total_providers} provider(s), {total_models} model(s)"
+                    );
                     if let Some(providers) = parsed["providers"].as_array() {
                         for p in providers {
                             let name = p["name"].as_str().unwrap_or("?");
@@ -1147,16 +1181,12 @@ async fn main() -> anyhow::Result<()> {
                 label,
                 max_results,
             } => {
-                let mut body = serde_json::json!({"memory_id": memory_id, "max_results": max_results});
+                let mut body =
+                    serde_json::json!({"memory_id": memory_id, "max_results": max_results});
                 if let Some(lbl) = label {
                     body["label"] = serde_json::json!(lbl);
                 }
-                let resp = daemon_post(
-                    base,
-                    "/api/memory_related",
-                    &body,
-                )
-                .await?;
+                let resp = daemon_post(base, "/api/memory_related", &body).await?;
                 println!("{resp}");
             }
             Commands::Get { memory_id } => {

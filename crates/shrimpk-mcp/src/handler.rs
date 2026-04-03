@@ -80,9 +80,13 @@ mod tests {
         #[allow(unused_mut)]
         let mut expected = 12;
         #[cfg(feature = "vision")]
-        { expected += 1; }
+        {
+            expected += 1;
+        }
         #[cfg(feature = "speech")]
-        { expected += 1; }
+        {
+            expected += 1;
+        }
         assert_eq!(tool_names.len(), expected);
     }
 }

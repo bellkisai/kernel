@@ -12,13 +12,13 @@ pub mod traits;
 
 // Re-export commonly used types at crate root
 pub use config::{
-    EchoConfig, FileConfig, QuantizationMode, RerankerBackend, config_dir, config_path,
-    disk_usage, load_config_file, resolve_config, save_config_file,
+    EchoConfig, FileConfig, QuantizationMode, RerankerBackend, config_dir, config_path, disk_usage,
+    load_config_file, resolve_config, save_config_file,
 };
 pub use error::{Result, ShrimPKError};
 pub use memory::{
     EchoResult, LabelConnection, MemoryCategory, MemoryEntry, MemoryEntrySummary,
-    MemoryGraphResult, MemoryId, MemoryStats, Modality, QueryMode, SensitivityLevel,
+    MemoryGraphResult, MemoryId, MemoryStats, Modality, QueryMode, SensitivityLevel, source_weight,
 };
 pub use pii::{PiiMatch, PiiType};
 pub use traits::{ConsolidationOutput, Consolidator, LabelSet, ModelBackend, Provider};

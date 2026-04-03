@@ -79,10 +79,7 @@ fn text_echo_latency_regression_100k() {
             engine.store(&text, "bench").await.expect("store");
         }
     });
-    println!(
-        "Stored 100K in {:.1}s",
-        store_start.elapsed().as_secs_f64()
-    );
+    println!("Stored 100K in {:.1}s", store_start.elapsed().as_secs_f64());
 
     // Run 100 echo queries, measure latency
     let queries = [
@@ -202,12 +199,19 @@ fn cross_modal_echo_latency() {
     println!("Storing 10K text + 100 images...");
     rt.block_on(async {
         for i in 0..10_000 {
-            let text = format!("Text memory {} about {}", i, ["cats", "dogs", "cars"][i % 3]);
+            let text = format!(
+                "Text memory {} about {}",
+                i,
+                ["cats", "dogs", "cars"][i % 3]
+            );
             engine.store(&text, "bench").await.expect("store");
         }
         for i in 0..100 {
             let img = create_test_png(64, 64, (i * 3) as u8, 100, 200);
-            engine.store_image(&img, "bench", None).await.expect("store_image");
+            engine
+                .store_image(&img, "bench", None)
+                .await
+                .expect("store_image");
         }
     });
 
@@ -317,9 +321,7 @@ fn text_to_image_recall() {
                 .expect("echo")
         });
 
-        let hit1 = results
-            .first()
-            .map_or(false, |r| r.source.contains(name));
+        let hit1 = results.first().map_or(false, |r| r.source.contains(name));
         let hit5 = results.iter().take(5).any(|r| r.source.contains(name));
 
         if hit1 {
@@ -350,7 +352,9 @@ fn text_to_image_recall() {
 
     // SOFT GATE: print warning but don't fail (synthetic images)
     if r1_pct < 50.0 {
-        println!("WARNING: Recall@1 {r1_pct:.0}% below 50% target (expected with synthetic images)");
+        println!(
+            "WARNING: Recall@1 {r1_pct:.0}% below 50% target (expected with synthetic images)"
+        );
     }
 }
 
@@ -470,9 +474,8 @@ fn mixed_modal_throughput() {
     let query_start = Instant::now();
     for i in 0..100 {
         let (q, mode) = queries[i % queries.len()];
-        let _results = rt.block_on(async {
-            engine.echo_with_mode(q, 5, mode).await.expect("echo")
-        });
+        let _results =
+            rt.block_on(async { engine.echo_with_mode(q, 5, mode).await.expect("echo") });
     }
     let query_elapsed = query_start.elapsed();
     let qps = 100.0 / query_elapsed.as_secs_f64();

@@ -137,13 +137,22 @@ fn longmemeval_expanded_ie_6_team() {
 
     println!("IE-6 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "billing infrastructure"),
         "Top-3 should mention the billing infrastructure team. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -167,14 +176,22 @@ fn longmemeval_expanded_ie_7_siblings() {
 
     println!("IE-7 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "Maya")
-            || top_n_contains(&results, 3, "sister"),
+        top_n_contains(&results, 3, "Maya") || top_n_contains(&results, 3, "sister"),
         "Top-3 should mention sister Maya. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -198,14 +215,22 @@ fn longmemeval_expanded_ie_8_morning_routine() {
 
     println!("IE-8 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "meditation")
-            || top_n_contains(&results, 3, "morning routine"),
+        top_n_contains(&results, 3, "meditation") || top_n_contains(&results, 3, "morning routine"),
         "Top-3 should mention morning routine (meditation/coffee/reading). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -229,14 +254,22 @@ fn longmemeval_expanded_ie_9_vehicle() {
 
     println!("IE-9 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "Tesla")
-            || top_n_contains(&results, 3, "Model 3"),
+        top_n_contains(&results, 3, "Tesla") || top_n_contains(&results, 3, "Model 3"),
         "Top-3 should mention Tesla Model 3. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -260,7 +293,12 @@ fn longmemeval_expanded_ie_10_reading() {
 
     println!("IE-10 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
@@ -268,7 +306,11 @@ fn longmemeval_expanded_ie_10_reading() {
             || top_n_contains(&results, 3, "science fiction")
             || top_n_contains(&results, 3, "technical books"),
         "Top-3 should mention reading habits (sci-fi / technical). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -292,7 +334,12 @@ fn longmemeval_expanded_ie_11_donations() {
 
     println!("IE-11 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
@@ -300,7 +347,11 @@ fn longmemeval_expanded_ie_11_donations() {
             || top_n_contains(&results, 3, "Wikipedia")
             || top_n_contains(&results, 3, "donate"),
         "Top-3 should mention donations (EFF/Wikipedia). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -329,11 +380,16 @@ fn longmemeval_expanded_msr_6_tech_stack() {
 
     println!("MSR-6 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
-    let has_db = top_n_contains(&results, 5, "PostgreSQL")
-        || top_n_contains(&results, 5, "ClickHouse");
+    let has_db =
+        top_n_contains(&results, 5, "PostgreSQL") || top_n_contains(&results, 5, "ClickHouse");
     let has_backend = top_n_contains(&results, 5, "backend")
         || top_n_contains(&results, 5, "Stripe")
         || top_n_contains(&results, 5, "Rust");
@@ -341,12 +397,20 @@ fn longmemeval_expanded_msr_6_tech_stack() {
     assert!(
         has_db,
         "Top-5 should mention a database (PostgreSQL/ClickHouse). Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
     assert!(
         has_backend,
         "Top-5 should also surface backend context. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -371,11 +435,16 @@ fn longmemeval_expanded_msr_7_office_location() {
 
     println!("MSR-7 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
-    let has_stripe = top_n_contains(&results, 5, "Stripe")
-        || top_n_contains(&results, 5, "San Francisco");
+    let has_stripe =
+        top_n_contains(&results, 5, "Stripe") || top_n_contains(&results, 5, "San Francisco");
     let has_commute = top_n_contains(&results, 5, "bike")
         || top_n_contains(&results, 5, "Mission District")
         || top_n_contains(&results, 5, "25-minute");
@@ -383,7 +452,11 @@ fn longmemeval_expanded_msr_7_office_location() {
     assert!(
         has_stripe && has_commute,
         "Top-5 should mention both workplace and commute details. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -408,7 +481,12 @@ fn longmemeval_expanded_msr_8_music_while_coding() {
 
     println!("MSR-8 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     let has_music = top_n_contains(&results, 5, "lo-fi")
@@ -418,7 +496,11 @@ fn longmemeval_expanded_msr_8_music_while_coding() {
     assert!(
         has_music,
         "Top-5 should mention music listening habits (lo-fi/Chopin). Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -443,18 +525,27 @@ fn longmemeval_expanded_msr_9_pet_allergy() {
 
     println!("MSR-9 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
-    let has_pet = top_n_contains(&results, 5, "golden retriever")
-        || top_n_contains(&results, 5, "Pixel");
-    let has_allergy = top_n_contains(&results, 5, "allergic")
-        || top_n_contains(&results, 5, "cats");
+    let has_pet =
+        top_n_contains(&results, 5, "golden retriever") || top_n_contains(&results, 5, "Pixel");
+    let has_allergy =
+        top_n_contains(&results, 5, "allergic") || top_n_contains(&results, 5, "cats");
 
     assert!(
         has_pet && has_allergy,
         "Top-5 should surface both pet info and allergy info. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -471,7 +562,10 @@ fn longmemeval_expanded_msr_10_skills_career() {
     seed_extended_profile_sync(&engine, &rt);
     let results = rt.block_on(async {
         engine
-            .echo("What technical skills do I have that would help me start my own company?", 5)
+            .echo(
+                "What technical skills do I have that would help me start my own company?",
+                5,
+            )
             .await
             .expect("echo should succeed")
     });
@@ -479,7 +573,12 @@ fn longmemeval_expanded_msr_10_skills_career() {
 
     println!("MSR-10 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     let has_goal = top_n_contains(&results, 5, "developer tools")
@@ -493,7 +592,11 @@ fn longmemeval_expanded_msr_10_skills_career() {
     assert!(
         has_goal || has_skill,
         "Top-5 should surface startup goal or relevant technical skills. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -518,17 +621,25 @@ fn longmemeval_expanded_msr_11_hobby_location() {
 
     println!("MSR-11 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     let has_bjj = top_n_contains(&results, 3, "jiu-jitsu");
-    let has_gym = top_n_contains(&results, 5, "Gracie")
-        || top_n_contains(&results, 5, "gym");
+    let has_gym = top_n_contains(&results, 5, "Gracie") || top_n_contains(&results, 5, "gym");
 
     assert!(
         has_bjj && has_gym,
         "Top-5 should mention both jiu-jitsu and the Gracie gym. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -547,25 +658,40 @@ fn longmemeval_expanded_tr_4_graduation() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I started university at UBC in September 2011", "session_edu1")
+            .store(
+                "I started university at UBC in September 2011",
+                "session_edu1",
+            )
             .await
             .unwrap();
         engine
-            .store("I did a summer internship at Amazon in 2013", "session_edu2")
+            .store(
+                "I did a summer internship at Amazon in 2013",
+                "session_edu2",
+            )
             .await
             .unwrap();
         engine
-            .store("I graduated from UBC with a CS degree in June 2015", "session_edu3")
+            .store(
+                "I graduated from UBC with a CS degree in June 2015",
+                "session_edu3",
+            )
             .await
             .unwrap();
         engine
-            .store("After graduating I spent 3 months backpacking in Southeast Asia", "session_edu4")
+            .store(
+                "After graduating I spent 3 months backpacking in Southeast Asia",
+                "session_edu4",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("My sister graduated from art school in 2018", "session_noise")
+            .store(
+                "My sister graduated from art school in 2018",
+                "session_noise",
+            )
             .await
             .unwrap();
 
@@ -578,14 +704,22 @@ fn longmemeval_expanded_tr_4_graduation() {
 
     println!("TR-4 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "2015")
-            || top_n_contains(&results, 3, "graduated"),
+        top_n_contains(&results, 3, "2015") || top_n_contains(&results, 3, "graduated"),
         "Top-3 should mention graduation in 2015. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -600,7 +734,10 @@ fn longmemeval_expanded_tr_5_relationship() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I met Jordan at a coffee shop in Vancouver in 2018", "session_rel1")
+            .store(
+                "I met Jordan at a coffee shop in Vancouver in 2018",
+                "session_rel1",
+            )
             .await
             .unwrap();
         engine
@@ -608,22 +745,34 @@ fn longmemeval_expanded_tr_5_relationship() {
             .await
             .unwrap();
         engine
-            .store("We moved in together in San Francisco in 2021", "session_rel3")
+            .store(
+                "We moved in together in San Francisco in 2021",
+                "session_rel3",
+            )
             .await
             .unwrap();
         engine
-            .store("Jordan and I celebrated our 5th anniversary last month", "session_rel4")
+            .store(
+                "Jordan and I celebrated our 5th anniversary last month",
+                "session_rel4",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("My coworker just got engaged to their partner", "session_noise")
+            .store(
+                "My coworker just got engaged to their partner",
+                "session_noise",
+            )
             .await
             .unwrap();
 
         engine
-            .echo("How long have I been with my partner? When did we start dating?", 5)
+            .echo(
+                "How long have I been with my partner? When did we start dating?",
+                5,
+            )
             .await
             .expect("echo should succeed")
     });
@@ -631,18 +780,27 @@ fn longmemeval_expanded_tr_5_relationship() {
 
     println!("TR-5 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
-    let has_dating = top_n_contains(&results, 5, "2019")
-        || top_n_contains(&results, 5, "started dating");
-    let has_anniversary = top_n_contains(&results, 5, "anniversary")
-        || top_n_contains(&results, 5, "5th");
+    let has_dating =
+        top_n_contains(&results, 5, "2019") || top_n_contains(&results, 5, "started dating");
+    let has_anniversary =
+        top_n_contains(&results, 5, "anniversary") || top_n_contains(&results, 5, "5th");
 
     assert!(
         has_dating || has_anniversary,
         "Top-5 should mention relationship timeline. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -657,21 +815,33 @@ fn longmemeval_expanded_tr_6_pet_age() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I adopted Pixel as a puppy from a rescue shelter in 2021", "session_pet1")
+            .store(
+                "I adopted Pixel as a puppy from a rescue shelter in 2021",
+                "session_pet1",
+            )
             .await
             .unwrap();
         engine
-            .store("Pixel turned 2 years old in March 2023, we had a little birthday party", "session_pet2")
+            .store(
+                "Pixel turned 2 years old in March 2023, we had a little birthday party",
+                "session_pet2",
+            )
             .await
             .unwrap();
         engine
-            .store("Pixel is now 4 years old and has calmed down a lot from his puppy energy", "session_pet3")
+            .store(
+                "Pixel is now 4 years old and has calmed down a lot from his puppy energy",
+                "session_pet3",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("My neighbor's cat is 12 years old and still very active", "session_noise")
+            .store(
+                "My neighbor's cat is 12 years old and still very active",
+                "session_noise",
+            )
             .await
             .unwrap();
 
@@ -684,14 +854,22 @@ fn longmemeval_expanded_tr_6_pet_age() {
 
     println!("TR-6 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "4 years old")
-            || top_n_contains(&results, 3, "Pixel"),
+        top_n_contains(&results, 3, "4 years old") || top_n_contains(&results, 3, "Pixel"),
         "Top-3 should mention Pixel's current age. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -706,25 +884,40 @@ fn longmemeval_expanded_tr_7_career_timing() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("In 2016 I got my first programming job at a small Vancouver startup", "session_c1")
+            .store(
+                "In 2016 I got my first programming job at a small Vancouver startup",
+                "session_c1",
+            )
             .await
             .unwrap();
         engine
-            .store("In 2019 I joined Shopify as a backend engineer on their payments team", "session_c2")
+            .store(
+                "In 2019 I joined Shopify as a backend engineer on their payments team",
+                "session_c2",
+            )
             .await
             .unwrap();
         engine
-            .store("In January 2022 I started at Stripe as a senior backend engineer", "session_c3")
+            .store(
+                "In January 2022 I started at Stripe as a senior backend engineer",
+                "session_c3",
+            )
             .await
             .unwrap();
         engine
-            .store("I've been at Stripe for over 2 years now and I'm up for a promotion", "session_c4")
+            .store(
+                "I've been at Stripe for over 2 years now and I'm up for a promotion",
+                "session_c4",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("My friend just started a new job at Apple last week", "session_noise")
+            .store(
+                "My friend just started a new job at Apple last week",
+                "session_noise",
+            )
             .await
             .unwrap();
 
@@ -737,16 +930,25 @@ fn longmemeval_expanded_tr_7_career_timing() {
 
     println!("TR-7 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
-    let has_stripe_start = top_n_contains(&results, 3, "2022")
-        || top_n_contains(&results, 3, "Stripe");
+    let has_stripe_start =
+        top_n_contains(&results, 3, "2022") || top_n_contains(&results, 3, "Stripe");
 
     assert!(
         has_stripe_start,
         "Top-3 should mention starting at Stripe in 2022. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -792,14 +994,22 @@ fn longmemeval_expanded_tr_8_recent_activity() {
 
     println!("TR-8 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "Tokyo")
-            || top_n_contains(&results, 3, "November"),
+        top_n_contains(&results, 3, "Tokyo") || top_n_contains(&results, 3, "November"),
         "Top-3 should mention the Tokyo trip in November. Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -814,19 +1024,31 @@ fn longmemeval_expanded_tr_9_future_plans() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I competed in my first jiu-jitsu tournament last September", "session_f1")
+            .store(
+                "I competed in my first jiu-jitsu tournament last September",
+                "session_f1",
+            )
             .await
             .unwrap();
         engine
-            .store("I've registered for the IBJJF San Francisco Open in March 2027", "session_f2")
+            .store(
+                "I've registered for the IBJJF San Francisco Open in March 2027",
+                "session_f2",
+            )
             .await
             .unwrap();
         engine
-            .store("After that I want to try the Pan American championships in April 2027", "session_f3")
+            .store(
+                "After that I want to try the Pan American championships in April 2027",
+                "session_f3",
+            )
             .await
             .unwrap();
         engine
-            .store("My next trip is planned for Barcelona in April 2027", "session_f4")
+            .store(
+                "My next trip is planned for Barcelona in April 2027",
+                "session_f4",
+            )
             .await
             .unwrap();
 
@@ -845,7 +1067,12 @@ fn longmemeval_expanded_tr_9_future_plans() {
 
     println!("TR-9 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
@@ -853,7 +1080,11 @@ fn longmemeval_expanded_tr_9_future_plans() {
             || top_n_contains(&results, 3, "San Francisco Open")
             || top_n_contains(&results, 3, "March 2027"),
         "Top-3 should mention the next competition (IBJJF SF Open). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -893,21 +1124,33 @@ fn longmemeval_expanded_ku_4_hobby_change() {
 
     println!("KU-4 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "swim")
-            || top_n_contains(&results, 3, "YMCA"),
+        top_n_contains(&results, 3, "swim") || top_n_contains(&results, 3, "YMCA"),
         "Top-3 should mention swimming (current exercise). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 
     // Old hobby should also surface for context
     assert!(
         top_n_contains(&results, 5, "run") || top_n_contains(&results, 5, "running"),
         "Top-5 should also mention running (old hobby) for context. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -943,14 +1186,22 @@ fn longmemeval_expanded_ku_5_relationship_update() {
 
     println!("KU-5 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "engaged")
-            || top_n_contains(&results, 3, "wedding"),
+        top_n_contains(&results, 3, "engaged") || top_n_contains(&results, 3, "wedding"),
         "Top-3 should mention engagement (most recent status). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -965,21 +1216,33 @@ fn longmemeval_expanded_ku_6_triple_address_change() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I live in a studio apartment in downtown Vancouver near Gastown", "session_addr1")
+            .store(
+                "I live in a studio apartment in downtown Vancouver near Gastown",
+                "session_addr1",
+            )
             .await
             .unwrap();
         engine
-            .store("I moved to Seattle for a new job, renting a place in Capitol Hill", "session_addr2")
+            .store(
+                "I moved to Seattle for a new job, renting a place in Capitol Hill",
+                "session_addr2",
+            )
             .await
             .unwrap();
         engine
-            .store("I relocated to San Francisco last month, now living in the Mission District", "session_addr3")
+            .store(
+                "I relocated to San Francisco last month, now living in the Mission District",
+                "session_addr3",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("I love exploring new neighborhoods and finding good coffee shops", "session_noise")
+            .store(
+                "I love exploring new neighborhoods and finding good coffee shops",
+                "session_noise",
+            )
             .await
             .unwrap();
 
@@ -992,7 +1255,12 @@ fn longmemeval_expanded_ku_6_triple_address_change() {
 
     println!("KU-6 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // Most recent address should surface
@@ -1000,7 +1268,11 @@ fn longmemeval_expanded_ku_6_triple_address_change() {
         top_n_contains(&results, 3, "San Francisco")
             || top_n_contains(&results, 3, "Mission District"),
         "Top-3 should mention San Francisco / Mission District (most recent address). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 
     // All addresses should appear in top-5 for full history
@@ -1016,7 +1288,11 @@ fn longmemeval_expanded_ku_6_triple_address_change() {
     assert!(
         addr_count >= 2,
         "Top-5 should contain at least 2 of 3 addresses. Found {addr_count}. Got: {:?}",
-        results.iter().take(5).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(5)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1054,15 +1330,23 @@ fn longmemeval_expanded_ku_7_partial_update() {
 
     println!("KU-7 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     // Updated info should surface
     assert!(
-        top_n_contains(&results, 3, "staff engineer")
-            || top_n_contains(&results, 3, "230k"),
+        top_n_contains(&results, 3, "staff engineer") || top_n_contains(&results, 3, "230k"),
         "Top-3 should mention staff engineer / $230k (updated compensation). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1077,26 +1361,41 @@ fn longmemeval_expanded_ku_8_skill_level_update() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I'm learning Japanese and just passed the JLPT N4 test", "session_skill1")
+            .store(
+                "I'm learning Japanese and just passed the JLPT N4 test",
+                "session_skill1",
+            )
             .await
             .unwrap();
         engine
-            .store("I passed the JLPT N3 exam last December after months of studying", "session_skill2")
+            .store(
+                "I passed the JLPT N3 exam last December after months of studying",
+                "session_skill2",
+            )
             .await
             .unwrap();
         engine
-            .store("I just got my JLPT N2 certification! Next goal is N1", "session_skill3")
+            .store(
+                "I just got my JLPT N2 certification! Next goal is N1",
+                "session_skill3",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("I want to visit Kyoto to practice my Japanese in a traditional setting", "session_noise")
+            .store(
+                "I want to visit Kyoto to practice my Japanese in a traditional setting",
+                "session_noise",
+            )
             .await
             .unwrap();
 
         engine
-            .echo("What level is my Japanese at? What JLPT level did I reach?", 5)
+            .echo(
+                "What level is my Japanese at? What JLPT level did I reach?",
+                5,
+            )
             .await
             .expect("echo should succeed")
     });
@@ -1104,13 +1403,22 @@ fn longmemeval_expanded_ku_8_skill_level_update() {
 
     println!("KU-8 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "N2"),
         "Top-3 should mention JLPT N2 (most recent level). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1125,21 +1433,33 @@ fn longmemeval_expanded_ku_9_diet_evolution() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I eat everything, no restrictions. I love burgers and steaks", "session_diet1")
+            .store(
+                "I eat everything, no restrictions. I love burgers and steaks",
+                "session_diet1",
+            )
             .await
             .unwrap();
         engine
-            .store("I cut out red meat for health reasons, now I only eat chicken and fish", "session_diet2")
+            .store(
+                "I cut out red meat for health reasons, now I only eat chicken and fish",
+                "session_diet2",
+            )
             .await
             .unwrap();
         engine
-            .store("I've gone fully plant-based vegan. No animal products at all, and I feel amazing", "session_diet3")
+            .store(
+                "I've gone fully plant-based vegan. No animal products at all, and I feel amazing",
+                "session_diet3",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("I started a new workout routine focusing on strength training", "session_noise")
+            .store(
+                "I started a new workout routine focusing on strength training",
+                "session_noise",
+            )
             .await
             .unwrap();
 
@@ -1152,14 +1472,22 @@ fn longmemeval_expanded_ku_9_diet_evolution() {
 
     println!("KU-9 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "vegan")
-            || top_n_contains(&results, 3, "plant-based"),
+        top_n_contains(&results, 3, "vegan") || top_n_contains(&results, 3, "plant-based"),
         "Top-3 should mention vegan/plant-based (current diet). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1182,11 +1510,17 @@ fn longmemeval_expanded_pt_5_music() {
             .await
             .unwrap();
         engine
-            .store("I've been getting into indie rock and alternative music lately", "month3")
+            .store(
+                "I've been getting into indie rock and alternative music lately",
+                "month3",
+            )
             .await
             .unwrap();
         engine
-            .store("Now I mainly listen to lo-fi hip hop and ambient electronic music for focus", "month6")
+            .store(
+                "Now I mainly listen to lo-fi hip hop and ambient electronic music for focus",
+                "month6",
+            )
             .await
             .unwrap();
 
@@ -1197,7 +1531,10 @@ fn longmemeval_expanded_pt_5_music() {
             .unwrap();
 
         engine
-            .echo("What kind of music do I listen to? What's my music taste?", 5)
+            .echo(
+                "What kind of music do I listen to? What's my music taste?",
+                5,
+            )
             .await
             .expect("echo should succeed")
     });
@@ -1205,7 +1542,12 @@ fn longmemeval_expanded_pt_5_music() {
 
     println!("PT-5 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
@@ -1213,7 +1555,11 @@ fn longmemeval_expanded_pt_5_music() {
             || top_n_contains(&results, 3, "ambient")
             || top_n_contains(&results, 3, "electronic"),
         "Top-3 should mention lo-fi/ambient (most recent preference). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1228,15 +1574,24 @@ fn longmemeval_expanded_pt_6_commute() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I drive my car to work every day, about a 40-minute commute on the highway", "month1")
+            .store(
+                "I drive my car to work every day, about a 40-minute commute on the highway",
+                "month1",
+            )
             .await
             .unwrap();
         engine
-            .store("I started taking the BART train to reduce my carbon footprint", "month4")
+            .store(
+                "I started taking the BART train to reduce my carbon footprint",
+                "month4",
+            )
             .await
             .unwrap();
         engine
-            .store("I now bike to work every day, it's a 25-minute ride and I love the fresh air", "month8")
+            .store(
+                "I now bike to work every day, it's a 25-minute ride and I love the fresh air",
+                "month8",
+            )
             .await
             .unwrap();
 
@@ -1255,13 +1610,22 @@ fn longmemeval_expanded_pt_6_commute() {
 
     println!("PT-6 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
         top_n_contains(&results, 3, "bike"),
         "Top-3 should mention biking (most recent commute). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1303,7 +1667,12 @@ fn longmemeval_expanded_pt_7_desk_setup() {
 
     println!("PT-7 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
@@ -1311,7 +1680,11 @@ fn longmemeval_expanded_pt_7_desk_setup() {
             || top_n_contains(&results, 3, "Kinesis")
             || top_n_contains(&results, 3, "standing desk"),
         "Top-3 should mention Uplift/Kinesis (most recent setup). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1326,21 +1699,33 @@ fn longmemeval_expanded_pt_8_learning() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let results = rt.block_on(async {
         engine
-            .store("I'm taking an online course on machine learning fundamentals", "month1")
+            .store(
+                "I'm taking an online course on machine learning fundamentals",
+                "month1",
+            )
             .await
             .unwrap();
         engine
-            .store("I finished the ML course and started studying distributed systems design", "month3")
+            .store(
+                "I finished the ML course and started studying distributed systems design",
+                "month3",
+            )
             .await
             .unwrap();
         engine
-            .store("I'm currently studying for the AWS Solutions Architect certification exam", "month6")
+            .store(
+                "I'm currently studying for the AWS Solutions Architect certification exam",
+                "month6",
+            )
             .await
             .unwrap();
 
         // Noise
         engine
-            .store("I find that studying in the morning works best for me", "noise")
+            .store(
+                "I find that studying in the morning works best for me",
+                "noise",
+            )
             .await
             .unwrap();
 
@@ -1353,14 +1738,22 @@ fn longmemeval_expanded_pt_8_learning() {
 
     println!("PT-8 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
-        top_n_contains(&results, 3, "AWS")
-            || top_n_contains(&results, 3, "Solutions Architect"),
+        top_n_contains(&results, 3, "AWS") || top_n_contains(&results, 3, "Solutions Architect"),
         "Top-3 should mention AWS certification (most recent study). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1402,7 +1795,12 @@ fn longmemeval_expanded_pt_9_communities() {
 
     println!("PT-9 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
@@ -1410,7 +1808,11 @@ fn longmemeval_expanded_pt_9_communities() {
             || top_n_contains(&results, 3, "Hacker News")
             || top_n_contains(&results, 3, "San Francisco Rust"),
         "Top-3 should mention current communities (Reddit/HN/meetup). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1452,7 +1854,12 @@ fn longmemeval_expanded_pt_10_cooking() {
 
     println!("PT-10 results:");
     for (i, r) in results.iter().enumerate() {
-        println!("  #{}: sim={:.3} content={}", i + 1, r.similarity, &r.content[..r.content.len().min(80)]);
+        println!(
+            "  #{}: sim={:.3} content={}",
+            i + 1,
+            r.similarity,
+            &r.content[..r.content.len().min(80)]
+        );
     }
 
     assert!(
@@ -1461,7 +1868,11 @@ fn longmemeval_expanded_pt_10_cooking() {
             || top_n_contains(&results, 3, "pad see ew")
             || top_n_contains(&results, 3, "ramen"),
         "Top-3 should mention Thai/Japanese cooking (most recent). Got: {:?}",
-        results.iter().take(3).map(|r| &r.content).collect::<Vec<_>>()
+        results
+            .iter()
+            .take(3)
+            .map(|r| &r.content)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1496,7 +1907,8 @@ fn longmemeval_combined_config(data_dir: PathBuf) -> EchoConfig {
              3. No colons, labels, or key-value pairs\n\n\
              Example:\n  The user uses Neovim\n  The user lives in Berlin\n  \
              The user switched to Python from Java\n\n\
-             Max {max_facts} facts. If none found, output NONE.".to_string()
+             Max {max_facts} facts. If none found, output NONE."
+                .to_string(),
         ),
         ..Default::default()
     }
@@ -1513,8 +1925,10 @@ fn run_full_consolidation(engine: &EchoEngine) -> usize {
                 let result = rt.block_on(engine.consolidate_now());
                 println!(
                     "  Consolidation pass {pass}: facts={}, merged={}, pruned={}, duration={}ms",
-                    result.facts_extracted, result.duplicates_merged,
-                    result.hebbian_edges_pruned, result.duration_ms
+                    result.facts_extracted,
+                    result.duplicates_merged,
+                    result.hebbian_edges_pruned,
+                    result.duration_ms
                 );
                 facts += result.facts_extracted;
                 if result.facts_extracted == 0 {
@@ -1549,7 +1963,8 @@ fn longmemeval_expanded_combined_scorecard() {
     println!("--- Category 1: Information Extraction (11 tests) ---");
 
     let dir_ie = tempdir().expect("temp dir");
-    let engine_ie = EchoEngine::new(longmemeval_combined_config(dir_ie.path().to_path_buf())).expect("init");
+    let engine_ie =
+        EchoEngine::new(longmemeval_combined_config(dir_ie.path().to_path_buf())).expect("init");
     let rt_ie = tokio::runtime::Runtime::new().unwrap();
 
     // Store extended profile
@@ -1600,17 +2015,53 @@ fn longmemeval_expanded_combined_scorecard() {
     run_full_consolidation(&engine_ie);
 
     let ie_queries: Vec<(&str, &str, &[&str])> = vec![
-        ("IE-1: Profession",       "What is my job? Where do I work?",                    &["Stripe"]),
-        ("IE-2: Pet",              "Do I have any pets?",                                  &["golden retriever"]),
-        ("IE-3: Education",        "Where did I go to college?",                           &["British Columbia"]),
-        ("IE-4: Allergy",          "What am I allergic to?",                               &["shellfish"]),
-        ("IE-5: Hobby",            "What sports or physical activities do I do?",           &["jiu-jitsu"]),
-        ("IE-6: Team",             "What team am I on at work?",                           &["billing infrastructure"]),
-        ("IE-7: Siblings",         "Do I have any brothers or sisters?",                   &["sister", "Maya"]),
-        ("IE-8: Morning routine",  "What do I do every morning?",                          &["meditation", "morning routine"]),
-        ("IE-9: Vehicle",          "What car do I drive?",                                 &["Tesla", "Model 3"]),
-        ("IE-10: Reading",         "What kind of books do I read?",                        &["sci-fi", "science fiction", "technical"]),
-        ("IE-11: Donations",       "What charities or causes do I support financially?",   &["EFF", "Wikipedia", "donate"]),
+        (
+            "IE-1: Profession",
+            "What is my job? Where do I work?",
+            &["Stripe"],
+        ),
+        ("IE-2: Pet", "Do I have any pets?", &["golden retriever"]),
+        (
+            "IE-3: Education",
+            "Where did I go to college?",
+            &["British Columbia"],
+        ),
+        ("IE-4: Allergy", "What am I allergic to?", &["shellfish"]),
+        (
+            "IE-5: Hobby",
+            "What sports or physical activities do I do?",
+            &["jiu-jitsu"],
+        ),
+        (
+            "IE-6: Team",
+            "What team am I on at work?",
+            &["billing infrastructure"],
+        ),
+        (
+            "IE-7: Siblings",
+            "Do I have any brothers or sisters?",
+            &["sister", "Maya"],
+        ),
+        (
+            "IE-8: Morning routine",
+            "What do I do every morning?",
+            &["meditation", "morning routine"],
+        ),
+        (
+            "IE-9: Vehicle",
+            "What car do I drive?",
+            &["Tesla", "Model 3"],
+        ),
+        (
+            "IE-10: Reading",
+            "What kind of books do I read?",
+            &["sci-fi", "science fiction", "technical"],
+        ),
+        (
+            "IE-11: Donations",
+            "What charities or causes do I support financially?",
+            &["EFF", "Wikipedia", "donate"],
+        ),
     ];
 
     rt_ie.block_on(async {
@@ -1618,8 +2069,16 @@ fn longmemeval_expanded_combined_scorecard() {
             let res = engine_ie.echo(query, 5).await.expect("echo");
             let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
             let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
-            println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
-            all_results.push(TestResult { name, top3: h3, top5: h5 });
+            println!(
+                "  {name}: top3={} top5={}",
+                if h3 { "PASS" } else { "MISS" },
+                if h5 { "PASS" } else { "MISS" }
+            );
+            all_results.push(TestResult {
+                name,
+                top3: h3,
+                top5: h5,
+            });
         }
     });
     drop(engine_ie);
@@ -1630,7 +2089,8 @@ fn longmemeval_expanded_combined_scorecard() {
     println!("\n--- Category 2: Multi-Session Reasoning (11 tests) ---");
 
     let dir_msr = tempdir().expect("temp dir");
-    let engine_msr = EchoEngine::new(longmemeval_combined_config(dir_msr.path().to_path_buf())).expect("init");
+    let engine_msr =
+        EchoEngine::new(longmemeval_combined_config(dir_msr.path().to_path_buf())).expect("init");
 
     // Reuse same extended profile
     rt_ie.block_on(async {
@@ -1677,17 +2137,61 @@ fn longmemeval_expanded_combined_scorecard() {
     run_full_consolidation(&engine_msr);
 
     let msr_queries: Vec<(&str, &str, &[&str])> = vec![
-        ("MSR-1: Work+Lang",        "What programming languages do I use at work?",                              &["Rust"]),
-        ("MSR-2: Travel+Lang",      "Have I traveled anywhere related to languages I'm learning?",               &["Tokyo"]),
-        ("MSR-3: Hobby+Goal",       "What goals do I have related to my hobbies?",                               &["tournament"]),
-        ("MSR-4: Career",           "Tell me about my career progression",                                       &["Stripe", "Shopify"]),
-        ("MSR-5: Life Goals",       "What are my big life goals? What am I saving up for?",                      &["house", "developer tools", "observability"]),
-        ("MSR-6: Tech Stack",       "What database do I use for my backend services?",                           &["PostgreSQL", "ClickHouse"]),
-        ("MSR-7: Office Location",  "Where is my office? How far is my commute?",                                &["Stripe", "Mission District", "bike"]),
-        ("MSR-8: Music+Coding",     "What music do I listen to while programming?",                              &["lo-fi", "Chopin"]),
-        ("MSR-9: Pet+Allergy",      "What should I know about my animal allergies and current pets?",            &["golden retriever", "Pixel", "allergic", "cats"]),
-        ("MSR-10: Skills+Career",   "What technical skills would help me start my own company?",                 &["Rust", "Go", "developer tools", "observability"]),
-        ("MSR-11: Hobby+Location",  "Where do I train jiu-jitsu? What gym?",                                    &["Gracie", "jiu-jitsu"]),
+        (
+            "MSR-1: Work+Lang",
+            "What programming languages do I use at work?",
+            &["Rust"],
+        ),
+        (
+            "MSR-2: Travel+Lang",
+            "Have I traveled anywhere related to languages I'm learning?",
+            &["Tokyo"],
+        ),
+        (
+            "MSR-3: Hobby+Goal",
+            "What goals do I have related to my hobbies?",
+            &["tournament"],
+        ),
+        (
+            "MSR-4: Career",
+            "Tell me about my career progression",
+            &["Stripe", "Shopify"],
+        ),
+        (
+            "MSR-5: Life Goals",
+            "What are my big life goals? What am I saving up for?",
+            &["house", "developer tools", "observability"],
+        ),
+        (
+            "MSR-6: Tech Stack",
+            "What database do I use for my backend services?",
+            &["PostgreSQL", "ClickHouse"],
+        ),
+        (
+            "MSR-7: Office Location",
+            "Where is my office? How far is my commute?",
+            &["Stripe", "Mission District", "bike"],
+        ),
+        (
+            "MSR-8: Music+Coding",
+            "What music do I listen to while programming?",
+            &["lo-fi", "Chopin"],
+        ),
+        (
+            "MSR-9: Pet+Allergy",
+            "What should I know about my animal allergies and current pets?",
+            &["golden retriever", "Pixel", "allergic", "cats"],
+        ),
+        (
+            "MSR-10: Skills+Career",
+            "What technical skills would help me start my own company?",
+            &["Rust", "Go", "developer tools", "observability"],
+        ),
+        (
+            "MSR-11: Hobby+Location",
+            "Where do I train jiu-jitsu? What gym?",
+            &["Gracie", "jiu-jitsu"],
+        ),
     ];
 
     rt_ie.block_on(async {
@@ -1695,8 +2199,16 @@ fn longmemeval_expanded_combined_scorecard() {
             let res = engine_msr.echo(query, 5).await.expect("echo");
             let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
             let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
-            println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
-            all_results.push(TestResult { name, top3: h3, top5: h5 });
+            println!(
+                "  {name}: top3={} top5={}",
+                if h3 { "PASS" } else { "MISS" },
+                if h5 { "PASS" } else { "MISS" }
+            );
+            all_results.push(TestResult {
+                name,
+                top3: h3,
+                top5: h5,
+            });
         }
     });
     drop(engine_msr);
@@ -1707,7 +2219,8 @@ fn longmemeval_expanded_combined_scorecard() {
     println!("\n--- Category 3: Temporal Reasoning (9 tests) ---");
 
     let dir_tr = tempdir().expect("temp dir");
-    let engine_tr = EchoEngine::new(longmemeval_combined_config(dir_tr.path().to_path_buf())).expect("init");
+    let engine_tr =
+        EchoEngine::new(longmemeval_combined_config(dir_tr.path().to_path_buf())).expect("init");
 
     rt_ie.block_on(async {
         // Original TR memories
@@ -1754,15 +2267,51 @@ fn longmemeval_expanded_combined_scorecard() {
     run_full_consolidation(&engine_tr);
 
     let tr_queries: Vec<(&str, &str, &[&str])> = vec![
-        ("TR-1: Job Timeline",      "Where have I worked over the years?",                          &["startup", "Shopify", "Stripe"]),
-        ("TR-2: Recent Events",     "What tech events have I been involved in recently?",           &["conference", "meetup", "RustConf"]),
-        ("TR-3: Piano Progress",    "How is my piano playing going?",                               &["Chopin", "nocturne", "beginner", "piano"]),
-        ("TR-4: Graduation",        "When did I finish university? What year?",                     &["2015", "graduated"]),
-        ("TR-5: Relationship",      "How long have I been with my partner?",                        &["2019", "started dating", "anniversary"]),
-        ("TR-6: Pet Age",           "How old is my dog now?",                                       &["4 years old", "Pixel"]),
-        ("TR-7: Career Timing",     "When did I start working at my current company?",              &["2022", "Stripe"]),
-        ("TR-8: November Trip",     "What did I do last November?",                                 &["Tokyo", "November"]),
-        ("TR-9: Next Competition",  "When is my next jiu-jitsu competition?",                       &["IBJJF", "San Francisco Open", "March 2027"]),
+        (
+            "TR-1: Job Timeline",
+            "Where have I worked over the years?",
+            &["startup", "Shopify", "Stripe"],
+        ),
+        (
+            "TR-2: Recent Events",
+            "What tech events have I been involved in recently?",
+            &["conference", "meetup", "RustConf"],
+        ),
+        (
+            "TR-3: Piano Progress",
+            "How is my piano playing going?",
+            &["Chopin", "nocturne", "beginner", "piano"],
+        ),
+        (
+            "TR-4: Graduation",
+            "When did I finish university? What year?",
+            &["2015", "graduated"],
+        ),
+        (
+            "TR-5: Relationship",
+            "How long have I been with my partner?",
+            &["2019", "started dating", "anniversary"],
+        ),
+        (
+            "TR-6: Pet Age",
+            "How old is my dog now?",
+            &["4 years old", "Pixel"],
+        ),
+        (
+            "TR-7: Career Timing",
+            "When did I start working at my current company?",
+            &["2022", "Stripe"],
+        ),
+        (
+            "TR-8: November Trip",
+            "What did I do last November?",
+            &["Tokyo", "November"],
+        ),
+        (
+            "TR-9: Next Competition",
+            "When is my next jiu-jitsu competition?",
+            &["IBJJF", "San Francisco Open", "March 2027"],
+        ),
     ];
 
     rt_ie.block_on(async {
@@ -1770,8 +2319,16 @@ fn longmemeval_expanded_combined_scorecard() {
             let res = engine_tr.echo(query, 5).await.expect("echo");
             let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
             let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
-            println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
-            all_results.push(TestResult { name, top3: h3, top5: h5 });
+            println!(
+                "  {name}: top3={} top5={}",
+                if h3 { "PASS" } else { "MISS" },
+                if h5 { "PASS" } else { "MISS" }
+            );
+            all_results.push(TestResult {
+                name,
+                top3: h3,
+                top5: h5,
+            });
         }
     });
     drop(engine_tr);
@@ -1784,48 +2341,181 @@ fn longmemeval_expanded_combined_scorecard() {
     println!("\n--- Category 4: Knowledge Update (9 tests, isolated engines) ---");
 
     let ku_tests: Vec<(&str, &str, &[&str], Vec<(&str, &str)>)> = vec![
-        ("KU-1: Job Change", "Where do I work now?", &["Meta"],
-         vec![("I work as a backend engineer at Google on the Cloud Spanner team", "old"),
-              ("I left Google last month. I now work at Meta on the infrastructure team", "new"),
-              ("I enjoy hiking on weekends in the bay area", "noise")]),
-        ("KU-2: Address", "Where do I live now?", &["Portland"],
-         vec![("I live in a one-bedroom apartment in downtown Seattle", "old"),
-              ("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new")]),
-        ("KU-3: Language", "What programming language do I mainly use?", &["Rust"],
-         vec![("Python is my go-to programming language for everything", "old"),
-              ("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new")]),
-        ("KU-4: Hobby Change", "What cardio exercise do I do?", &["swim", "YMCA"],
-         vec![("I run 5 kilometers every morning before work, it's my main cardio exercise", "old"),
-              ("I enjoy listening to podcasts during my morning run", "noise"),
-              ("I had to stop running due to a knee injury. Now I swim laps at the YMCA pool three times a week instead", "new")]),
-        ("KU-5: Relationship", "What's my relationship status?", &["engaged", "wedding"],
-         vec![("I've been dating Jordan for about 3 years, we live together in an apartment", "old"),
-              ("I love cooking dinner with Jordan on weekends", "noise"),
-              ("Jordan and I got engaged last weekend! We're planning a small wedding for next spring", "new")]),
-        ("KU-6: Triple Address", "Where do I currently live?", &["San Francisco", "Mission District"],
-         vec![("I live in a studio apartment in downtown Vancouver near Gastown", "addr1"),
-              ("I moved to Seattle for a new job, renting a place in Capitol Hill", "addr2"),
-              ("I relocated to San Francisco last month, now living in the Mission District", "addr3"),
-              ("I love exploring new neighborhoods and finding good coffee shops", "noise")]),
-        ("KU-7: Partial Update", "What's my current role and compensation?", &["staff engineer", "230k"],
-         vec![("I work at Stripe as a senior engineer with a salary of $185k base plus equity", "old"),
-              ("I got promoted to staff engineer at Stripe with a salary increase to $230k base plus larger equity grant", "new"),
-              ("Tech salaries in the Bay Area have been going up this year", "noise")]),
-        ("KU-8: Skill Level", "What JLPT level did I reach?", &["N2"],
-         vec![("I'm learning Japanese and just passed the JLPT N4 test", "skill1"),
-              ("I passed the JLPT N3 exam last December after months of studying", "skill2"),
-              ("I just got my JLPT N2 certification! Next goal is N1", "skill3"),
-              ("I want to visit Kyoto to practice my Japanese in a traditional setting", "noise")]),
-        ("KU-9: Diet Evolution", "What's my current diet? Do I eat meat?", &["vegan", "plant-based"],
-         vec![("I eat everything, no restrictions. I love burgers and steaks", "diet1"),
-              ("I cut out red meat for health reasons, now I only eat chicken and fish", "diet2"),
-              ("I've gone fully plant-based vegan. No animal products at all, and I feel amazing", "diet3"),
-              ("I started a new workout routine focusing on strength training", "noise")]),
+        (
+            "KU-1: Job Change",
+            "Where do I work now?",
+            &["Meta"],
+            vec![
+                (
+                    "I work as a backend engineer at Google on the Cloud Spanner team",
+                    "old",
+                ),
+                (
+                    "I left Google last month. I now work at Meta on the infrastructure team",
+                    "new",
+                ),
+                ("I enjoy hiking on weekends in the bay area", "noise"),
+            ],
+        ),
+        (
+            "KU-2: Address",
+            "Where do I live now?",
+            &["Portland"],
+            vec![
+                (
+                    "I live in a one-bedroom apartment in downtown Seattle",
+                    "old",
+                ),
+                (
+                    "I just moved to Portland, Oregon and I'm renting a house in the Pearl District",
+                    "new",
+                ),
+            ],
+        ),
+        (
+            "KU-3: Language",
+            "What programming language do I mainly use?",
+            &["Rust"],
+            vec![
+                (
+                    "Python is my go-to programming language for everything",
+                    "old",
+                ),
+                (
+                    "I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve",
+                    "new",
+                ),
+            ],
+        ),
+        (
+            "KU-4: Hobby Change",
+            "What cardio exercise do I do?",
+            &["swim", "YMCA"],
+            vec![
+                (
+                    "I run 5 kilometers every morning before work, it's my main cardio exercise",
+                    "old",
+                ),
+                (
+                    "I enjoy listening to podcasts during my morning run",
+                    "noise",
+                ),
+                (
+                    "I had to stop running due to a knee injury. Now I swim laps at the YMCA pool three times a week instead",
+                    "new",
+                ),
+            ],
+        ),
+        (
+            "KU-5: Relationship",
+            "What's my relationship status?",
+            &["engaged", "wedding"],
+            vec![
+                (
+                    "I've been dating Jordan for about 3 years, we live together in an apartment",
+                    "old",
+                ),
+                ("I love cooking dinner with Jordan on weekends", "noise"),
+                (
+                    "Jordan and I got engaged last weekend! We're planning a small wedding for next spring",
+                    "new",
+                ),
+            ],
+        ),
+        (
+            "KU-6: Triple Address",
+            "Where do I currently live?",
+            &["San Francisco", "Mission District"],
+            vec![
+                (
+                    "I live in a studio apartment in downtown Vancouver near Gastown",
+                    "addr1",
+                ),
+                (
+                    "I moved to Seattle for a new job, renting a place in Capitol Hill",
+                    "addr2",
+                ),
+                (
+                    "I relocated to San Francisco last month, now living in the Mission District",
+                    "addr3",
+                ),
+                (
+                    "I love exploring new neighborhoods and finding good coffee shops",
+                    "noise",
+                ),
+            ],
+        ),
+        (
+            "KU-7: Partial Update",
+            "What's my current role and compensation?",
+            &["staff engineer", "230k"],
+            vec![
+                (
+                    "I work at Stripe as a senior engineer with a salary of $185k base plus equity",
+                    "old",
+                ),
+                (
+                    "I got promoted to staff engineer at Stripe with a salary increase to $230k base plus larger equity grant",
+                    "new",
+                ),
+                (
+                    "Tech salaries in the Bay Area have been going up this year",
+                    "noise",
+                ),
+            ],
+        ),
+        (
+            "KU-8: Skill Level",
+            "What JLPT level did I reach?",
+            &["N2"],
+            vec![
+                (
+                    "I'm learning Japanese and just passed the JLPT N4 test",
+                    "skill1",
+                ),
+                (
+                    "I passed the JLPT N3 exam last December after months of studying",
+                    "skill2",
+                ),
+                (
+                    "I just got my JLPT N2 certification! Next goal is N1",
+                    "skill3",
+                ),
+                (
+                    "I want to visit Kyoto to practice my Japanese in a traditional setting",
+                    "noise",
+                ),
+            ],
+        ),
+        (
+            "KU-9: Diet Evolution",
+            "What's my current diet? Do I eat meat?",
+            &["vegan", "plant-based"],
+            vec![
+                (
+                    "I eat everything, no restrictions. I love burgers and steaks",
+                    "diet1",
+                ),
+                (
+                    "I cut out red meat for health reasons, now I only eat chicken and fish",
+                    "diet2",
+                ),
+                (
+                    "I've gone fully plant-based vegan. No animal products at all, and I feel amazing",
+                    "diet3",
+                ),
+                (
+                    "I started a new workout routine focusing on strength training",
+                    "noise",
+                ),
+            ],
+        ),
     ];
 
     for (name, query, needles, memories) in &ku_tests {
         let dir_ku = tempdir().expect("temp dir");
-        let engine_ku = EchoEngine::new(longmemeval_combined_config(dir_ku.path().to_path_buf())).expect("init");
+        let engine_ku = EchoEngine::new(longmemeval_combined_config(dir_ku.path().to_path_buf()))
+            .expect("init");
         rt_ie.block_on(async {
             for (text, src) in memories {
                 engine_ku.store(text, src).await.unwrap();
@@ -1836,8 +2526,16 @@ fn longmemeval_expanded_combined_scorecard() {
         let res = rt_ie.block_on(async { engine_ku.echo(query, 5).await.expect("echo") });
         let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
         let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
-        println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
-        all_results.push(TestResult { name, top3: h3, top5: h5 });
+        println!(
+            "  {name}: top3={} top5={}",
+            if h3 { "PASS" } else { "MISS" },
+            if h5 { "PASS" } else { "MISS" }
+        );
+        all_results.push(TestResult {
+            name,
+            top3: h3,
+            top5: h5,
+        });
         drop(engine_ku);
         drop(dir_ku);
     }
@@ -1850,56 +2548,195 @@ fn longmemeval_expanded_combined_scorecard() {
     println!("\n--- Category 5: Preference Tracking (10 tests, isolated engines) ---");
 
     let pt_tests: Vec<(&str, &str, &[&str], Vec<(&str, &str)>)> = vec![
-        ("PT-1: IDE", "What code editor do I use?", &["Neovim"],
-         vec![("I use Sublime Text as my code editor, it's fast and lightweight", "m1"),
-              ("I switched to VS Code because of the extension ecosystem", "m3"),
-              ("I've moved to Neovim with a custom Lua config for maximum speed", "m6")]),
-        ("PT-2: Diet", "What's my diet like?", &["pescatarian"],
-         vec![("I'm vegetarian and have been for the past 3 years", "m1"),
-              ("I started eating fish again, so now I'm pescatarian", "m4")]),
-        ("PT-3: Coffee", "How do I take my coffee?", &["pour-over", "V60", "black coffee"],
-         vec![("I drink regular drip coffee with cream and sugar", "m1"),
-              ("I switched to espresso-based drinks, usually a latte with whole milk", "m3"),
-              ("Now I drink pour-over black coffee, no milk no sugar, using a Hario V60", "m6")]),
-        ("PT-4: OS", "What operating system do I use?", &["Arch", "Hyprland"],
-         vec![("I use Windows 11 on all my machines for gaming and development", "m1"),
-              ("I dual-boot Linux Mint alongside Windows now for dev work", "m3"),
-              ("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "m6")]),
-        ("PT-5: Music", "What kind of music do I listen to?", &["lo-fi", "ambient", "electronic"],
-         vec![("I mostly listen to pop music and top 40 hits", "m1"),
-              ("I've been getting into indie rock and alternative music lately", "m3"),
-              ("Now I mainly listen to lo-fi hip hop and ambient electronic music for focus", "m6"),
-              ("I bought new headphones, the Sony WH-1000XM5", "noise")]),
-        ("PT-6: Commute", "How do I get to work?", &["bike"],
-         vec![("I drive my car to work every day, about a 40-minute commute on the highway", "m1"),
-              ("I started taking the BART train to reduce my carbon footprint", "m4"),
-              ("I now bike to work every day, it's a 25-minute ride and I love the fresh air", "m8"),
-              ("Gas prices have been going up a lot this year", "noise")]),
-        ("PT-7: Desk Setup", "What's my desk and keyboard setup?", &["Uplift", "Kinesis", "standing desk"],
-         vec![("I work at a regular sitting desk with a standard Dell keyboard and mouse", "m1"),
-              ("I got a sit-stand desk converter for my existing desk, and a mechanical keyboard", "m4"),
-              ("I upgraded to a full Uplift standing desk and a split ergonomic Kinesis Advantage 360", "m8"),
-              ("I need to clean my office this weekend", "noise")]),
-        ("PT-8: Learning", "What am I currently learning or studying?", &["AWS", "Solutions Architect"],
-         vec![("I'm taking an online course on machine learning fundamentals", "m1"),
-              ("I finished the ML course and started studying distributed systems design", "m3"),
-              ("I'm currently studying for the AWS Solutions Architect certification exam", "m6"),
-              ("I find that studying in the morning works best for me", "noise")]),
-        ("PT-9: Communities", "What online communities am I active on?", &["Rust subreddit", "Hacker News"],
-         vec![("I'm mostly on Twitter for tech discussions and memes", "m1"),
-              ("I left Twitter and moved to Mastodon for the tech community", "m4"),
-              ("I'm now most active on the Rust subreddit and Hacker News, and I'm a member of the San Francisco Rust meetup", "m8"),
-              ("Social media can be really distracting during work hours", "noise")]),
-        ("PT-10: Cooking", "What do I like to cook?", &["Thai", "Japanese", "pad see ew", "ramen"],
-         vec![("I mostly order takeout and eat at restaurants, I don't cook much", "m1"),
-              ("I started meal prepping on Sundays, mostly simple pasta and salad recipes", "m4"),
-              ("I've gotten into Thai and Japanese home cooking, I make pad see ew and ramen from scratch now", "m8"),
-              ("I need to buy a new set of kitchen knives", "noise")]),
+        (
+            "PT-1: IDE",
+            "What code editor do I use?",
+            &["Neovim"],
+            vec![
+                (
+                    "I use Sublime Text as my code editor, it's fast and lightweight",
+                    "m1",
+                ),
+                (
+                    "I switched to VS Code because of the extension ecosystem",
+                    "m3",
+                ),
+                (
+                    "I've moved to Neovim with a custom Lua config for maximum speed",
+                    "m6",
+                ),
+            ],
+        ),
+        (
+            "PT-2: Diet",
+            "What's my diet like?",
+            &["pescatarian"],
+            vec![
+                ("I'm vegetarian and have been for the past 3 years", "m1"),
+                ("I started eating fish again, so now I'm pescatarian", "m4"),
+            ],
+        ),
+        (
+            "PT-3: Coffee",
+            "How do I take my coffee?",
+            &["pour-over", "V60", "black coffee"],
+            vec![
+                ("I drink regular drip coffee with cream and sugar", "m1"),
+                (
+                    "I switched to espresso-based drinks, usually a latte with whole milk",
+                    "m3",
+                ),
+                (
+                    "Now I drink pour-over black coffee, no milk no sugar, using a Hario V60",
+                    "m6",
+                ),
+            ],
+        ),
+        (
+            "PT-4: OS",
+            "What operating system do I use?",
+            &["Arch", "Hyprland"],
+            vec![
+                (
+                    "I use Windows 11 on all my machines for gaming and development",
+                    "m1",
+                ),
+                (
+                    "I dual-boot Linux Mint alongside Windows now for dev work",
+                    "m3",
+                ),
+                (
+                    "I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely",
+                    "m6",
+                ),
+            ],
+        ),
+        (
+            "PT-5: Music",
+            "What kind of music do I listen to?",
+            &["lo-fi", "ambient", "electronic"],
+            vec![
+                ("I mostly listen to pop music and top 40 hits", "m1"),
+                (
+                    "I've been getting into indie rock and alternative music lately",
+                    "m3",
+                ),
+                (
+                    "Now I mainly listen to lo-fi hip hop and ambient electronic music for focus",
+                    "m6",
+                ),
+                ("I bought new headphones, the Sony WH-1000XM5", "noise"),
+            ],
+        ),
+        (
+            "PT-6: Commute",
+            "How do I get to work?",
+            &["bike"],
+            vec![
+                (
+                    "I drive my car to work every day, about a 40-minute commute on the highway",
+                    "m1",
+                ),
+                (
+                    "I started taking the BART train to reduce my carbon footprint",
+                    "m4",
+                ),
+                (
+                    "I now bike to work every day, it's a 25-minute ride and I love the fresh air",
+                    "m8",
+                ),
+                ("Gas prices have been going up a lot this year", "noise"),
+            ],
+        ),
+        (
+            "PT-7: Desk Setup",
+            "What's my desk and keyboard setup?",
+            &["Uplift", "Kinesis", "standing desk"],
+            vec![
+                (
+                    "I work at a regular sitting desk with a standard Dell keyboard and mouse",
+                    "m1",
+                ),
+                (
+                    "I got a sit-stand desk converter for my existing desk, and a mechanical keyboard",
+                    "m4",
+                ),
+                (
+                    "I upgraded to a full Uplift standing desk and a split ergonomic Kinesis Advantage 360",
+                    "m8",
+                ),
+                ("I need to clean my office this weekend", "noise"),
+            ],
+        ),
+        (
+            "PT-8: Learning",
+            "What am I currently learning or studying?",
+            &["AWS", "Solutions Architect"],
+            vec![
+                (
+                    "I'm taking an online course on machine learning fundamentals",
+                    "m1",
+                ),
+                (
+                    "I finished the ML course and started studying distributed systems design",
+                    "m3",
+                ),
+                (
+                    "I'm currently studying for the AWS Solutions Architect certification exam",
+                    "m6",
+                ),
+                (
+                    "I find that studying in the morning works best for me",
+                    "noise",
+                ),
+            ],
+        ),
+        (
+            "PT-9: Communities",
+            "What online communities am I active on?",
+            &["Rust subreddit", "Hacker News"],
+            vec![
+                ("I'm mostly on Twitter for tech discussions and memes", "m1"),
+                (
+                    "I left Twitter and moved to Mastodon for the tech community",
+                    "m4",
+                ),
+                (
+                    "I'm now most active on the Rust subreddit and Hacker News, and I'm a member of the San Francisco Rust meetup",
+                    "m8",
+                ),
+                (
+                    "Social media can be really distracting during work hours",
+                    "noise",
+                ),
+            ],
+        ),
+        (
+            "PT-10: Cooking",
+            "What do I like to cook?",
+            &["Thai", "Japanese", "pad see ew", "ramen"],
+            vec![
+                (
+                    "I mostly order takeout and eat at restaurants, I don't cook much",
+                    "m1",
+                ),
+                (
+                    "I started meal prepping on Sundays, mostly simple pasta and salad recipes",
+                    "m4",
+                ),
+                (
+                    "I've gotten into Thai and Japanese home cooking, I make pad see ew and ramen from scratch now",
+                    "m8",
+                ),
+                ("I need to buy a new set of kitchen knives", "noise"),
+            ],
+        ),
     ];
 
     for (name, query, needles, memories) in &pt_tests {
         let dir_pt = tempdir().expect("temp dir");
-        let engine_pt = EchoEngine::new(longmemeval_combined_config(dir_pt.path().to_path_buf())).expect("init");
+        let engine_pt = EchoEngine::new(longmemeval_combined_config(dir_pt.path().to_path_buf()))
+            .expect("init");
         rt_ie.block_on(async {
             for (text, src) in memories {
                 engine_pt.store(text, src).await.unwrap();
@@ -1910,8 +2747,16 @@ fn longmemeval_expanded_combined_scorecard() {
         let res = rt_ie.block_on(async { engine_pt.echo(query, 5).await.expect("echo") });
         let h3 = needles.iter().any(|n| top_n_contains(&res, 3, n));
         let h5 = needles.iter().any(|n| top_n_contains(&res, 5, n));
-        println!("  {name}: top3={} top5={}", if h3 { "PASS" } else { "MISS" }, if h5 { "PASS" } else { "MISS" });
-        all_results.push(TestResult { name, top3: h3, top5: h5 });
+        println!(
+            "  {name}: top3={} top5={}",
+            if h3 { "PASS" } else { "MISS" },
+            if h5 { "PASS" } else { "MISS" }
+        );
+        all_results.push(TestResult {
+            name,
+            top3: h3,
+            top5: h5,
+        });
         drop(engine_pt);
         drop(dir_pt);
     }
@@ -1936,11 +2781,11 @@ fn longmemeval_expanded_combined_scorecard() {
 
     // Per-category breakdown
     let categories = [
-        ("IE (Info Extraction)",       0..11),
-        ("MSR (Multi-Session)",        11..22),
-        ("TR (Temporal Reasoning)",    22..31),
-        ("KU (Knowledge Update)",      31..40),
-        ("PT (Preference Tracking)",   40..50),
+        ("IE (Info Extraction)", 0..11),
+        ("MSR (Multi-Session)", 11..22),
+        ("TR (Temporal Reasoning)", 22..31),
+        ("KU (Knowledge Update)", 31..40),
+        ("PT (Preference Tracking)", 40..50),
     ];
 
     for (cat_name, range) in &categories {

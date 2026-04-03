@@ -85,7 +85,12 @@ impl OllamaConsolidator {
                 .timeout_global(Some(std::time::Duration::from_secs(60)))
                 .build(),
         );
-        Self { url, model, agent, system_prompt }
+        Self {
+            url,
+            model,
+            agent,
+            system_prompt,
+        }
     }
 }
 
@@ -259,7 +264,12 @@ pub struct HttpConsolidator {
 }
 
 impl HttpConsolidator {
-    pub fn new(url: String, model: String, api_key: Option<String>, system_prompt: Option<String>) -> Self {
+    pub fn new(
+        url: String,
+        model: String,
+        api_key: Option<String>,
+        system_prompt: Option<String>,
+    ) -> Self {
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
                 .timeout_global(Some(std::time::Duration::from_secs(60)))
@@ -291,10 +301,7 @@ impl Consolidator for HttpConsolidator {
             "temperature": 0.0
         });
 
-        let endpoint = format!(
-            "{}/v1/chat/completions",
-            self.url.trim_end_matches('/')
-        );
+        let endpoint = format!("{}/v1/chat/completions", self.url.trim_end_matches('/'));
 
         let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
         tracing::info!(
@@ -390,7 +397,10 @@ pub fn from_config(config: &EchoConfig) -> Box<dyn Consolidator> {
             Box::new(NoopConsolidator)
         }
         other => {
-            tracing::warn!(provider = other, "Unknown consolidation provider, falling back to noop");
+            tracing::warn!(
+                provider = other,
+                "Unknown consolidation provider, falling back to noop"
+            );
             Box::new(NoopConsolidator)
         }
     }
@@ -564,8 +574,14 @@ mod tests {
         let prompt = combined_enrichment_prompt(5);
         assert!(prompt.contains("topic:"), "Prompt should mention topic");
         assert!(prompt.contains("memtype:"), "Prompt should mention memtype");
-        assert!(prompt.contains("sentiment:"), "Prompt should mention sentiment");
-        assert!(prompt.contains("IS ABOUT"), "Prompt should emphasize implicit inference");
+        assert!(
+            prompt.contains("sentiment:"),
+            "Prompt should mention sentiment"
+        );
+        assert!(
+            prompt.contains("IS ABOUT"),
+            "Prompt should emphasize implicit inference"
+        );
     }
 
     #[test]

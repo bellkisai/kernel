@@ -12,14 +12,24 @@ use tempfile::tempdir;
 
 fn top_n_contains(results: &[shrimpk_core::EchoResult], n: usize, needle: &str) -> bool {
     let lc = needle.to_lowercase();
-    results.iter().take(n).any(|r| r.content.to_lowercase().contains(&lc))
+    results
+        .iter()
+        .take(n)
+        .any(|r| r.content.to_lowercase().contains(&lc))
 }
 
 fn any_needle_in_top_n(results: &[shrimpk_core::EchoResult], n: usize, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| top_n_contains(results, n, needle))
+    needles
+        .iter()
+        .any(|needle| top_n_contains(results, n, needle))
 }
 
-fn make_config(data_dir: PathBuf, hyde: bool, reranker: bool, backend: RerankerBackend) -> EchoConfig {
+fn make_config(
+    data_dir: PathBuf,
+    hyde: bool,
+    reranker: bool,
+    backend: RerankerBackend,
+) -> EchoConfig {
     EchoConfig {
         max_memories: 10_000,
         similarity_threshold: 0.15,
@@ -44,10 +54,14 @@ fn run_consolidation(engine: &EchoEngine) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             for pass in 1..=10 {
                 let r = rt.block_on(engine.consolidate_now());
-                if r.facts_extracted == 0 { break; }
+                if r.facts_extracted == 0 {
+                    break;
+                }
                 println!("    consolidation pass {pass}: facts={}", r.facts_extracted);
             }
-        }).join().expect("consolidation panicked");
+        })
+        .join()
+        .expect("consolidation panicked");
     });
 }
 
@@ -57,9 +71,19 @@ fn print_results(results: &[shrimpk_core::EchoResult], label: &str, needles: &[&
     println!("  [{label}]");
     for (i, r) in results.iter().take(5).enumerate() {
         let content = &r.content[..r.content.len().min(90)];
-        println!("    #{}: sim={:.3} score={:.3} | {}", i+1, r.similarity, r.final_score, content);
+        println!(
+            "    #{}: sim={:.3} score={:.3} | {}",
+            i + 1,
+            r.similarity,
+            r.final_score,
+            content
+        );
     }
-    println!("    Verdict: top3={} top5={}", if hit3 {"PASS"} else {"MISS"}, if hit5 {"PASS"} else {"MISS"});
+    println!(
+        "    Verdict: top3={} top5={}",
+        if hit3 { "PASS" } else { "MISS" },
+        if hit5 { "PASS" } else { "MISS" }
+    );
     println!();
 }
 
@@ -77,9 +101,18 @@ fn test_cases() -> Vec<TestCase> {
             query: "What operating system do I use?",
             needles: vec!["Arch", "Hyprland"],
             memories: vec![
-                ("I use Windows 11 on all my machines for gaming and development", "month1"),
-                ("I dual-boot Linux Mint alongside Windows now for dev work", "month3"),
-                ("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "month6"),
+                (
+                    "I use Windows 11 on all my machines for gaming and development",
+                    "month1",
+                ),
+                (
+                    "I dual-boot Linux Mint alongside Windows now for dev work",
+                    "month3",
+                ),
+                (
+                    "I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely",
+                    "month6",
+                ),
                 ("I bought a new 4K monitor for my desk setup", "noise"),
             ],
         },
@@ -88,9 +121,18 @@ fn test_cases() -> Vec<TestCase> {
             query: "How do I get to work?",
             needles: vec!["bike"],
             memories: vec![
-                ("I drive my car to work every day, about a 40-minute commute on the highway", "month1"),
-                ("I started taking the BART train to reduce my carbon footprint", "month4"),
-                ("I now bike to work every day, it's a 25-minute ride and I love the fresh air", "month8"),
+                (
+                    "I drive my car to work every day, about a 40-minute commute on the highway",
+                    "month1",
+                ),
+                (
+                    "I started taking the BART train to reduce my carbon footprint",
+                    "month4",
+                ),
+                (
+                    "I now bike to work every day, it's a 25-minute ride and I love the fresh air",
+                    "month8",
+                ),
                 ("Gas prices have been going up a lot this year", "noise"),
             ],
         },
@@ -99,9 +141,18 @@ fn test_cases() -> Vec<TestCase> {
             query: "What do I like to cook?",
             needles: vec!["Thai", "Japanese", "pad see ew", "ramen"],
             memories: vec![
-                ("I mostly order takeout and eat at restaurants, I don't cook much", "month1"),
-                ("I started meal prepping on Sundays, mostly simple pasta and salad recipes", "month4"),
-                ("I've gotten into Thai and Japanese home cooking, I make pad see ew and ramen from scratch now", "month8"),
+                (
+                    "I mostly order takeout and eat at restaurants, I don't cook much",
+                    "month1",
+                ),
+                (
+                    "I started meal prepping on Sundays, mostly simple pasta and salad recipes",
+                    "month4",
+                ),
+                (
+                    "I've gotten into Thai and Japanese home cooking, I make pad see ew and ramen from scratch now",
+                    "month8",
+                ),
                 ("I need to buy a new set of kitchen knives", "noise"),
             ],
         },
@@ -110,11 +161,26 @@ fn test_cases() -> Vec<TestCase> {
             query: "When did I start working at my current company?",
             needles: vec!["2022", "Stripe"],
             memories: vec![
-                ("In 2016 I got my first programming job at a small Vancouver startup", "career1"),
-                ("In 2019 I joined Shopify as a backend engineer on their payments team", "career2"),
-                ("In January 2022 I started at Stripe as a senior backend engineer", "career3"),
-                ("I've been at Stripe for over 2 years now and I'm up for a promotion", "career4"),
-                ("My friend just started a new job at Apple last week", "noise"),
+                (
+                    "In 2016 I got my first programming job at a small Vancouver startup",
+                    "career1",
+                ),
+                (
+                    "In 2019 I joined Shopify as a backend engineer on their payments team",
+                    "career2",
+                ),
+                (
+                    "In January 2022 I started at Stripe as a senior backend engineer",
+                    "career3",
+                ),
+                (
+                    "I've been at Stripe for over 2 years now and I'm up for a promotion",
+                    "career4",
+                ),
+                (
+                    "My friend just started a new job at Apple last week",
+                    "noise",
+                ),
             ],
         },
         TestCase {
@@ -122,13 +188,34 @@ fn test_cases() -> Vec<TestCase> {
             query: "What car do I drive?",
             needles: vec!["Tesla", "Model 3"],
             memories: vec![
-                ("I drive a 2022 Tesla Model 3 but mostly bike to work on my Canyon Grail gravel bike", "profile"),
-                ("I work as a senior backend engineer at Stripe in San Francisco", "profile"),
-                ("I have a golden retriever named Pixel who is 4 years old", "profile"),
-                ("I practice Brazilian jiu-jitsu three times a week at a Gracie gym", "profile"),
-                ("I prefer Rust for systems programming and Go for microservices", "profile"),
-                ("My morning routine is meditation, coffee, then 30 minutes of reading", "profile"),
-                ("I enjoy listening to classical music while coding, especially Chopin", "profile"),
+                (
+                    "I drive a 2022 Tesla Model 3 but mostly bike to work on my Canyon Grail gravel bike",
+                    "profile",
+                ),
+                (
+                    "I work as a senior backend engineer at Stripe in San Francisco",
+                    "profile",
+                ),
+                (
+                    "I have a golden retriever named Pixel who is 4 years old",
+                    "profile",
+                ),
+                (
+                    "I practice Brazilian jiu-jitsu three times a week at a Gracie gym",
+                    "profile",
+                ),
+                (
+                    "I prefer Rust for systems programming and Go for microservices",
+                    "profile",
+                ),
+                (
+                    "My morning routine is meditation, coffee, then 30 minutes of reading",
+                    "profile",
+                ),
+                (
+                    "I enjoy listening to classical music while coding, especially Chopin",
+                    "profile",
+                ),
             ],
         },
         TestCase {
@@ -136,11 +223,26 @@ fn test_cases() -> Vec<TestCase> {
             query: "Have I traveled anywhere related to languages I'm learning?",
             needles: vec!["Tokyo"],
             memories: vec![
-                ("I'm learning Japanese and currently at JLPT N3 level", "session3"),
-                ("I visited Tokyo last November and stayed in Shinjuku for two weeks", "session4"),
-                ("I was born in Taipei, Taiwan but grew up in Vancouver, Canada", "session1"),
-                ("I prefer Rust for systems programming and Go for microservices", "session3"),
-                ("My favorite cuisine is Thai food, especially pad see ew and massaman curry", "session3"),
+                (
+                    "I'm learning Japanese and currently at JLPT N3 level",
+                    "session3",
+                ),
+                (
+                    "I visited Tokyo last November and stayed in Shinjuku for two weeks",
+                    "session4",
+                ),
+                (
+                    "I was born in Taipei, Taiwan but grew up in Vancouver, Canada",
+                    "session1",
+                ),
+                (
+                    "I prefer Rust for systems programming and Go for microservices",
+                    "session3",
+                ),
+                (
+                    "My favorite cuisine is Thai food, especially pad see ew and massaman curry",
+                    "session3",
+                ),
             ],
         },
     ]
@@ -152,12 +254,17 @@ const NUM_CONFIGS: usize = 6;
 #[ignore = "requires Ollama with llama3.2:3b"]
 fn regression_diagnostic() {
     let configs: Vec<(&str, bool, bool, RerankerBackend)> = vec![
-        ("A: Baseline",       false, false, RerankerBackend::None),
-        ("B: HyDE only",      true,  false, RerankerBackend::None),
-        ("C: Reranker (LLM)", false, true,  RerankerBackend::Llm),
-        ("D: Combined (LLM)", true,  true,  RerankerBackend::Llm),
-        ("E: CrossEncoder",   false, true,  RerankerBackend::CrossEncoder),
-        ("F: CE + HyDE",      true,  true,  RerankerBackend::CrossEncoder),
+        ("A: Baseline", false, false, RerankerBackend::None),
+        ("B: HyDE only", true, false, RerankerBackend::None),
+        ("C: Reranker (LLM)", false, true, RerankerBackend::Llm),
+        ("D: Combined (LLM)", true, true, RerankerBackend::Llm),
+        (
+            "E: CrossEncoder",
+            false,
+            true,
+            RerankerBackend::CrossEncoder,
+        ),
+        ("F: CE + HyDE", true, true, RerankerBackend::CrossEncoder),
     ];
 
     let cases = test_cases();
@@ -198,16 +305,18 @@ fn regression_diagnostic() {
 
             // Query with latency measurement
             let start = Instant::now();
-            let results = rt.block_on(async {
-                engine.echo(case.query, 5).await.expect("echo")
-            });
+            let results = rt.block_on(async { engine.echo(case.query, 5).await.expect("echo") });
             let latency_ms = start.elapsed().as_millis();
             drop(rt);
 
             let hit3 = any_needle_in_top_n(&results, 3, &case.needles);
             row[ci] = hit3;
             latencies[ci] = latency_ms;
-            print_results(&results, &format!("{label} ({latency_ms}ms)"), &case.needles);
+            print_results(
+                &results,
+                &format!("{label} ({latency_ms}ms)"),
+                &case.needles,
+            );
 
             // Explicitly drop engine to free fastembed memory before next config
             drop(engine);
@@ -229,15 +338,17 @@ fn regression_diagnostic() {
         println!(
             "{:<20} | {:^8} | {:^6} | {:^10} | {:^10} | {:^8} | {:^8}",
             name,
-            if results[0] {"PASS"} else {"MISS"},
-            if results[1] {"PASS"} else {"MISS"},
-            if results[2] {"PASS"} else {"MISS"},
-            if results[3] {"PASS"} else {"MISS"},
-            if results[4] {"PASS"} else {"MISS"},
-            if results[5] {"PASS"} else {"MISS"},
+            if results[0] { "PASS" } else { "MISS" },
+            if results[1] { "PASS" } else { "MISS" },
+            if results[2] { "PASS" } else { "MISS" },
+            if results[3] { "PASS" } else { "MISS" },
+            if results[4] { "PASS" } else { "MISS" },
+            if results[5] { "PASS" } else { "MISS" },
         );
     }
-    let totals: Vec<usize> = (0..NUM_CONFIGS).map(|i| summary.iter().filter(|(_, r, _)| r[i]).count()).collect();
+    let totals: Vec<usize> = (0..NUM_CONFIGS)
+        .map(|i| summary.iter().filter(|(_, r, _)| r[i]).count())
+        .collect();
     println!("{}", "-".repeat(90));
     println!(
         "{:<20} | {:^8} | {:^6} | {:^10} | {:^10} | {:^8} | {:^8}",
@@ -261,17 +372,29 @@ fn regression_diagnostic() {
         println!(
             "{:<20} | {:>6}ms | {:>4}ms | {:>8}ms | {:>8}ms | {:>6}ms | {:>6}ms",
             name,
-            latencies[0], latencies[1], latencies[2], latencies[3], latencies[4], latencies[5],
+            latencies[0],
+            latencies[1],
+            latencies[2],
+            latencies[3],
+            latencies[4],
+            latencies[5],
         );
     }
-    let avg_latencies: Vec<u128> = (0..NUM_CONFIGS).map(|i| {
-        let sum: u128 = summary.iter().map(|(_, _, l)| l[i]).sum();
-        sum / summary.len().max(1) as u128
-    }).collect();
+    let avg_latencies: Vec<u128> = (0..NUM_CONFIGS)
+        .map(|i| {
+            let sum: u128 = summary.iter().map(|(_, _, l)| l[i]).sum();
+            sum / summary.len().max(1) as u128
+        })
+        .collect();
     println!("{}", "-".repeat(90));
     println!(
         "{:<20} | {:>6}ms | {:>4}ms | {:>8}ms | {:>8}ms | {:>6}ms | {:>6}ms",
         "AVERAGE",
-        avg_latencies[0], avg_latencies[1], avg_latencies[2], avg_latencies[3], avg_latencies[4], avg_latencies[5],
+        avg_latencies[0],
+        avg_latencies[1],
+        avg_latencies[2],
+        avg_latencies[3],
+        avg_latencies[4],
+        avg_latencies[5],
     );
 }

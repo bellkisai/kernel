@@ -58,7 +58,10 @@ impl EchoStore {
         self.id_to_index.insert(entry.id.clone(), index);
         // Maintain parent-children index
         if let Some(ref pid) = entry.parent_id {
-            self.parent_children.entry(pid.clone()).or_default().push(index);
+            self.parent_children
+                .entry(pid.clone())
+                .or_default()
+                .push(index);
         }
         // Maintain label inverted index (ADR-015 D3)
         for label in &entry.labels {
@@ -341,7 +344,11 @@ impl EchoStore {
                 }
             }
         }
-        tracing::info!(updated, total = self.entries.len(), "Tier 1 label bootstrap complete");
+        tracing::info!(
+            updated,
+            total = self.entries.len(),
+            "Tier 1 label bootstrap complete"
+        );
         updated
     }
 
@@ -608,13 +615,24 @@ mod tests {
     #[test]
     fn label_index_add_indexes_labels() {
         let mut store = EchoStore::new();
-        store.add(make_labeled_entry("learning japanese", &["topic:language", "action:learning"]));
+        store.add(make_labeled_entry(
+            "learning japanese",
+            &["topic:language", "action:learning"],
+        ));
 
         let results = store.query_labels(&["topic:language".into()]);
-        assert_eq!(results, vec![0], "Entry 0 should be in topic:language posting list");
+        assert_eq!(
+            results,
+            vec![0],
+            "Entry 0 should be in topic:language posting list"
+        );
 
         let results = store.query_labels(&["action:learning".into()]);
-        assert_eq!(results, vec![0], "Entry 0 should be in action:learning posting list");
+        assert_eq!(
+            results,
+            vec![0],
+            "Entry 0 should be in action:learning posting list"
+        );
 
         assert_eq!(store.label_count(), 2);
     }
@@ -629,7 +647,11 @@ mod tests {
         assert_eq!(store.label_posting_len("topic:temp"), 1);
         store.remove(&id);
         assert_eq!(store.label_posting_len("topic:temp"), 0);
-        assert_eq!(store.label_count(), 0, "Empty posting list should be removed");
+        assert_eq!(
+            store.label_count(),
+            0,
+            "Empty posting list should be removed"
+        );
     }
 
     #[test]
@@ -657,7 +679,11 @@ mod tests {
 
         // "shared:label" should contain indices 0 and 1 (not 0 and 2)
         let shared = store.query_labels(&["shared:label".into()]);
-        assert_eq!(shared, vec![0, 1], "shared:label should have updated indices");
+        assert_eq!(
+            shared,
+            vec![0, 1],
+            "shared:label should have updated indices"
+        );
 
         // "only:first" should be gone
         assert_eq!(store.label_posting_len("only:first"), 0);
@@ -694,15 +720,20 @@ mod tests {
 
         // Sort posting lists for comparison (order may differ)
         let normalize = |m: &HashMap<String, Vec<u32>>| -> HashMap<String, Vec<u32>> {
-            m.iter().map(|(k, v)| {
-                let mut sorted = v.clone();
-                sorted.sort();
-                (k.clone(), sorted)
-            }).collect()
+            m.iter()
+                .map(|(k, v)| {
+                    let mut sorted = v.clone();
+                    sorted.sort();
+                    (k.clone(), sorted)
+                })
+                .collect()
         };
 
-        assert_eq!(normalize(&before), normalize(&store.label_index),
-            "Rebuilt index should match incrementally-built index");
+        assert_eq!(
+            normalize(&before),
+            normalize(&store.label_index),
+            "Rebuilt index should match incrementally-built index"
+        );
     }
 
     #[test]
@@ -714,7 +745,11 @@ mod tests {
 
         // OR: entries matching either label
         let results = store.query_labels(&["topic:language".into(), "topic:career".into()]);
-        assert_eq!(results, vec![0, 1, 2], "OR should return union, deduplicated and sorted");
+        assert_eq!(
+            results,
+            vec![0, 1, 2],
+            "OR should return union, deduplicated and sorted"
+        );
     }
 
     #[test]
@@ -777,15 +812,20 @@ mod tests {
         store.rebuild_label_index();
 
         let normalize = |m: &HashMap<String, Vec<u32>>| -> HashMap<String, Vec<u32>> {
-            m.iter().map(|(k, v)| {
-                let mut sorted = v.clone();
-                sorted.sort();
-                (k.clone(), sorted)
-            }).collect()
+            m.iter()
+                .map(|(k, v)| {
+                    let mut sorted = v.clone();
+                    sorted.sort();
+                    (k.clone(), sorted)
+                })
+                .collect()
         };
 
-        assert_eq!(normalize(&before), normalize(&store.label_index),
-            "After 50 adds + 25 removes, rebuild should match incremental index");
+        assert_eq!(
+            normalize(&before),
+            normalize(&store.label_index),
+            "After 50 adds + 25 removes, rebuild should match incremental index"
+        );
     }
 
     // --- Graph navigation tests (KS57) ---
@@ -826,7 +866,10 @@ mod tests {
         assert!(result.contains(&1), "lang-only should match");
         assert!(result.contains(&3), "both should match");
         assert!(!result.contains(&0), "source excluded");
-        assert!(!result.contains(&2), "work-only should not match lang filter");
+        assert!(
+            !result.contains(&2),
+            "work-only should not match lang filter"
+        );
     }
 
     #[test]
@@ -840,7 +883,10 @@ mod tests {
         // No filter — union across all labels on entry 0
         let result = store.connected_indices(0, None);
         assert!(result.contains(&1), "lang-only should match via topic:lang");
-        assert!(result.contains(&2), "work-only should match via domain:work");
+        assert!(
+            result.contains(&2),
+            "work-only should match via domain:work"
+        );
         assert!(!result.contains(&3), "neither should not match");
         assert!(!result.contains(&0), "source excluded");
         // Should be deduped
@@ -853,8 +899,16 @@ mod tests {
     #[test]
     fn embedding_at_valid_index() {
         let mut store = EchoStore::new();
-        store.add(MemoryEntry::new("a".into(), vec![1.0, 2.0, 3.0], "test".into()));
-        store.add(MemoryEntry::new("b".into(), vec![4.0, 5.0, 6.0], "test".into()));
+        store.add(MemoryEntry::new(
+            "a".into(),
+            vec![1.0, 2.0, 3.0],
+            "test".into(),
+        ));
+        store.add(MemoryEntry::new(
+            "b".into(),
+            vec![4.0, 5.0, 6.0],
+            "test".into(),
+        ));
 
         let emb0 = store.embedding_at(0).expect("should have embedding at 0");
         assert_eq!(emb0, &[1.0, 2.0, 3.0]);
@@ -862,7 +916,10 @@ mod tests {
         let emb1 = store.embedding_at(1).expect("should have embedding at 1");
         assert_eq!(emb1, &[4.0, 5.0, 6.0]);
 
-        assert!(store.embedding_at(99).is_none(), "out-of-bounds should return None");
+        assert!(
+            store.embedding_at(99).is_none(),
+            "out-of-bounds should return None"
+        );
     }
 
     #[test]

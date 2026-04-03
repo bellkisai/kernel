@@ -148,7 +148,9 @@ mod speech_feature_tests {
         assert_eq!(pcm.len(), 16_000);
 
         // Store as a speech memory (EchoEngine::store_audio)
-        let memory_id_result = engine.store_audio(&pcm, sample_rate, "integration-test", None).await;
+        let memory_id_result = engine
+            .store_audio(&pcm, sample_rate, "integration-test", None)
+            .await;
 
         match memory_id_result {
             Ok(id) => {
@@ -189,11 +191,16 @@ mod speech_feature_tests {
             .load_models()
             .expect("Models should load (requires network)");
 
-        assert!(embedder.is_ready(), "Embedder should be ready after load_models()");
+        assert!(
+            embedder.is_ready(),
+            "Embedder should be ready after load_models()"
+        );
 
         // 1 second of silence at 16kHz
         let pcm = vec![0.0f32; 16_000];
-        let emb = embedder.embed_pcm(&pcm, 16_000).expect("embed_pcm should succeed");
+        let emb = embedder
+            .embed_pcm(&pcm, 16_000)
+            .expect("embed_pcm should succeed");
 
         assert_eq!(
             emb.len(),
@@ -266,8 +273,14 @@ mod speech_feature_tests {
         let engine = EchoEngine::new(config).expect("EchoEngine::new");
 
         // Store some text memories as distractors
-        engine.store("I went grocery shopping yesterday", "test").await.expect("store text");
-        engine.store("The weather was sunny and warm", "test").await.expect("store text");
+        engine
+            .store("I went grocery shopping yesterday", "test")
+            .await
+            .expect("store text");
+        engine
+            .store("The weather was sunny and warm", "test")
+            .await
+            .expect("store text");
 
         // Store audio WITH description — enables cross-modal recall
         let pcm: Vec<f32> = (0..16_000usize)
@@ -275,7 +288,12 @@ mod speech_feature_tests {
             .collect();
 
         let id = engine
-            .store_audio(&pcm, 16_000, "test", Some("daily standup meeting recording"))
+            .store_audio(
+                &pcm,
+                16_000,
+                "test",
+                Some("daily standup meeting recording"),
+            )
             .await
             .expect("store_audio with description");
 
@@ -290,7 +308,10 @@ mod speech_feature_tests {
             "Text echo for 'standup meeting' should find the speech memory stored with \
              description 'daily standup meeting recording'. Got {} results: {:?}",
             results.len(),
-            results.iter().map(|r| (&r.memory_id, &r.content)).collect::<Vec<_>>()
+            results
+                .iter()
+                .map(|r| (&r.memory_id, &r.content))
+                .collect::<Vec<_>>()
         );
 
         // Verify the memory has memtype:audio label

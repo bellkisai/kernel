@@ -70,9 +70,9 @@ impl MultiEmbedder {
             use fastembed::{ImageEmbedding, ImageEmbeddingModel, ImageInitOptions};
 
             let vis_start = std::time::Instant::now();
-            let vision = match ImageEmbedding::try_new(
-                ImageInitOptions::new(ImageEmbeddingModel::ClipVitB32),
-            ) {
+            let vision = match ImageEmbedding::try_new(ImageInitOptions::new(
+                ImageEmbeddingModel::ClipVitB32,
+            )) {
                 Ok(model) => {
                     tracing::info!(
                         elapsed_ms = vis_start.elapsed().as_millis(),
@@ -89,23 +89,24 @@ impl MultiEmbedder {
             };
 
             let vt_start = std::time::Instant::now();
-            let vision_text = match TextEmbedding::try_new(
-                InitOptions::new(EmbeddingModel::ClipVitB32),
-            ) {
-                Ok(model) => {
-                    tracing::info!(
-                        elapsed_ms = vt_start.elapsed().as_millis(),
-                        model = "clip-ViT-B-32-text",
-                        dim = 512,
-                        "CLIP text encoder initialized"
-                    );
-                    Some(model)
-                }
-                Err(e) => {
-                    tracing::warn!("CLIP text encoder failed to init, cross-modal search disabled: {e}");
-                    None
-                }
-            };
+            let vision_text =
+                match TextEmbedding::try_new(InitOptions::new(EmbeddingModel::ClipVitB32)) {
+                    Ok(model) => {
+                        tracing::info!(
+                            elapsed_ms = vt_start.elapsed().as_millis(),
+                            model = "clip-ViT-B-32-text",
+                            dim = 512,
+                            "CLIP text encoder initialized"
+                        );
+                        Some(model)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "CLIP text encoder failed to init, cross-modal search disabled: {e}"
+                        );
+                        None
+                    }
+                };
 
             (vision, vision_text)
         };
@@ -477,7 +478,11 @@ mod tests {
             .unwrap()
             .expect("CLIP text available");
 
-        let sim: f32 = img_emb.iter().zip(text_emb.iter()).map(|(a, b)| a * b).sum();
+        let sim: f32 = img_emb
+            .iter()
+            .zip(text_emb.iter())
+            .map(|(a, b)| a * b)
+            .sum();
         // Cross-modal similarity is typically lower than same-modal,
         // but should be positive for matching concepts
         assert!(
