@@ -235,6 +235,20 @@ pub struct EchoConfig {
     #[serde(default = "default_hebbian_prune_threshold")]
     pub hebbian_prune_threshold: f64,
 
+    // --- GraphRAG (KS62) ---
+    /// Enable entity-anchored graph traversal during echo queries.
+    /// When true and query mentions known entities, BFS from entity-anchored
+    /// memories via Hebbian edges, merged with vector results via RRF.
+    #[serde(default = "default_true")]
+    pub graph_traversal_enabled: bool,
+    /// Maximum BFS hops for graph traversal. Default: 2.
+    #[serde(default = "default_graph_max_hops")]
+    pub graph_max_hops: usize,
+    /// RRF k parameter. Higher values reduce the impact of rank position.
+    /// Default: 60 (standard value from literature).
+    #[serde(default = "default_graph_rrf_k")]
+    pub graph_rrf_k: usize,
+
     // --- Context Assembly (KS60) ---
     /// Maximum conversation turns to include in proxy context. Default: 20.
     #[serde(default = "default_proxy_max_conversation_turns")]
@@ -264,6 +278,12 @@ fn default_hebbian_half_life() -> f64 {
 }
 fn default_hebbian_prune_threshold() -> f64 {
     0.01
+}
+fn default_graph_max_hops() -> usize {
+    2
+}
+fn default_graph_rrf_k() -> usize {
+    60
 }
 fn default_proxy_max_conversation_turns() -> usize {
     20
@@ -361,6 +381,9 @@ impl Default for EchoConfig {
             activation_weight: default_activation_weight(),
             importance_weight: 0.0,
             use_full_actr_history: false,
+            graph_traversal_enabled: default_true(),
+            graph_max_hops: default_graph_max_hops(),
+            graph_rrf_k: default_graph_rrf_k(),
             hebbian_half_life_secs: default_hebbian_half_life(),
             hebbian_prune_threshold: default_hebbian_prune_threshold(),
             proxy_max_conversation_turns: default_proxy_max_conversation_turns(),
@@ -481,6 +504,9 @@ pub struct FileConfig {
     pub activation_weight: Option<f32>,
     pub importance_weight: Option<f32>,
     pub use_full_actr_history: Option<bool>,
+    pub graph_traversal_enabled: Option<bool>,
+    pub graph_max_hops: Option<usize>,
+    pub graph_rrf_k: Option<usize>,
     pub hebbian_half_life_secs: Option<f64>,
     pub hebbian_prune_threshold: Option<f64>,
     pub proxy_max_conversation_turns: Option<usize>,
@@ -694,6 +720,15 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.use_full_actr_history {
             config.use_full_actr_history = v;
+        }
+        if let Some(v) = fc.graph_traversal_enabled {
+            config.graph_traversal_enabled = v;
+        }
+        if let Some(v) = fc.graph_max_hops {
+            config.graph_max_hops = v;
+        }
+        if let Some(v) = fc.graph_rrf_k {
+            config.graph_rrf_k = v;
         }
         if let Some(v) = fc.hebbian_half_life_secs {
             config.hebbian_half_life_secs = v;

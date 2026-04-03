@@ -55,6 +55,9 @@ __pycache__/
 # ONNX model files
 *.onnx
 
+# Claude Code project instructions (local only)
+CLAUDE.md
+
 # Internal sprint research docs (belong in docs-repo, not public kernel)
 docs/KS*
 docs/S*-*

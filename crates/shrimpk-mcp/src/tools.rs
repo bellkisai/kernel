@@ -10,7 +10,7 @@ use shrimpk_memory::{EchoEngine, PiiFilter};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Return all tool definitions (9 base + 2 multimodal).
+/// Return all tool definitions (10 base + 2 multimodal).
 pub fn all_tools() -> Vec<ToolDefinition> {
     #[allow(unused_mut)]
     let mut tools = vec![
@@ -127,6 +127,18 @@ pub fn all_tools() -> Vec<ToolDefinition> {
                     "memory_id": { "type": "string", "description": "UUID of the memory to retrieve" }
                 },
                 "required": ["memory_id"]
+            }),
+        },
+        ToolDefinition {
+            name: "entity_search".into(),
+            description: "Search for memories mentioning a specific entity (person, place, tool, organization). Uses the entity knowledge graph index for fast lookup.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "entity": { "type": "string", "description": "Entity name to search for (case-insensitive)" },
+                    "max_results": { "type": "integer", "description": "Maximum results (default 10)", "default": 10 }
+                },
+                "required": ["entity"]
             }),
         },
     ];
@@ -424,6 +436,48 @@ pub async fn handle_memory_get(engine: &Arc<EchoEngine>, args: &Value) -> Result
     });
 
     Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".into()))
+}
+
+pub async fn handle_entity_search(
+    engine: &Arc<EchoEngine>,
+    args: &Value,
+) -> Result<String, String> {
+    let entity = args["entity"]
+        .as_str()
+        .ok_or("Missing required argument: entity")?;
+    let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+
+    let start = Instant::now();
+    let results = engine
+        .entity_search(entity, max_results)
+        .await
+        .map_err(|e| e.to_string())?;
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let results_json: Vec<Value> = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            json!({
+                "rank": i + 1,
+                "memory_id": r.memory_id.to_string(),
+                "content": r.content,
+                "similarity": (r.similarity * 100.0).round() / 100.0,
+                "final_score": (r.final_score * 100.0).round() / 100.0,
+                "source": r.source,
+                "labels": r.labels
+            })
+        })
+        .collect();
+
+    let output = json!({
+        "entity": entity,
+        "results": results_json,
+        "count": results.len(),
+        "elapsed_ms": (elapsed_ms * 10.0).round() / 10.0
+    });
+
+    Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
 }
 
 pub async fn handle_stats(engine: &Arc<EchoEngine>, config: &EchoConfig) -> Result<String, String> {
@@ -797,10 +851,10 @@ mod tests {
     #[test]
     fn all_tools_returns_expected_count() {
         let count = all_tools().len();
-        // Base: 12 tools (9 original + memory_graph + memory_related + memory_get).
+        // Base: 13 tools (9 original + memory_graph + memory_related + memory_get + entity_search).
         // +1 if vision feature, +1 if speech feature.
         #[allow(unused_mut)]
-        let mut expected = 12;
+        let mut expected = 13;
         #[cfg(feature = "vision")]
         {
             expected += 1;

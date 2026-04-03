@@ -18,7 +18,8 @@ pub use config::{
 pub use error::{Result, ShrimPKError};
 pub use memory::{
     EchoResult, LabelConnection, MemoryCategory, MemoryEntry, MemoryEntrySummary,
-    MemoryGraphResult, MemoryId, MemoryStats, Modality, QueryMode, SensitivityLevel, source_weight,
+    MemoryGraphResult, MemoryId, MemoryStats, Modality, QueryMode, SensitivityLevel, Triple,
+    TriplePredicate, source_weight,
 };
 pub use pii::{PiiMatch, PiiType};
 pub use traits::{ConsolidationOutput, Consolidator, LabelSet, ModelBackend, Provider};

@@ -350,6 +350,56 @@ impl HebbianGraph {
             .collect()
     }
 
+    /// BFS graph traversal from anchor nodes via Hebbian edges (KS62).
+    ///
+    /// Walks the co-activation graph outward from `anchors` up to `max_hops` hops.
+    /// Path weight is multiplicative: if A→B has weight 0.8 and B→C has weight 0.5,
+    /// the path A→B→C has weight 0.4. A visited set prevents cycles.
+    ///
+    /// Returns `(node_id, accumulated_weight)` sorted by weight descending,
+    /// truncated to `max_results`.
+    pub fn graph_traverse(
+        &self,
+        anchors: &[u32],
+        max_hops: usize,
+        max_results: usize,
+    ) -> Vec<(u32, f64)> {
+        let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut results: Vec<(u32, f64)> = Vec::new();
+        let mut frontier: Vec<(u32, f64)> = Vec::new();
+
+        // Seed with anchors (weight 1.0 = direct entity match)
+        for &anchor in anchors {
+            if visited.insert(anchor) {
+                frontier.push((anchor, 1.0));
+                results.push((anchor, 1.0));
+            }
+        }
+
+        for _hop in 0..max_hops {
+            let mut next_frontier: Vec<(u32, f64)> = Vec::new();
+            for &(node, path_weight) in &frontier {
+                for (neighbor, edge_weight) in
+                    self.get_associations(node, self.prune_threshold)
+                {
+                    if visited.insert(neighbor) {
+                        let new_weight = path_weight * edge_weight;
+                        next_frontier.push((neighbor, new_weight));
+                        results.push((neighbor, new_weight));
+                    }
+                }
+            }
+            if next_frontier.is_empty() {
+                break;
+            }
+            frontier = next_frontier;
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(max_results);
+        results
+    }
+
     /// Consolidation: prune edges whose decayed weight has fallen below the threshold.
     ///
     /// Also cleans up the adjacency index for pruned edges.
@@ -970,5 +1020,76 @@ mod tests {
             plain.unwrap().2.is_none(),
             "Plain association should have no relationship"
         );
+    }
+
+    // --- KS62: graph_traverse tests ---
+
+    #[test]
+    fn graph_traverse_single_hop() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        // A --0.5-- B --0.3-- C
+        graph.co_activate(1, 2, 0.5);
+        graph.co_activate(2, 3, 0.3);
+
+        let results = graph.graph_traverse(&[1], 1, 10);
+        let ids: Vec<u32> = results.iter().map(|&(id, _)| id).collect();
+        assert!(ids.contains(&1), "Anchor should be in results");
+        assert!(ids.contains(&2), "1-hop neighbor should be in results");
+        assert!(!ids.contains(&3), "2-hop neighbor should NOT be in 1-hop results");
+    }
+
+    #[test]
+    fn graph_traverse_multi_hop() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        graph.co_activate(1, 2, 0.8);
+        graph.co_activate(2, 3, 0.6);
+        graph.co_activate(3, 4, 0.4);
+
+        let results = graph.graph_traverse(&[1], 2, 10);
+        let ids: Vec<u32> = results.iter().map(|&(id, _)| id).collect();
+        assert!(ids.contains(&1));
+        assert!(ids.contains(&2));
+        assert!(ids.contains(&3), "2-hop neighbor should be reached");
+        assert!(!ids.contains(&4), "3-hop should NOT be reached with max_hops=2");
+
+        // Verify multiplicative weights
+        let w3 = results.iter().find(|&&(id, _)| id == 3).unwrap().1;
+        assert!(w3 < 0.6, "2-hop weight should be < direct edge weight, got {w3}");
+    }
+
+    #[test]
+    fn graph_traverse_handles_cycles() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        // Triangle: 1--2--3--1
+        graph.co_activate(1, 2, 0.5);
+        graph.co_activate(2, 3, 0.5);
+        graph.co_activate(3, 1, 0.5);
+
+        let results = graph.graph_traverse(&[1], 3, 10);
+        // Should visit each node exactly once despite cycle
+        assert_eq!(results.len(), 3, "Should visit 3 unique nodes");
+        let ids: Vec<u32> = results.iter().map(|&(id, _)| id).collect();
+        assert!(ids.contains(&1));
+        assert!(ids.contains(&2));
+        assert!(ids.contains(&3));
+    }
+
+    #[test]
+    fn graph_traverse_empty_graph() {
+        let graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        let results = graph.graph_traverse(&[1, 2], 2, 10);
+        // Anchors still appear even with no edges
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn graph_traverse_respects_max_results() {
+        let mut graph = HebbianGraph::new(HALF_LIFE, PRUNE_THRESHOLD);
+        // Star graph: center 0, spokes 1..10
+        for i in 1..=10 {
+            graph.co_activate(0, i, 0.5);
+        }
+        let results = graph.graph_traverse(&[0], 1, 5);
+        assert_eq!(results.len(), 5, "Should truncate to max_results");
     }
 }

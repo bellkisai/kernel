@@ -255,6 +255,11 @@ pub fn consolidate(
                         child.created_at = parent_entry.created_at;
                     }
 
+                    // Extract structured triple if possible (KS61)
+                    if let Some(triple) = extract_triples(fact) {
+                        child.triples.push(triple);
+                    }
+
                     let child_idx = store.add(child) as u32;
                     // Only index children in LSH/Bloom when they participate in direct ranking.
                     // When child_rescue_only is true, children are only accessed via Pipe B
@@ -496,6 +501,30 @@ fn extract_entity(original: &str, start: usize, end: usize) -> String {
         .trim_end_matches(|c: char| c == '.' || c == ',' || c == ';' || c == '!' || c == '?')
         .trim()
         .to_string()
+}
+
+/// Extract a structured (subject, predicate, object) triple from a fact string.
+/// Reuses detect_relationship() for predicate+object and extract_subject() for subject.
+/// Returns None if no relationship pattern matches.
+pub fn extract_triples(fact: &str) -> Option<shrimpk_core::Triple> {
+    use shrimpk_core::{Triple, TriplePredicate};
+
+    let rel = detect_relationship(fact)?;
+    let subject = extract_subject(fact);
+    if subject.is_empty() {
+        return None;
+    }
+
+    let (predicate, object) = match rel {
+        RelationshipType::WorksAt(obj) => (TriplePredicate::WorksAt, obj),
+        RelationshipType::LivesIn(obj) => (TriplePredicate::LivesIn, obj),
+        RelationshipType::PrefersTool(obj) => (TriplePredicate::PrefersTool, obj),
+        RelationshipType::PartOf(obj) => (TriplePredicate::PartOf, obj),
+        RelationshipType::Custom(ref s) => (TriplePredicate::Custom(s.clone()), s.clone()),
+        _ => return None, // CoActivation, TemporalSequence, Supersedes are graph-edge-only
+    };
+
+    Some(Triple { subject, predicate, object })
 }
 
 /// Detect entity-level contradictions between new facts and existing memories.
@@ -1399,5 +1428,42 @@ mod tests {
 
         let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
         assert!(pairs.is_empty(), "Same fact should not trigger supersedes");
+    }
+
+    // ---- Triple extraction tests (KS61 Track C) ----
+
+    #[test]
+    fn extract_triples_works_at() {
+        use shrimpk_core::TriplePredicate;
+        let triple = extract_triples("Lior works at Bellkis").unwrap();
+        assert_eq!(triple.subject, "Lior");
+        assert_eq!(triple.predicate, TriplePredicate::WorksAt);
+        assert_eq!(triple.object, "Bellkis");
+    }
+
+    #[test]
+    fn extract_triples_lives_in() {
+        use shrimpk_core::TriplePredicate;
+        let triple = extract_triples("User lives in Tel Aviv").unwrap();
+        assert_eq!(triple.predicate, TriplePredicate::LivesIn);
+    }
+
+    #[test]
+    fn extract_triples_prefers_tool() {
+        use shrimpk_core::TriplePredicate;
+        let triple = extract_triples("Developer prefers Rust").unwrap();
+        assert_eq!(triple.predicate, TriplePredicate::PrefersTool);
+    }
+
+    #[test]
+    fn extract_triples_part_of() {
+        use shrimpk_core::TriplePredicate;
+        let triple = extract_triples("Module part of ShrimPK").unwrap();
+        assert_eq!(triple.predicate, TriplePredicate::PartOf);
+    }
+
+    #[test]
+    fn extract_triples_none_for_plain_fact() {
+        assert!(extract_triples("The sky is blue").is_none());
     }
 }

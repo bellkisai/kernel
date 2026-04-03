@@ -4,7 +4,13 @@
       "Bash(cargo test:*)",
       "Bash(ls:*)",
       "Bash(cargo check:*)",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "mcp__shrimpk__store",
+      "mcp__shrimpk__status",
+      "mcp__shrimpk__stats",
+      "Bash(wc:*)",
+      "WebSearch",
+      "WebFetch(domain:arxiv.org)"
     ]
   }
 }

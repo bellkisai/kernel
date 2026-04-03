@@ -239,6 +239,10 @@ pub struct MemoryEntry {
     /// 2 = LLM-enriched (Tier 2: NER + Ollama classification).
     #[serde(default)]
     pub label_version: u8,
+    /// Knowledge graph triples extracted during consolidation.
+    /// Each triple is (subject, predicate, object) — e.g., ("Lior", WorksAt, "Bellkis").
+    #[serde(default)]
+    pub triples: Vec<Triple>,
     /// Novelty score at store time: 1.0 - max cosine similarity to existing memories.
     /// Higher = more novel/unique. Used for consolidation priority.
     #[serde(default)]
@@ -279,6 +283,7 @@ impl MemoryEntry {
             parent_id: None,
             labels: Vec::new(),
             label_version: 0,
+            triples: Vec::new(),
             novelty_score: 0.0,
             importance: 0.0,
             activation_cache: 0.0,
@@ -364,6 +369,26 @@ pub struct MemoryGraphResult {
     pub total_connected: usize,
     /// Total unique connected memories.
     pub unique_connected: usize,
+}
+
+/// Predicate type for knowledge graph triples.
+/// Lightweight enum for core — maps from `hebbian::RelationshipType` at the boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TriplePredicate {
+    WorksAt,
+    LivesIn,
+    PrefersTool,
+    PartOf,
+    Custom(String),
+}
+
+/// A structured knowledge triple: (subject, predicate, object).
+/// Extracted from facts during consolidation for entity-anchored graph queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Triple {
+    pub subject: String,
+    pub predicate: TriplePredicate,
+    pub object: String,
 }
 
 /// Statistics about the Echo Memory system.
@@ -654,6 +679,30 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
         let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.labels.len(), 10);
+    }
+
+    // --- Triple / entity graph tests (KS61) ---
+
+    #[test]
+    fn triple_serde_roundtrip() {
+        let triple = Triple {
+            subject: "Lior".into(),
+            predicate: TriplePredicate::WorksAt,
+            object: "Bellkis AI".into(),
+        };
+        let json = serde_json::to_string(&triple).unwrap();
+        let back: Triple = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.subject, "Lior");
+        assert_eq!(back.predicate, TriplePredicate::WorksAt);
+        assert_eq!(back.object, "Bellkis AI");
+    }
+
+    #[test]
+    fn triple_defaults_on_legacy_json() {
+        // MemoryEntry JSON without triples field should deserialize with empty triples vec
+        let json = r#"{"id":"00000000-0000-0000-0000-000000000000","content":"test","masked_content":null,"embedding":[],"source":"test","sensitivity":"Public","created_at":"2024-01-01T00:00:00Z","last_echoed":null,"echo_count":0}"#;
+        let entry: MemoryEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.triples.is_empty());
     }
 
     #[test]

@@ -34,6 +34,9 @@ pub struct EchoStore {
     /// Inverted index: label string -> sorted store indices (ADR-015 D3).
     /// Maintained incrementally on add/remove. Enables O(1) label-based pre-filtering.
     label_index: HashMap<String, Vec<u32>>,
+    /// Entity name -> store indices. Populated from MemoryEntry.triples during add/load.
+    /// Normalized to lowercase for case-insensitive lookup.
+    entity_index: HashMap<String, Vec<u32>>,
 }
 
 impl EchoStore {
@@ -45,6 +48,7 @@ impl EchoStore {
             id_to_index: HashMap::new(),
             parent_children: HashMap::new(),
             label_index: HashMap::new(),
+            entity_index: HashMap::new(),
         }
     }
 
@@ -69,6 +73,13 @@ impl EchoStore {
                 .entry(label.clone())
                 .or_default()
                 .push(index as u32);
+        }
+        // Maintain entity index from triples (KS61)
+        for triple in &entry.triples {
+            let subj = triple.subject.to_lowercase();
+            let obj = triple.object.to_lowercase();
+            self.entity_index.entry(subj).or_default().push(index as u32);
+            self.entity_index.entry(obj).or_default().push(index as u32);
         }
         self.entries.push(entry);
         self.embeddings.push(embedding);
@@ -103,6 +114,19 @@ impl EchoStore {
                 }
             }
         }
+        // Clean entity index for the removed entry (KS61)
+        for triple in &self.entries[index].triples {
+            let subj = triple.subject.to_lowercase();
+            let obj = triple.object.to_lowercase();
+            for key in [subj, obj] {
+                if let Some(posting) = self.entity_index.get_mut(&key) {
+                    posting.retain(|&i| i != index as u32);
+                    if posting.is_empty() {
+                        self.entity_index.remove(&key);
+                    }
+                }
+            }
+        }
 
         if index != last_index {
             // Swap the last entry into this slot
@@ -122,6 +146,20 @@ impl EchoStore {
                     for idx in posting.iter_mut() {
                         if *idx == last_index as u32 {
                             *idx = index as u32;
+                        }
+                    }
+                }
+            }
+            // Fix entity index references from last_index to index (KS61)
+            for triple in &self.entries[last_index].triples {
+                let subj = triple.subject.to_lowercase();
+                let obj = triple.object.to_lowercase();
+                for key in [subj, obj] {
+                    if let Some(posting) = self.entity_index.get_mut(&key) {
+                        for idx in posting.iter_mut() {
+                            if *idx == last_index as u32 {
+                                *idx = index as u32;
+                            }
                         }
                     }
                 }
@@ -257,6 +295,32 @@ impl EchoStore {
     /// Get the posting list size for a specific label.
     pub fn label_posting_len(&self, label: &str) -> usize {
         self.label_index.get(label).map_or(0, |v| v.len())
+    }
+
+    // --- Entity index API (KS61) ---
+
+    /// Look up memories mentioning a specific entity (case-insensitive).
+    pub fn query_entities(&self, entity: &str) -> Vec<u32> {
+        let key = entity.to_lowercase();
+        self.entity_index.get(&key).cloned().unwrap_or_default()
+    }
+
+    /// Rebuild entity index from all entries' triples (called after load).
+    pub fn rebuild_entity_index(&mut self) {
+        self.entity_index.clear();
+        for (idx, entry) in self.entries.iter().enumerate() {
+            for triple in &entry.triples {
+                let subj = triple.subject.to_lowercase();
+                let obj = triple.object.to_lowercase();
+                self.entity_index.entry(subj).or_default().push(idx as u32);
+                self.entity_index.entry(obj).or_default().push(idx as u32);
+            }
+        }
+    }
+
+    /// Read-only reference to the entity index (for query-time entity detection).
+    pub fn entity_index_ref(&self) -> &HashMap<String, Vec<u32>> {
+        &self.entity_index
     }
 
     /// Get the embedding vector at a specific index.
@@ -920,6 +984,46 @@ mod tests {
             store.embedding_at(99).is_none(),
             "out-of-bounds should return None"
         );
+    }
+
+    // --- Entity index tests (KS61) ---
+
+    #[test]
+    fn entity_index_query_case_insensitive() {
+        use shrimpk_core::{Triple, TriplePredicate};
+
+        let mut store = EchoStore::new();
+        let mut entry = MemoryEntry::new("test".into(), vec![0.0; 384], "test".into());
+        entry.triples.push(Triple {
+            subject: "Lior".into(),
+            predicate: TriplePredicate::WorksAt,
+            object: "Bellkis".into(),
+        });
+        store.add(entry);
+
+        assert!(!store.query_entities("lior").is_empty());
+        assert!(!store.query_entities("LIOR").is_empty());
+        assert!(!store.query_entities("bellkis").is_empty());
+        assert!(store.query_entities("unknown").is_empty());
+    }
+
+    #[test]
+    fn entity_index_rebuild_matches_incremental() {
+        use shrimpk_core::{Triple, TriplePredicate};
+
+        let mut store = EchoStore::new();
+        let mut entry = MemoryEntry::new("test".into(), vec![0.0; 384], "test".into());
+        entry.triples.push(Triple {
+            subject: "Alice".into(),
+            predicate: TriplePredicate::LivesIn,
+            object: "NYC".into(),
+        });
+        store.add(entry);
+
+        let before = store.query_entities("alice").len();
+        store.rebuild_entity_index();
+        let after = store.query_entities("alice").len();
+        assert_eq!(before, after);
     }
 
     #[test]

@@ -92,6 +92,80 @@ fn truncate_content(s: &str, max_chars: usize) -> String {
     }
 }
 
+/// Detect entity names mentioned in a query by matching against the entity index (KS62).
+///
+/// Tokenizes query into lowercase words and bigrams, checks each against entity_index keys.
+/// Returns matching entity names (lowercased).
+fn detect_query_entities(
+    query: &str,
+    entity_index: &std::collections::HashMap<String, Vec<u32>>,
+) -> Vec<String> {
+    if entity_index.is_empty() {
+        return Vec::new();
+    }
+    let words: Vec<String> = query
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| c.is_ascii_punctuation()).to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    let mut matches: Vec<String> = Vec::new();
+    let mut matched_set = std::collections::HashSet::new();
+
+    // Check bigrams first (longer matches preferred)
+    for pair in words.windows(2) {
+        let bigram = format!("{} {}", pair[0], pair[1]);
+        if entity_index.contains_key(&bigram) && matched_set.insert(bigram.clone()) {
+            matches.push(bigram);
+        }
+    }
+
+    // Check unigrams (skip words already covered by bigrams)
+    for word in &words {
+        if word.len() < 2 {
+            continue; // skip single-char tokens like "a", "i"
+        }
+        if entity_index.contains_key(word.as_str()) && matched_set.insert(word.clone()) {
+            matches.push(word.clone());
+        }
+    }
+
+    matches
+}
+
+/// Reciprocal Rank Fusion merge of vector and graph result lists (KS62).
+///
+/// Standard RRF: for each item, `score = sum(1/(k + rank))` across lists where it appears.
+/// Items present in both lists get boosted. The output preserves original cosine similarity
+/// scores (for downstream threshold comparison) but is ORDERED by RRF score.
+fn reciprocal_rank_fusion(
+    vector: &[(usize, f32)],
+    graph: &[(usize, f32)],
+    k: usize,
+) -> Vec<(usize, f32)> {
+    // Accumulate RRF score + track cosine similarity per item
+    let mut scores: std::collections::HashMap<usize, (f64, f32)> =
+        std::collections::HashMap::new();
+
+    for (rank, &(idx, cosine)) in vector.iter().enumerate() {
+        let entry = scores.entry(idx).or_insert((0.0, cosine));
+        entry.0 += 1.0 / (k as f64 + rank as f64 + 1.0);
+    }
+
+    for (rank, &(idx, cosine)) in graph.iter().enumerate() {
+        let entry = scores.entry(idx).or_insert((0.0, cosine));
+        entry.0 += 1.0 / (k as f64 + rank as f64 + 1.0);
+    }
+
+    let mut merged: Vec<(usize, f32, f64)> = scores
+        .into_iter()
+        .map(|(idx, (rrf, cosine))| (idx, cosine, rrf))
+        .collect();
+    merged.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    merged.into_iter().map(|(idx, cosine, _)| (idx, cosine)).collect()
+}
+
 impl EchoEngine {
     /// Initialize a new EchoEngine with an empty store.
     ///
@@ -1062,8 +1136,72 @@ impl EchoEngine {
         // 5b. Split pipeline: Pipe A (above threshold) + Pipe B (near-miss child rescue)
         //     Use half-threshold to capture near-misses for potential child rescue.
         let near_miss_threshold = self.config.similarity_threshold * 0.5;
-        let all_ranked =
+        let cosine_ranked =
             similarity::rank_candidates(&query_embedding, &candidates, near_miss_threshold);
+
+        // 5c. Entity-anchored graph traversal + RRF merge (KS62).
+        //     If query mentions known entities, BFS from entity-anchored memories
+        //     via Hebbian edges, then merge with cosine results via RRF.
+        let all_ranked = if self.config.graph_traversal_enabled {
+            let entities = detect_query_entities(query, store.entity_index_ref());
+            if !entities.is_empty() {
+                // Collect anchor indices from entity index
+                let mut anchors: Vec<u32> = Vec::new();
+                for entity in &entities {
+                    anchors.extend(store.query_entities(entity));
+                }
+                anchors.sort_unstable();
+                anchors.dedup();
+
+                // BFS via Hebbian edges
+                let graph_results = {
+                    let hebbian = self.hebbian.read().await;
+                    hebbian.graph_traverse(&anchors, self.config.graph_max_hops, 20)
+                };
+
+                if !graph_results.is_empty() {
+                    // Compute cosine for graph-discovered nodes not already in cosine_ranked
+                    let ranked_set: std::collections::HashSet<usize> =
+                        cosine_ranked.iter().map(|&(idx, _)| idx).collect();
+                    let mut graph_with_cosine: Vec<(usize, f32)> = Vec::new();
+                    for &(node_id, _weight) in &graph_results {
+                        let idx = node_id as usize;
+                        if !ranked_set.contains(&idx) {
+                            if let Some(emb) = embeddings.get(idx) {
+                                let sim =
+                                    similarity::cosine_similarity(&query_embedding, emb);
+                                if sim > near_miss_threshold {
+                                    graph_with_cosine.push((idx, sim));
+                                }
+                            }
+                        }
+                    }
+
+                    if !graph_with_cosine.is_empty() {
+                        tracing::debug!(
+                            entities = ?entities,
+                            anchors = anchors.len(),
+                            graph_new = graph_with_cosine.len(),
+                            cosine_total = cosine_ranked.len(),
+                            "GraphRAG: entity-anchored traversal injected candidates"
+                        );
+                        reciprocal_rank_fusion(
+                            &cosine_ranked,
+                            &graph_with_cosine,
+                            self.config.graph_rrf_k,
+                        )
+                    } else {
+                        cosine_ranked
+                    }
+                } else {
+                    cosine_ranked
+                }
+            } else {
+                cosine_ranked
+            }
+        } else {
+            cosine_ranked
+        };
 
         let threshold = self.config.similarity_threshold;
         let child_rescue_only = self.config.child_rescue_only;
@@ -1804,6 +1942,69 @@ impl EchoEngine {
             results = results.len(),
             elapsed_ms = elapsed.as_millis(),
             "Memory related query complete (cosine-only fast path)"
+        );
+
+        Ok(results)
+    }
+
+    /// Search for memories mentioning a specific entity by name.
+    /// Uses the entity index for O(1) lookup, then ranks by cosine similarity.
+    #[instrument(skip(self), fields(entity = %entity))]
+    pub async fn entity_search(&self, entity: &str, max_results: usize) -> Result<Vec<EchoResult>> {
+        let start = std::time::Instant::now();
+        let store = self.store.read().await;
+        let indices = store.query_entities(entity);
+        if indices.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Embed the entity name for ranking
+        let mut embedder = self.embedder.lock().map_err(|e| ShrimPKError::Memory(format!("lock: {e}")))?;
+        let query_emb = embedder.embed_text(entity)?;
+        drop(embedder);
+
+        let mut scored: Vec<(usize, f32)> = indices
+            .iter()
+            .filter_map(|&idx| {
+                let idx = idx as usize;
+                store.embedding_at(idx).and_then(|emb| {
+                    if emb.is_empty() {
+                        None
+                    } else {
+                        let sim = similarity::cosine_similarity(&query_emb, emb);
+                        Some((idx, sim))
+                    }
+                })
+            })
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(max_results);
+
+        let now = Utc::now();
+        let results: Vec<EchoResult> = scored
+            .into_iter()
+            .filter_map(|(idx, sim)| {
+                let entry = store.entry_at(idx)?;
+                Some(EchoResult {
+                    memory_id: entry.id.clone(),
+                    content: truncate_content(entry.display_content(), 200),
+                    similarity: sim,
+                    final_score: sim as f64,
+                    source: entry.source.clone(),
+                    echoed_at: now,
+                    modality: entry.modality,
+                    labels: entry.labels.clone(),
+                })
+            })
+            .collect();
+
+        let elapsed = start.elapsed();
+        tracing::info!(
+            entity = %entity,
+            candidates = indices.len(),
+            results = results.len(),
+            elapsed_ms = elapsed.as_millis(),
+            "Entity search complete"
         );
 
         Ok(results)
@@ -2637,5 +2838,96 @@ mod tests {
     fn d6_use_labels_defaults_to_true() {
         let config = EchoConfig::default();
         assert!(config.use_labels, "use_labels should default to true");
+    }
+
+    // --- KS62: detect_query_entities tests ---
+
+    #[test]
+    fn detect_entities_unigram_match() {
+        let mut index = std::collections::HashMap::new();
+        index.insert("rust".to_string(), vec![0, 1]);
+        index.insert("python".to_string(), vec![2]);
+
+        let matches = detect_query_entities("I love Rust programming", &index);
+        assert_eq!(matches, vec!["rust"]);
+    }
+
+    #[test]
+    fn detect_entities_bigram_match() {
+        let mut index = std::collections::HashMap::new();
+        index.insert("lior cohen".to_string(), vec![0]);
+        index.insert("lior".to_string(), vec![0]);
+
+        let matches = detect_query_entities("Where does Lior Cohen work?", &index);
+        assert!(matches.contains(&"lior cohen".to_string()));
+    }
+
+    #[test]
+    fn detect_entities_no_match() {
+        let mut index = std::collections::HashMap::new();
+        index.insert("python".to_string(), vec![0]);
+
+        let matches = detect_query_entities("What is the weather today?", &index);
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn detect_entities_empty_index() {
+        let index = std::collections::HashMap::new();
+        let matches = detect_query_entities("anything", &index);
+        assert!(matches.is_empty());
+    }
+
+    // --- KS62: reciprocal_rank_fusion tests ---
+
+    #[test]
+    fn rrf_merge_overlapping() {
+        let vector = vec![(0, 0.9f32), (1, 0.8), (2, 0.7)];
+        let graph = vec![(2, 0.7f32), (3, 0.6), (0, 0.5)];
+
+        let merged = reciprocal_rank_fusion(&vector, &graph, 60);
+
+        // Items in both lists (0, 2) should rank higher than single-list items
+        let ids: Vec<usize> = merged.iter().map(|&(idx, _)| idx).collect();
+        assert_eq!(ids.len(), 4, "Union of both lists = 4 unique items");
+
+        // Item 0 is rank 1 in vector + rank 3 in graph → strong RRF
+        // Item 2 is rank 3 in vector + rank 1 in graph → strong RRF
+        // Both should be in top 2
+        let top2: Vec<usize> = ids[..2].to_vec();
+        assert!(top2.contains(&0), "Item 0 (in both lists) should be top-2");
+        assert!(top2.contains(&2), "Item 2 (in both lists) should be top-2");
+    }
+
+    #[test]
+    fn rrf_merge_non_overlapping() {
+        let vector = vec![(0, 0.9f32), (1, 0.8)];
+        let graph = vec![(2, 0.7f32), (3, 0.6)];
+
+        let merged = reciprocal_rank_fusion(&vector, &graph, 60);
+        assert_eq!(merged.len(), 4);
+        // All items get single-list RRF scores
+    }
+
+    #[test]
+    fn rrf_merge_empty_graph() {
+        let vector = vec![(0, 0.9f32), (1, 0.8)];
+        let graph: Vec<(usize, f32)> = vec![];
+
+        let merged = reciprocal_rank_fusion(&vector, &graph, 60);
+        assert_eq!(merged.len(), 2);
+        // Order preserved from vector since graph is empty
+        assert_eq!(merged[0].0, 0);
+        assert_eq!(merged[1].0, 1);
+    }
+
+    // --- KS62: config defaults ---
+
+    #[test]
+    fn graph_config_defaults() {
+        let config = EchoConfig::default();
+        assert!(config.graph_traversal_enabled);
+        assert_eq!(config.graph_max_hops, 2);
+        assert_eq!(config.graph_rrf_k, 60);
     }
 }

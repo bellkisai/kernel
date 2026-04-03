@@ -27,6 +27,7 @@ pub async fn dispatch(
         "memory_graph" => tools::handle_memory_graph(engine, args).await,
         "memory_related" => tools::handle_memory_related(engine, args).await,
         "memory_get" => tools::handle_memory_get(engine, args).await,
+        "entity_search" => tools::handle_entity_search(engine, args).await,
         #[cfg(feature = "vision")]
         "store_image" => tools::handle_store_image(engine, args).await,
         #[cfg(feature = "speech")]
@@ -71,6 +72,7 @@ mod tests {
             "memory_graph",
             "memory_related",
             "memory_get",
+            "entity_search",
         ];
         #[cfg(feature = "vision")]
         tool_names.push("store_image");
@@ -78,7 +80,7 @@ mod tests {
         tool_names.push("store_audio");
 
         #[allow(unused_mut)]
-        let mut expected = 12;
+        let mut expected = 13;
         #[cfg(feature = "vision")]
         {
             expected += 1;

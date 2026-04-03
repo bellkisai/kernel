@@ -131,6 +131,9 @@ pub struct MemoryMeta {
     /// Retrieval timestamps as seconds since UNIX epoch (ring buffer, cap 16).
     #[serde(default)]
     pub retrieval_history_secs: Vec<u32>,
+    /// Knowledge graph triples extracted during consolidation (KS61).
+    #[serde(default)]
+    pub triples: Vec<shrimpk_core::Triple>,
 }
 
 impl MemoryMeta {
@@ -159,6 +162,7 @@ impl MemoryMeta {
             activation_cache: entry.activation_cache,
             importance_computed_at: entry.importance_computed_at,
             retrieval_history_secs: entry.retrieval_history_secs.clone(),
+            triples: entry.triples.clone(),
         }
     }
 
@@ -189,6 +193,7 @@ impl MemoryMeta {
             activation_cache: self.activation_cache,
             importance_computed_at: self.importance_computed_at,
             retrieval_history_secs: self.retrieval_history_secs,
+            triples: self.triples,
         }
     }
 }
