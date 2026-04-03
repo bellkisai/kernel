@@ -189,32 +189,88 @@ curl -X POST localhost:11435/api/echo \
   -d '{"query":"What language for the backend?"}'
 ```
 
-## Quick Start
+## Install
 
-### Install
-
-```bash
-# Build from source
-cargo build --release -p shrimpk-cli -p shrimpk-daemon
-
-# Start daemon (runs in background)
-./target/release/shrimpk-daemon
-
-# Auto-start on login
-./target/release/shrimpk-daemon --install
-```
-
-### CLI
+### One-liner (recommended)
 
 ```bash
-shrimpk store "I prefer FastAPI for REST APIs"
-shrimpk echo "What framework for APIs?"
-shrimpk stats
-shrimpk config show
-shrimpk status
+curl -fsSL https://raw.githubusercontent.com/bellkisai/kernel/master/scripts/install-remote.sh | sh
 ```
 
-When the daemon is running, CLI commands are instant (~1ms) — they proxy to the daemon via HTTP. Without the daemon, CLI loads the engine in-process (slower but works anywhere).
+Installs pre-built binaries to `~/.shrimpk/bin/`, registers the MCP server, and starts the daemon.
+
+### Docker
+
+```bash
+docker run -d --name shrimpk -p 11435:11435 -v shrimpk-data:/data bellkisai/shrimpk
+```
+
+### From source
+
+```bash
+git clone https://github.com/bellkisai/kernel.git && cd kernel
+cargo build --release -p shrimpk-cli -p shrimpk-mcp -p shrimpk-daemon -p shrimpk-tray
+bash scripts/install.sh   # or: powershell scripts/install.ps1
+```
+
+### GitHub Releases
+
+Download pre-built binaries for your platform from [Releases](https://github.com/bellkisai/kernel/releases). Available for Linux (x86_64, aarch64), macOS (Apple Silicon, Intel), and Windows.
+
+### Verify
+
+```bash
+curl http://localhost:11435/health          # daemon running?
+shrimpk status                              # system overview
+shrimpk store "I prefer Rust"               # store a memory
+shrimpk echo "What language do I like?"     # recall it
+```
+
+## Proxy — Zero-Config Memory for Any LLM
+
+Point your LLM client at ShrimPK instead of your provider. Every request gets transparent memory injection.
+
+```bash
+# Start with smart defaults (expands "ollama" to localhost:11434)
+shrimpk-daemon --proxy-to ollama
+
+# Now use localhost:11435 instead of localhost:11434
+# Open WebUI, Chatbox, or any OpenAI-compatible client — just change the port
+```
+
+The daemon auto-detects local providers (Ollama, LM Studio, vLLM, Jan, LocalAI, GPT4All) and routes by model name. You'll see `Memories injected: N` in the daemon logs for every request.
+
+| Provider | Default Port | Flag |
+|----------|-------------|------|
+| Ollama | 11434 | `--proxy-to ollama` |
+| LM Studio | 1234 | `--proxy-to lmstudio` |
+| vLLM | 8000 | `--proxy-to vllm` |
+| Jan | 1337 | `--proxy-to jan` |
+| LocalAI | 8080 | `--proxy-to localai` |
+| GPT4All | 4891 | `--proxy-to gpt4all` |
+| Custom | any | `--proxy-to http://host:port` |
+
+```
+Client Request → ShrimPK (11435)
+                    │
+              ┌─────┴─────┐
+              │ 1. Echo    │ ← find relevant memories (3.50ms)
+              │ 2. Inject  │ ← prepend to system prompt
+              │ 3. Store   │ ← save user message for future
+              │ 4. Forward │ ← send to LLM provider
+              └─────┬─────┘
+                    │
+              Provider (Ollama, LM Studio, etc.)
+                    │
+              Response → Client (streamed transparently)
+```
+
+### Proxy Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/chat/completions` | Chat with memory injection |
+| GET | `/v1/models` | List available models from backend |
 
 ### Rust Library
 
@@ -290,88 +346,6 @@ shrimpk-kernel          (facade — re-exports all)
 3. **Cosine similarity** — SIMD-accelerated exact scoring
 4. **Hebbian boost** — co-activated memories get promoted
 5. **Category decay** — Identity (365d) → Conversation (3d)
-
-## Memory Proxy — Works With Any LLM
-
-ShrimPK sits between your client and your LLM provider. Point your app at `localhost:11435` instead of your provider's port. Memory injection is automatic and invisible.
-
-### Quick Setup
-
-| Provider | Default Port | ShrimPK Config |
-|----------|:---:|---|
-| Ollama | 11434 | Default — works out of the box |
-| LM Studio | 1234 | `shrimpk config set proxy_target http://127.0.0.1:1234` |
-| Jan.ai | 1337 | `shrimpk config set proxy_target http://127.0.0.1:1337` |
-| vLLM | 8000 | `shrimpk config set proxy_target http://127.0.0.1:8000` |
-| LocalAI | 8080 | `shrimpk config set proxy_target http://127.0.0.1:8080` |
-| GPT4All | 4891 | `shrimpk config set proxy_target http://127.0.0.1:4891` |
-| OpenAI API | — | `shrimpk config set proxy_target https://api.openai.com` |
-| xAI (Grok) | — | `shrimpk config set proxy_target https://api.x.ai` |
-
-### How It Works
-
-```
-Client Request → ShrimPK (11435)
-                    │
-              ┌─────┴─────┐
-              │ 1. Echo    │ ← find relevant memories (3.50ms)
-              │ 2. Inject  │ ← prepend to system prompt
-              │ 3. Store   │ ← save user message for future
-              │ 4. Forward │ ← send to LLM provider
-              └─────┬─────┘
-                    │
-              Provider (Ollama, LM Studio, etc.)
-                    │
-              Response → Client (streamed transparently)
-```
-
-### Auto-Detection
-
-```bash
-$ shrimpk detect
-
-  Provider     Port   Status    Models
-  ------------ ------ --------- ------
-  Ollama       11434  RUNNING   gemma3:1b, phi4-mini
-  LM Studio    1234   NOT FOUND
-```
-
-ShrimPK auto-routes requests by model name. If you have Ollama and LM Studio running, a request for `gemma3:1b` goes to Ollama and `mistral-7b` goes to LM Studio.
-
-### Open WebUI
-
-Settings → Connections → Ollama URL → change to `http://localhost:11435`
-
-All conversations now have persistent memory across sessions.
-
-### curl
-
-```bash
-curl http://localhost:11435/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gemma3:1b","messages":[{"role":"user","content":"hello"}]}'
-```
-
-### Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/chat/completions` | Chat with memory injection |
-| GET | `/v1/models` | List available models from backend |
-
-### Configuration
-
-```bash
-shrimpk config set proxy_target http://127.0.0.1:11434  # Backend URL
-shrimpk config set proxy_enabled true                     # Enable/disable
-shrimpk config set proxy_max_echo_results 5               # Memories per request
-```
-
-Or via environment variables:
-```bash
-SHRIMPK_PROXY_TARGET=http://127.0.0.1:11434
-SHRIMPK_PROXY_ENABLED=true
-```
 
 ## Configuration
 

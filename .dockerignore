@@ -1,0 +1,15 @@
+target/
+.git/
+.github/
+*.md
+!README.md
+benches/
+benchmarks/
+docs/
+examples/
+wix/
+scripts/
+integrations/
+tests/
+.gitignore
+.gitattributes

@@ -18,38 +18,92 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: shrimpk
+            archive_name: shrimpk-linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive_name: shrimpk-linux-aarch64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: shrimpk
+            archive_name: shrimpk-darwin-aarch64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive_name: shrimpk-darwin-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: shrimpk.exe
+            archive_name: shrimpk-windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p shrimpk-cli -p shrimpk-mcp -p shrimpk-daemon -p shrimpk-tray
-      - uses: actions/upload-artifact@v4
-        with:
-          name: shrimpk-${{ matrix.target }}
-          path: |
-            target/release/${{ matrix.artifact }}
-            target/release/shrimpk-mcp${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-            target/release/shrimpk-daemon${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-            target/release/shrimpk-app${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
-  github-release:
-    name: Create Release
+      - name: Build
+        run: cargo build --release -p shrimpk-cli -p shrimpk-mcp -p shrimpk-daemon -p shrimpk-tray
+
+      - name: Package (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir staging
+          cp target/release/shrimpk staging/
+          cp target/release/shrimpk-mcp staging/
+          cp target/release/shrimpk-daemon staging/
+          cp target/release/shrimpk-app staging/
+          tar -czf ${{ matrix.archive_name }}.tar.gz -C staging .
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir staging
+          cp target/release/shrimpk.exe staging/
+          cp target/release/shrimpk-mcp.exe staging/
+          cp target/release/shrimpk-daemon.exe staging/
+          cp target/release/shrimpk-app.exe staging/
+          7z a ${{ matrix.archive_name }}.zip ./staging/*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: |
+            ${{ matrix.archive_name }}.tar.gz
+            ${{ matrix.archive_name }}.zip
+
+  checksum:
+    name: Generate checksums
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        run: sha256sum *.tar.gz *.zip > SHA256SUMS
+        working-directory: artifacts
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: artifacts/SHA256SUMS
+
+  github-release:
+    name: Create Release
+    needs: checksum
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/**/*
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/SHA256SUMS

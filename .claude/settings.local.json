@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(ls:*)",
+      "Bash(cargo check:*)",
+      "Bash(git status:*)"
+    ]
+  }
+}

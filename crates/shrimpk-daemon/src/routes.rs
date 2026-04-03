@@ -577,6 +577,50 @@ pub async fn memory_get(
     })))
 }
 
+/// GET /debug — comprehensive observability snapshot.
+pub async fn debug(State(state): State<AppState>) -> Json<Value> {
+    let stats = state.engine.stats().await;
+    let uptime = state.started_at.elapsed();
+    let routes = state.model_routes.read().await;
+    let config = &state.config;
+
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_secs": uptime.as_secs(),
+        "engine": {
+            "total_memories": stats.total_memories,
+            "max_capacity": stats.max_capacity,
+            "text_count": stats.text_count,
+            "vision_count": stats.vision_count,
+            "speech_count": stats.speech_count,
+            "index_size_bytes": stats.index_size_bytes,
+            "ram_usage_bytes": stats.ram_usage_bytes,
+            "disk_usage_bytes": stats.disk_usage_bytes,
+            "avg_echo_latency_ms": stats.avg_echo_latency_ms,
+            "total_echo_queries": stats.total_echo_queries
+        },
+        "proxy": {
+            "target": config.proxy_target,
+            "enabled": config.proxy_enabled,
+            "max_echo_results": config.proxy_max_echo_results,
+            "context_window": config.proxy_context_window
+        },
+        "model_routes": routes.iter()
+            .map(|(k, v)| json!({"model": k, "provider": v}))
+            .collect::<Vec<_>>(),
+        "config": {
+            "data_dir": config.data_dir.to_string_lossy(),
+            "quantization": config.quantization.to_string(),
+            "embedding_dim": config.embedding_dim,
+            "use_lsh": config.use_lsh,
+            "use_bloom": config.use_bloom,
+            "similarity_threshold": config.similarity_threshold,
+            "max_disk_bytes": config.max_disk_bytes
+        },
+        "auth_enabled": state.auth_token.is_some()
+    }))
+}
+
 /// POST /api/store_image — store an image as a vision memory.
 #[cfg(feature = "vision")]
 pub async fn store_image(

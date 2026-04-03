@@ -226,6 +226,8 @@ pub async fn chat_completions(
                 let memory_block = build_memory_block(&echo_results);
                 inject_memories(&mut req.messages, &memory_block);
             }
+
+            tracing::info!("Memories injected: {}", echo_results.len());
         }
 
         // 4. Store user message for future recall (fire-and-forget)

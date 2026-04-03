@@ -28,6 +28,19 @@ use tower_http::cors::{Any, CorsLayer};
 /// Default port (one above Ollama's 11434).
 const DEFAULT_PORT: u16 = 11435;
 
+/// Resolve a `--proxy-to` shorthand (e.g. "ollama") to a full base URL.
+fn resolve_proxy_target(raw: &str) -> String {
+    match raw {
+        "ollama" => "http://127.0.0.1:11434".into(),
+        "lmstudio" | "lm-studio" => "http://127.0.0.1:1234".into(),
+        "vllm" => "http://127.0.0.1:8000".into(),
+        "jan" => "http://127.0.0.1:1337".into(),
+        "localai" => "http://127.0.0.1:8080".into(),
+        "gpt4all" => "http://127.0.0.1:4891".into(),
+        other => other.into(),
+    }
+}
+
 /// Auth middleware: check Bearer token if SHRIMPK_AUTH_TOKEN is set.
 async fn auth_middleware(
     state: axum::extract::State<AppState>,
@@ -116,6 +129,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_PORT);
 
+    let proxy_to = args
+        .iter()
+        .position(|a| a == "--proxy-to")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
+
     eprintln!(
         "[shrimpk] Starting daemon v{}...",
         env!("CARGO_PKG_VERSION")
@@ -125,11 +144,17 @@ async fn main() -> anyhow::Result<()> {
     validate_pid_file();
 
     // Resolve config
-    let echo_config = config::resolve_config().map_err(|e| {
+    let mut echo_config = config::resolve_config().map_err(|e| {
         eprintln!("[shrimpk] Config error: {e}");
         e
     })?;
     std::fs::create_dir_all(&echo_config.data_dir)?;
+
+    // Override proxy target if --proxy-to was given
+    if let Some(ref target) = proxy_to {
+        echo_config.proxy_target = resolve_proxy_target(target);
+        tracing::info!("Proxy target override: {}", echo_config.proxy_target);
+    }
 
     // Load engine (model + memories — the ONE time this happens)
     eprintln!("[shrimpk] Loading Echo Memory engine...");
@@ -207,6 +232,7 @@ async fn main() -> anyhow::Result<()> {
     #[allow(unused_mut)]
     let mut app = Router::new()
         .route("/health", get(routes::health))
+        .route("/debug", get(routes::debug))
         .route("/api/store", post(routes::store))
         .route("/api/echo", post(routes::echo))
         .route("/api/stats", get(routes::stats))
