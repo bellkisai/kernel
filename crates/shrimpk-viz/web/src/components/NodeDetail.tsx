@@ -1,4 +1,4 @@
-import { X, Expand, Link } from "lucide-react";
+import { X, Expand, Link, AlertCircle, Loader2 } from "lucide-react";
 import { useGraphStore } from "../stores/graphStore";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -16,7 +16,7 @@ function Bar({ value, label }: { value: number; label: string }) {
       <span className="w-20 text-zinc-500">{label}</span>
       <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
         <div
-          className="h-full bg-indigo-500 rounded-full"
+          className="h-full bg-indigo-500 rounded-full transition-all duration-300"
           style={{ width: `${Math.round(value * 100)}%` }}
         />
       </div>
@@ -30,13 +30,14 @@ function Bar({ value, label }: { value: number; label: string }) {
 export function NodeDetail() {
   const selectedNode = useGraphStore((s) => s.selectedNode);
   const detail = useGraphStore((s) => s.selectedDetail);
+  const detailError = useGraphStore((s) => s.detailError);
   const selectNode = useGraphStore((s) => s.selectNode);
   const expandNode = useGraphStore((s) => s.expandNode);
 
   if (!selectedNode) return null;
 
   return (
-    <div className="w-[350px] bg-zinc-900/95 border-l border-zinc-800 flex flex-col overflow-hidden">
+    <div className="w-[350px] shrink-0 bg-zinc-900/95 border-l border-zinc-800 flex flex-col overflow-hidden animate-slide-in">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <h3 className="text-sm font-medium text-zinc-200 truncate">
@@ -44,7 +45,8 @@ export function NodeDetail() {
         </h3>
         <button
           onClick={() => selectNode(null)}
-          className="p-1 hover:bg-zinc-800 rounded"
+          className="p-1 hover:bg-zinc-800 rounded transition-colors"
+          aria-label="Close detail panel"
         >
           <X size={14} className="text-zinc-500" />
         </button>
@@ -52,7 +54,20 @@ export function NodeDetail() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {detail ? (
+        {detailError ? (
+          /* Error state */
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <AlertCircle size={24} className="text-red-400" />
+            <p className="text-sm text-red-400">Failed to load memory</p>
+            <p className="text-xs text-zinc-600">{detailError}</p>
+            <button
+              onClick={() => selectNode(selectedNode)}
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        ) : detail ? (
           <>
             {/* Category badge */}
             <span
@@ -67,7 +82,7 @@ export function NodeDetail() {
             </p>
 
             {/* Labels */}
-            {detail.labels.length > 0 && (
+            {detail.labels && detail.labels.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {detail.labels.map((label) => (
                   <span
@@ -81,29 +96,42 @@ export function NodeDetail() {
             )}
 
             {/* Metrics */}
-            <div className="space-y-2">
-              <Bar value={detail.novelty_score} label="Novelty" />
+            <div className="space-y-2 pt-1">
+              <Bar value={detail.novelty_score ?? 0} label="Novelty" />
               <div className="flex items-center gap-2 text-xs">
                 <span className="w-20 text-zinc-500">Echo count</span>
-                <span className="text-zinc-300">{detail.echo_count}</span>
+                <span className="text-zinc-300">{detail.echo_count ?? 0}</span>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="w-20 text-zinc-500">Source</span>
-                <span className="text-zinc-300">{detail.source}</span>
+                <span className="text-zinc-300">{detail.source ?? "unknown"}</span>
               </div>
+              {detail.modality && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="w-20 text-zinc-500">Modality</span>
+                  <span className="text-zinc-300">{detail.modality}</span>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-xs">
                 <span className="w-20 text-zinc-500">Created</span>
                 <span className="text-zinc-300">
-                  {new Date(detail.created_at).toLocaleDateString()}
+                  {detail.created_at
+                    ? new Date(detail.created_at).toLocaleDateString()
+                    : "unknown"}
                 </span>
               </div>
+            </div>
+
+            {/* ID (truncated) */}
+            <div className="text-xs text-zinc-600 font-mono truncate pt-1">
+              {detail.memory_id}
             </div>
 
             {/* Actions */}
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => expandNode(selectedNode)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded transition-colors"
               >
                 <Expand size={12} />
                 Expand neighbors
@@ -112,7 +140,7 @@ export function NodeDetail() {
                 onClick={() => {
                   navigator.clipboard.writeText(detail.memory_id);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded transition-colors"
               >
                 <Link size={12} />
                 Copy ID
@@ -120,7 +148,11 @@ export function NodeDetail() {
             </div>
           </>
         ) : (
-          <div className="text-sm text-zinc-500">Loading...</div>
+          /* Loading state */
+          <div className="flex flex-col items-center gap-3 py-8">
+            <Loader2 size={20} className="text-indigo-400 animate-spin" />
+            <p className="text-sm text-zinc-500">Loading memory...</p>
+          </div>
         )}
       </div>
     </div>

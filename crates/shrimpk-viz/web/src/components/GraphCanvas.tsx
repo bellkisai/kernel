@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import {
   SigmaContainer,
   useLoadGraph,
@@ -6,6 +6,7 @@ import {
   useSigma,
 } from "@react-sigma/core";
 import "@react-sigma/core/lib/react-sigma.min.css";
+import forceAtlas2 from "graphology-layout-forceatlas2";
 import { useGraphStore } from "../stores/graphStore";
 
 /** Inner component that wires sigma events + loads graph data. */
@@ -21,33 +22,34 @@ function GraphEvents() {
   const setHoveredNode = useGraphStore((s) => s.setHoveredNode);
   const hoveredNode = useGraphStore((s) => s.hoveredNode);
 
-  // Load graph whenever it changes
+  // Keep refs to current zoom level and store graph so event handlers
+  // always read the latest values without needing to re-register.
+  const zoomRef = useRef(zoomLevel);
+  zoomRef.current = zoomLevel;
+
+  // Load graph into sigma whenever the store graph changes
   useEffect(() => {
     loadGraph(graph);
-
-    // Apply random initial positions if nodes don't have positions
-    graph.forEachNode((node) => {
-      if (!graph.getNodeAttribute(node, "x")) {
-        graph.setNodeAttribute(node, "x", Math.random() * 1000 - 500);
-        graph.setNodeAttribute(node, "y", Math.random() * 1000 - 500);
-      }
-    });
   }, [graph, loadGraph]);
 
-  // Register click + hover events
+  // Register click + hover events.
+  // Read node attributes from sigma's own graph (the copy loadGraph imported)
+  // so we never hit a stale-reference issue with the store graph.
   useEffect(() => {
     registerEvents({
       clickNode: ({ node }) => {
-        const attrs = graph.getNodeAttributes(node);
-        if (zoomLevel === "galaxy" && attrs.type === "cluster") {
+        const sigGraph = sigma.getGraph();
+        const attrs = sigGraph.getNodeAttributes(node);
+        if (zoomRef.current === "galaxy" && attrs.nodeType === "cluster") {
           drillIntoCommunity(node);
-        } else if (attrs.type === "memory") {
+        } else if (attrs.nodeType === "memory") {
           selectNode(node);
         }
       },
       doubleClickNode: ({ node }) => {
-        const attrs = graph.getNodeAttributes(node);
-        if (attrs.type === "memory") {
+        const sigGraph = sigma.getGraph();
+        const attrs = sigGraph.getNodeAttributes(node);
+        if (attrs.nodeType === "memory") {
           expandNode(node);
         }
       },
@@ -55,121 +57,82 @@ function GraphEvents() {
       leaveNode: () => setHoveredNode(null),
       clickStage: () => selectNode(null),
     });
-  }, [
-    registerEvents,
-    graph,
-    zoomLevel,
-    selectNode,
-    expandNode,
-    drillIntoCommunity,
-    setHoveredNode,
-  ]);
+  }, [registerEvents, sigma, selectNode, expandNode, drillIntoCommunity, setHoveredNode]);
 
-  // Highlight hovered node's neighbors
+  // Dim non-neighbor nodes on hover using sigma's nodeReducer, which
+  // applies a visual override without mutating the graph data.
   useEffect(() => {
-    const s = sigma.getGraph();
-    if (!s) return;
-
-    s.forEachNode((node) => {
-      if (!hoveredNode) {
-        s.setNodeAttribute(node, "hidden", false);
-        return;
-      }
+    sigma.setSetting("nodeReducer", (node, attrs) => {
+      if (!hoveredNode) return attrs;
+      const sigGraph = sigma.getGraph();
       const isNeighbor =
-        node === hoveredNode || s.areNeighbors(node, hoveredNode);
-      s.setNodeAttribute(node, "hidden", false);
-      s.setNodeAttribute(
-        node,
-        "color",
-        isNeighbor
-          ? s.getNodeAttribute(node, "color")
-          : "#27272a",
-      );
+        node === hoveredNode || sigGraph.areNeighbors(node, hoveredNode);
+      return isNeighbor ? attrs : { ...attrs, color: "#27272a" };
+    });
+    sigma.setSetting("edgeReducer", (edge, attrs) => {
+      if (!hoveredNode) return attrs;
+      const sigGraph = sigma.getGraph();
+      const src = sigGraph.source(edge);
+      const tgt = sigGraph.target(edge);
+      const connected = src === hoveredNode || tgt === hoveredNode;
+      return connected ? attrs : { ...attrs, color: "#1c1c1e" };
     });
   }, [hoveredNode, sigma]);
 
   return null;
 }
 
-/** Force-directed layout runner. */
+/** Force-directed layout runner using ForceAtlas2. */
 function LayoutRunner() {
   const sigma = useSigma();
   const graph = useGraphStore((s) => s.graph);
   const animFrame = useRef<number>();
+  const iterRef = useRef(0);
+
+  const stopLayout = useCallback(() => {
+    if (animFrame.current) {
+      cancelAnimationFrame(animFrame.current);
+      animFrame.current = undefined;
+    }
+  }, []);
 
   useEffect(() => {
-    if (graph.order === 0) return;
+    stopLayout();
+    iterRef.current = 0;
 
-    // Simple force-directed layout (ForceAtlas2 can be added via web worker)
-    let iterations = 0;
-    const maxIterations = 100;
+    const sigGraph = sigma.getGraph();
+    if (!sigGraph || sigGraph.order < 2) return;
+
+    const totalIterations = 80;
 
     const step = () => {
-      const g = sigma.getGraph();
-      if (!g || iterations >= maxIterations) return;
+      if (iterRef.current >= totalIterations) {
+        animFrame.current = undefined;
+        return;
+      }
 
-      // Spring-electric model
-      const positions: Record<string, { x: number; y: number }> = {};
-      g.forEachNode((node) => {
-        positions[node] = {
-          x: g.getNodeAttribute(node, "x") || 0,
-          y: g.getNodeAttribute(node, "y") || 0,
-        };
+      // Run a single ForceAtlas2 iteration directly on sigma's graph.
+      // This mutates node x/y attributes in place.
+      forceAtlas2.assign(sigGraph, {
+        iterations: 1,
+        settings: {
+          gravity: 1,
+          scalingRatio: 10,
+          slowDown: 5,
+          barnesHutOptimize: sigGraph.order > 50,
+        },
       });
 
-      // Repulsion between all nodes
-      const nodes = Object.keys(positions);
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = positions[nodes[i]];
-          const b = positions[nodes[j]];
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-          const force = 500 / (dist * dist);
-          const fx = (dx / dist) * force;
-          const fy = (dy / dist) * force;
-          a.x -= fx;
-          a.y -= fy;
-          b.x += fx;
-          b.y += fy;
-        }
-      }
-
-      // Attraction along edges
-      g.forEachEdge((_edge, _attrs, source, target) => {
-        const a = positions[source];
-        const b = positions[target];
-        if (!a || !b) return;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const force = dist * 0.01;
-        const fx = (dx / Math.max(1, dist)) * force;
-        const fy = (dy / Math.max(1, dist)) * force;
-        a.x += fx;
-        a.y += fy;
-        b.x -= fx;
-        b.y -= fy;
-      });
-
-      // Apply positions
-      for (const [node, pos] of Object.entries(positions)) {
-        g.setNodeAttribute(node, "x", pos.x);
-        g.setNodeAttribute(node, "y", pos.y);
-      }
-
-      iterations++;
-      if (iterations < maxIterations) {
-        animFrame.current = requestAnimationFrame(step);
-      }
+      sigma.refresh();
+      iterRef.current++;
+      animFrame.current = requestAnimationFrame(step);
     };
 
+    // Kick off on the next frame so loadGraph has flushed into sigma.
     animFrame.current = requestAnimationFrame(step);
-    return () => {
-      if (animFrame.current) cancelAnimationFrame(animFrame.current);
-    };
-  }, [graph, sigma]);
+
+    return stopLayout;
+  }, [graph, sigma, stopLayout]);
 
   return null;
 }

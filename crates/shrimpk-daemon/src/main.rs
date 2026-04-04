@@ -162,6 +162,13 @@ async fn main() -> anyhow::Result<()> {
     let total = engine.stats().await.total_memories;
     eprintln!("[shrimpk] Loaded {total} memories.");
 
+    // Bootstrap Tier 1 labels on unlabeled memories (auto on startup)
+    let bootstrapped = engine.bootstrap_labels().await;
+    if bootstrapped > 0 {
+        eprintln!("[shrimpk] Bootstrapped labels on {bootstrapped} memories.");
+        engine.persist().await.ok();
+    }
+
     // Start background consolidation
     engine.start_consolidation(300);
     eprintln!("[shrimpk] Consolidation started (every 5 min).");
@@ -243,6 +250,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/config", put(routes::config_set))
         .route("/api/persist", post(routes::persist))
         .route("/api/consolidate", post(routes::consolidate))
+        .route("/api/bootstrap", post(routes::bootstrap_labels))
         .route("/api/detect", get(routes::detect_providers))
         .route("/api/memory_graph", post(routes::memory_graph))
         .route("/api/memory_related", post(routes::memory_related))

@@ -453,11 +453,11 @@ impl EchoEngine {
     /// Returns the complete `MemoryEntry` without truncation. Use this after
     /// echo/graph/related to expand a truncated result.
     pub async fn memory_get(&self, id: &MemoryId) -> Result<MemoryEntry> {
-        let store = self.store.read().await;
-        store
-            .get(id)
-            .cloned()
-            .ok_or_else(|| ShrimPKError::Memory(format!("Memory not found: {id}")))
+        let entry = {
+            let store = self.store.read().await;
+            store.get(id).cloned()
+        }; // read lock released here
+        entry.ok_or_else(|| ShrimPKError::Memory(format!("Memory not found: {id}")))
     }
 
     /// Store an image as a vision memory with optional text description for cross-modal recall.
@@ -2224,62 +2224,67 @@ impl EchoEngine {
         min_members: usize,
         max_clusters: usize,
     ) -> Result<GraphOverviewResult> {
-        let store = self.store.read().await;
+        // Collect all data from the store in one fast pass, then release the lock.
+        // This prevents RwLock starvation when consolidation needs a write lock.
+        let (clusters, member_sets) = {
+            let store = self.store.read().await;
 
-        // Get labels that meet the minimum member threshold
-        let mut label_clusters = store.labels_with_min_members(min_members);
-        label_clusters.sort_by(|a, b| b.1.cmp(&a.1));
-        label_clusters.truncate(max_clusters);
+            let mut label_clusters = store.labels_with_min_members(min_members);
+            label_clusters.sort_by(|a, b| b.1.cmp(&a.1));
+            label_clusters.truncate(max_clusters);
 
-        // Build cluster info with optional community summary
-        let mut clusters: Vec<GraphCluster> = Vec::with_capacity(label_clusters.len());
-        for (label, member_count) in &label_clusters {
-            let summary = store
-                .get_summary(label)
-                .map(|s| s.summary.clone());
+            let mut clusters: Vec<GraphCluster> = Vec::with_capacity(label_clusters.len());
+            let mut member_sets: Vec<(String, std::collections::HashSet<u32>)> =
+                Vec::with_capacity(label_clusters.len());
 
-            // Get top members by importance
-            let member_indices = store.query_labels(&[label.clone()]);
-            let mut members_with_importance: Vec<(usize, f32)> = member_indices
-                .iter()
-                .filter_map(|&idx| {
-                    store.entry_at(idx as usize).map(|e| (idx as usize, e.importance))
-                })
-                .collect();
-            members_with_importance.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            for (label, member_count) in &label_clusters {
+                let summary = store.get_summary(label).map(|s| s.summary.clone());
 
-            let top_members: Vec<GraphNodePreview> = members_with_importance
-                .iter()
-                .take(5)
-                .filter_map(|&(idx, _)| {
-                    store.entry_at(idx).map(|e| GraphNodePreview {
-                        id: e.id.clone(),
-                        content_preview: truncate_content(e.display_content(), 120),
+                let member_indices = store.query_labels(&[label.clone()]);
+                let mut members_with_importance: Vec<(usize, f32)> = member_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        store
+                            .entry_at(idx as usize)
+                            .map(|e| (idx as usize, e.importance))
                     })
-                })
-                .collect();
-
-            clusters.push(GraphCluster {
-                label: label.clone(),
-                member_count: *member_count,
-                summary,
-                top_members,
-            });
-        }
-
-        // Compute inter-cluster edges (shared members between labels)
-        let mut inter_edges: Vec<GraphInterEdge> = Vec::new();
-        for (i, (label_a, _)) in label_clusters.iter().enumerate() {
-            let members_a: std::collections::HashSet<u32> = store
-                .query_labels(&[label_a.clone()])
-                .into_iter()
-                .collect();
-            for (label_b, _) in &label_clusters[i + 1..] {
-                let members_b: std::collections::HashSet<u32> = store
-                    .query_labels(&[label_b.clone()])
-                    .into_iter()
                     .collect();
-                let shared = members_a.intersection(&members_b).count();
+                members_with_importance.sort_by(|a, b| {
+                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                let top_members: Vec<GraphNodePreview> = members_with_importance
+                    .iter()
+                    .take(5)
+                    .filter_map(|&(idx, _)| {
+                        store.entry_at(idx).map(|e| GraphNodePreview {
+                            id: e.id.clone(),
+                            content_preview: truncate_content(e.display_content(), 120),
+                        })
+                    })
+                    .collect();
+
+                // Cache member set for inter-edge computation (after lock release)
+                member_sets
+                    .push((label.clone(), member_indices.into_iter().collect()));
+
+                clusters.push(GraphCluster {
+                    label: label.clone(),
+                    member_count: *member_count,
+                    summary,
+                    top_members,
+                });
+            }
+
+            (clusters, member_sets)
+            // read lock released here
+        };
+
+        // Compute inter-cluster edges WITHOUT holding the store lock
+        let mut inter_edges: Vec<GraphInterEdge> = Vec::new();
+        for (i, (label_a, members_a)) in member_sets.iter().enumerate() {
+            for (label_b, members_b) in &member_sets[i + 1..] {
+                let shared = members_a.intersection(members_b).count();
                 if shared > 0 {
                     inter_edges.push(GraphInterEdge {
                         source_label: label_a.clone(),
@@ -2529,6 +2534,19 @@ impl EchoEngine {
         }
         tracing::info!(unlabeled, "Starting Tier 1 label bootstrap");
         let updated = store.bootstrap_tier1_labels(&self.prototypes);
+        updated
+    }
+
+    /// Reset and re-run Tier 1 labels on all entries.
+    ///
+    /// Useful after improving the entity extraction stopword list.
+    /// Clears existing Tier 1 labels and regenerates from scratch.
+    pub async fn rebootstrap_labels(&self) -> usize {
+        if !self.config.use_labels || !self.prototypes.is_initialized() {
+            return 0;
+        }
+        let mut store = self.store.write().await;
+        let updated = store.rebootstrap_tier1_labels(&self.prototypes);
         updated
     }
 

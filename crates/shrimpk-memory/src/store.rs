@@ -457,6 +457,23 @@ impl EchoStore {
         updated
     }
 
+    /// Reset all Tier 1 labels and re-bootstrap from scratch.
+    ///
+    /// Clears every entry's labels and label_version, rebuilds the label index,
+    /// then runs Tier 1 generation again. Useful after improving the stopword list.
+    pub fn rebootstrap_tier1_labels(&mut self, prototypes: &crate::labels::LabelPrototypes) -> usize {
+        // Clear label index
+        self.label_index.clear();
+        // Reset all entries
+        for entry in &mut self.entries {
+            if entry.label_version <= 1 {
+                entry.labels.clear();
+                entry.label_version = 0;
+            }
+        }
+        self.bootstrap_tier1_labels(prototypes)
+    }
+
     /// Save the store to a binary file.
     ///
     /// Uses the SHRM binary format: 64-byte header + flat f32 embedding array

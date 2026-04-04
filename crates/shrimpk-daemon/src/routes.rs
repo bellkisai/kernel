@@ -526,6 +526,18 @@ pub async fn consolidate(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
+/// POST /api/bootstrap — force re-bootstrap of Tier 1 labels.
+pub async fn bootstrap_labels(State(state): State<AppState>) -> Json<Value> {
+    let updated = state.engine.rebootstrap_labels().await;
+    if updated > 0 {
+        state.engine.persist().await.ok();
+    }
+    Json(json!({
+        "labels_updated": updated,
+        "persisted": updated > 0
+    }))
+}
+
 /// POST /api/memory_graph — show label-graph connections for a memory.
 pub async fn memory_graph(
     State(state): State<AppState>,

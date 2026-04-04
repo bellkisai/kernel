@@ -5,7 +5,9 @@
   "version": "0.1.0",
   "build": {
     "frontendDist": "./web/dist",
-    "devUrl": "http://localhost:5173"
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
@@ -19,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:11435; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
   }
 }

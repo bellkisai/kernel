@@ -365,11 +365,23 @@ pub fn generate_tier1_labels(
 
     // 3. Simple entity extraction — capitalized multi-char words not at sentence start
     // This is a lightweight heuristic; Tier 2 (GLiNER) will provide precise NER.
-    for (i, word) in content.split_whitespace().enumerate() {
-        if i == 0 {
-            continue;
-        } // skip sentence-start capitalization
+    let mut after_sentence_end = true; // first word is always sentence-start
+    for word in content.split_whitespace() {
         let clean = word.trim_matches(|c: char| !c.is_alphanumeric());
+
+        // Skip sentence-start capitalization (after . ! ? or start of text)
+        if after_sentence_end {
+            after_sentence_end = word.ends_with('.') || word.ends_with('!') || word.ends_with('?');
+            continue;
+        }
+        after_sentence_end = word.ends_with('.') || word.ends_with('!') || word.ends_with('?')
+            || word.ends_with(".\n") || word.ends_with(':');
+
+        // Strip possessive suffix ('s / 's)
+        let clean = clean
+            .strip_suffix("'s").or_else(|| clean.strip_suffix("\u{2019}s"))
+            .unwrap_or(clean);
+
         if clean.len() >= 2
             && clean.chars().next().is_some_and(|c| c.is_uppercase())
             && !is_common_word(clean)
@@ -467,53 +479,77 @@ fn push_unique(labels: &mut Vec<String>, label: &str) {
 }
 
 fn is_common_word(word: &str) -> bool {
+    // Strip embedded apostrophes/quotes to check the base form too.
+    // e.g. "I'm" → check both "I'm" and "Im"; "It's" → "It's" and "Its"
+    let base: String = word.chars().filter(|c| c.is_alphanumeric()).collect();
+
+    // Check the raw word OR the stripped base against the stoplist.
+    is_stopword(word) || is_stopword(&base)
+}
+
+fn is_stopword(word: &str) -> bool {
     matches!(
         word,
-        "I" | "The"
-            | "A"
-            | "An"
-            | "My"
-            | "We"
-            | "They"
-            | "He"
-            | "She"
-            | "It"
-            | "This"
-            | "That"
-            | "But"
-            | "And"
-            | "Or"
-            | "So"
-            | "If"
-            | "In"
-            | "On"
-            | "At"
-            | "To"
-            | "For"
-            | "Of"
-            | "With"
-            | "Is"
-            | "Was"
-            | "Are"
-            | "Am"
-            | "Do"
-            | "Did"
-            | "Has"
-            | "Have"
-            | "Had"
-            | "Not"
-            | "No"
-            | "Yes"
-            | "Just"
-            | "Now"
-            | "Then"
-            | "Also"
-            | "About"
-            | "After"
-            | "Before"
-            | "Because"
-            | "When"
-            | "Where"
+        // Pronouns & determiners
+        "I" | "Im" | "Ive" | "Ill" | "Id"
+            | "The" | "A" | "An" | "My" | "We" | "They" | "He" | "She" | "It" | "Its"
+            | "You" | "Your" | "Our" | "Their" | "His" | "Her"
+            // Demonstratives & relatives
+            | "This" | "That" | "Thats" | "These" | "Those" | "Which" | "Who" | "Whom"
+            // Conjunctions & prepositions
+            | "But" | "And" | "Or" | "So" | "If" | "In" | "On" | "At" | "To" | "For"
+            | "Of" | "With" | "By" | "As" | "From" | "Into" | "Up" | "Out" | "Over"
+            // Verbs & auxiliaries
+            | "Is" | "Was" | "Are" | "Am" | "Be" | "Been" | "Being"
+            | "Do" | "Did" | "Does" | "Doesnt" | "Dont" | "Didnt"
+            | "Has" | "Have" | "Had" | "Hasnt" | "Havent"
+            | "Can" | "Cant" | "Could" | "Couldnt"
+            | "Will" | "Wont" | "Would" | "Wouldnt"
+            | "Should" | "Shouldnt" | "May" | "Might" | "Must"
+            | "Not" | "No" | "Yes"
+            // Adverbs & fillers
+            | "Just" | "Now" | "Then" | "Also" | "About" | "After" | "Before"
+            | "Because" | "When" | "Where" | "How" | "What" | "Why"
+            | "Here" | "Heres" | "There" | "Theres"
+            | "However" | "Although" | "Though" | "While" | "Since" | "Until"
+            | "Still" | "Yet" | "Already" | "Really" | "Very" | "Well"
+            | "Actually" | "Basically" | "Generally" | "Usually" | "Often"
+            | "Some" | "Many" | "Most" | "Each" | "Every" | "Any" | "All"
+            | "Sure" | "Maybe" | "Perhaps" | "Overall" | "Certainly"
+            | "First" | "Second" | "Third" | "Next" | "Last"
+            | "New" | "Good" | "Great" | "Best" | "Better"
+            | "Try" | "Trying" | "Think" | "Thinking" | "Like" | "Looking"
+            | "Make" | "Making" | "Keep" | "Take" | "Taking" | "Get" | "Getting"
+            | "Let" | "Lets"
+            // Day abbreviations (from timestamp patterns like "[2023/05/20 (Sat)]")
+            | "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun"
+            | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday"
+            | "Saturday" | "Sunday"
+            // Month abbreviations
+            | "Jan" | "Feb" | "Mar" | "Apr" | "Jun" | "Jul" | "Aug"
+            | "Sep" | "Oct" | "Nov" | "Dec"
+            | "January" | "February" | "March" | "April" | "June" | "July"
+            | "August" | "September" | "October" | "November" | "December"
+            // Common response starters (AI assistant patterns)
+            | "Thank" | "Thanks" | "Please" | "Sorry" | "Note"
+            | "Remember" | "Consider" | "Check" | "See" | "Using"
+            // More contractions (stripped forms)
+            | "Youre" | "Youve" | "Youll" | "Youd"
+            | "Theyre" | "Theyve" | "Theyll"
+            | "Were" | "Weve" | "Hes" | "Shes" | "Whats" | "Whos"
+            // Additional common words that appear as false entities
+            | "Congratulations" | "Additionally" | "Furthermore" | "Moreover"
+            | "Specifically" | "Particularly" | "Especially" | "Absolutely"
+            | "Definitely" | "Exactly" | "Certainly" | "Probably" | "Possibly"
+            | "Start" | "Started" | "Starting" | "Choose" | "Chose" | "Chosen"
+            | "Use" | "Used" | "Uses" | "Time" | "Times"
+            | "Yeah" | "Okay" | "Ok" | "Oh" | "Ah" | "Hmm" | "Wow"
+            | "Today" | "Tomorrow" | "Yesterday" | "Tonight"
+            | "Important" | "Interesting" | "Helpful" | "Useful"
+            | "Need" | "Needs" | "Want" | "Wants" | "Feel" | "Feels"
+            | "Say" | "Said" | "Saying" | "Know" | "Knew" | "Known"
+            | "Found" | "Find" | "Finding" | "Work" | "Works" | "Working"
+            | "Explore" | "Exploring" | "Include" | "Including" | "Includes"
     )
 }
 

@@ -11,21 +11,26 @@ export function App() {
 
   // Check daemon health on mount, retry every 3s if offline
   useEffect(() => {
+    let cancelled = false;
     let interval: ReturnType<typeof setInterval>;
 
     const check = async () => {
       const online = await checkHealth();
+      if (cancelled) return;
       setDaemonOnline(online);
       setChecking(false);
       if (online) {
-        loadOverview();
         clearInterval(interval);
+        await loadOverview();
       }
     };
 
     check();
     interval = setInterval(check, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [loadOverview, setDaemonOnline]);
 
   if (checking) {

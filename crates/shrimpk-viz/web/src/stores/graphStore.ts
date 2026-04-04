@@ -45,6 +45,7 @@ interface GraphState {
   // UI state
   loading: boolean;
   error: string | null;
+  detailError: string | null;
   daemonOnline: boolean;
 
   // Actions
@@ -68,6 +69,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   activeCommunity: null,
   loading: false,
   error: null,
+  detailError: null,
   daemonOnline: false,
 
   setDaemonOnline: (online) => set({ daemonOnline: online }),
@@ -79,13 +81,18 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       const data = await fetchOverview();
       const graph = new Graph();
 
-      // Add cluster super-nodes
-      for (const cluster of data.clusters) {
+      // Add cluster super-nodes with initial positions
+      for (let i = 0; i < data.clusters.length; i++) {
+        const cluster = data.clusters[i];
+        const angle = (2 * Math.PI * i) / data.clusters.length;
+        const radius = 200;
         graph.addNode(cluster.label, {
           label: cluster.label,
+          x: Math.cos(angle) * radius + (Math.random() - 0.5) * 40,
+          y: Math.sin(angle) * radius + (Math.random() - 0.5) * 40,
           size: Math.max(8, Math.min(30, cluster.member_count / 2)),
           color: CLUSTER_COLOR,
-          type: "cluster",
+          nodeType: "cluster",
           memberCount: cluster.member_count,
           summary: cluster.summary,
         });
@@ -118,27 +125,48 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   drillIntoCommunity: async (label) => {
+    // Prevent duplicate concurrent calls
+    if (get().loading) return;
     set({ loading: true, error: null });
     try {
       // Find a member ID to anchor the query
       const cluster = get().clusters.find((c) => c.label === label);
-      if (!cluster || cluster.top_members.length === 0) {
-        set({ loading: false, error: "No members in cluster" });
+      if (!cluster) {
+        set({ loading: false, error: `Cluster "${label}" not found` });
+        return;
+      }
+      if (cluster.top_members.length === 0) {
+        set({ loading: false, error: `Cluster "${label}" has no members` });
         return;
       }
 
       const anchorId = cluster.top_members[0].id;
       const data = await fetchRelated(anchorId, label, 100);
+
+      if (!data.results || data.results.length === 0) {
+        set({
+          loading: false,
+          error: `No related memories found for cluster "${label}"`,
+        });
+        return;
+      }
+
       const graph = new Graph();
 
-      // Add member nodes
-      for (const result of data.results) {
+      // Add member nodes with initial positions
+      const count = data.results.length;
+      for (let i = 0; i < count; i++) {
+        const result = data.results[i];
         if (!graph.hasNode(result.memory_id)) {
+          const angle = (2 * Math.PI * i) / count;
+          const radius = 150 + Math.random() * 100;
           graph.addNode(result.memory_id, {
             label: result.content.slice(0, 40),
+            x: Math.cos(angle) * radius,
+            y: Math.sin(angle) * radius,
             size: 6 + result.final_score * 8,
-            color: "#71717a", // will be colored by category if available
-            type: "memory",
+            color: "#71717a",
+            nodeType: "memory",
             content: result.content,
             similarity: result.similarity,
           });
@@ -167,9 +195,11 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       // Add center node
       graph.addNode(data.node.id, {
         label: data.node.content_preview.slice(0, 40),
+        x: 0,
+        y: 0,
         size: 14,
         color: CATEGORY_COLORS[data.node.category] ?? "#71717a",
-        type: "memory",
+        nodeType: "memory",
         content: data.node.content_preview,
         importance: data.node.importance,
         category: data.node.category,
@@ -177,13 +207,18 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       });
 
       // Add neighbors
-      for (const neighbor of data.neighbors) {
+      for (let i = 0; i < data.neighbors.length; i++) {
+        const neighbor = data.neighbors[i];
         if (!graph.hasNode(neighbor.id)) {
+          const angle = (2 * Math.PI * i) / data.neighbors.length;
+          const radius = 100 + neighbor.weight * 200;
           graph.addNode(neighbor.id, {
             label: neighbor.content_preview.slice(0, 40),
+            x: Math.cos(angle) * radius,
+            y: Math.sin(angle) * radius,
             size: 4 + neighbor.weight * 10,
             color: "#71717a",
-            type: "memory",
+            nodeType: "memory",
             content: neighbor.content_preview,
             weight: neighbor.weight,
           });
@@ -212,15 +247,20 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   selectNode: async (id) => {
     if (!id) {
-      set({ selectedNode: null, selectedDetail: null });
+      set({ selectedNode: null, selectedDetail: null, detailError: null });
       return;
     }
-    set({ selectedNode: id });
+    set({ selectedNode: id, selectedDetail: null, detailError: null });
     try {
       const detail = await fetchMemoryGet(id);
-      set({ selectedDetail: detail });
-    } catch {
-      // Non-critical — selection still shows graph highlight
+      // Guard against stale response — only apply if this node is still selected
+      if (get().selectedNode === id) {
+        set({ selectedDetail: detail });
+      }
+    } catch (e) {
+      if (get().selectedNode === id) {
+        set({ detailError: (e as Error).message });
+      }
     }
   },
 
