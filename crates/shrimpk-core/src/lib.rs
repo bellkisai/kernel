@@ -23,4 +23,6 @@ pub use memory::{
     MemoryStats, Modality, QueryMode, SensitivityLevel, Triple, TriplePredicate, source_weight,
 };
 pub use pii::{PiiMatch, PiiType};
-pub use traits::{ConsolidationOutput, Consolidator, LabelSet, ModelBackend, Provider};
+pub use traits::{
+    ConsolidationOutput, Consolidator, ExtractedFact, FactType, LabelSet, ModelBackend, Provider,
+};

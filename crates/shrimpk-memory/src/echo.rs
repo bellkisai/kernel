@@ -1433,6 +1433,12 @@ impl EchoEngine {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        // 7d2. Subject diversity cap (KS67): prevent identity gravity well
+        {
+            let subject_map = build_subject_map(&store, &top);
+            enforce_subject_diversity(&mut results, &store, &subject_map, 3);
+        }
+
         // 7e. Optional reranker: reorder top-N by true relevance (KS23 LLM / KS24 cross-encoder)
         let effective_backend = self.config.effective_reranker_backend();
         if effective_backend != shrimpk_core::RerankerBackend::None && !results.is_empty() {
@@ -2668,6 +2674,85 @@ fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Build a map from parent memory IDs to subject strings from their children.
+/// Used for subject diversity enforcement in echo results (KS67).
+fn build_subject_map(store: &EchoStore, results: &[(usize, f32)]) -> std::collections::HashMap<MemoryId, Vec<String>> {
+    let mut subject_map: std::collections::HashMap<MemoryId, Vec<String>> = std::collections::HashMap::new();
+
+    for &(idx, _score) in results {
+        if let Some(entry) = store.entry_at(idx) {
+            // Collect subjects from this entry's children
+            let child_indices = store.children_of(&entry.id);
+            let mut subjects: Vec<String> = Vec::new();
+
+            for &child_idx in child_indices {
+                if let Some(child) = store.entry_at(child_idx) {
+                    for triple in &child.triples {
+                        subjects.push(triple.subject.clone());
+                    }
+                    // Fallback: extract subject from content
+                    if child.triples.is_empty() {
+                        let subj = crate::consolidation::extract_subject(&child.content);
+                        if !subj.is_empty() {
+                            subjects.push(subj);
+                        }
+                    }
+                }
+            }
+
+            // Also check the entry's own triples
+            for triple in &entry.triples {
+                subjects.push(triple.subject.clone());
+            }
+
+            subjects.sort();
+            subjects.dedup();
+
+            if !subjects.is_empty() {
+                subject_map.insert(entry.id.clone(), subjects);
+            }
+        }
+    }
+
+    subject_map
+}
+
+/// Cap results so no single subject entity dominates the result set (KS67).
+/// Unknown subjects (no triple data) go into an "_unknown" bucket with a more generous cap.
+fn enforce_subject_diversity(
+    results: &mut Vec<EchoResult>,
+    _store: &EchoStore,
+    subject_map: &std::collections::HashMap<MemoryId, Vec<String>>,
+    max_per_subject: usize,
+) {
+    let mut subject_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    results.retain(|r| {
+        let subjects = subject_map.get(&r.memory_id).cloned().unwrap_or_default();
+
+        if subjects.is_empty() {
+            // Unknown bucket -- cap at max_per_subject * 2
+            let count = subject_counts.entry("_unknown".to_string()).or_insert(0);
+            if *count >= max_per_subject * 2 {
+                return false;
+            }
+            *count += 1;
+            return true;
+        }
+
+        // Check if any subject is already at cap
+        let dominated = subjects.iter().any(|s| {
+            *subject_counts.get(s).unwrap_or(&0) >= max_per_subject
+        });
+        if dominated {
+            return false;
+        }
+        for s in &subjects {
+            *subject_counts.entry(s.clone()).or_insert(0) += 1;
+        }
+        true
+    });
 }
 
 #[cfg(test)]

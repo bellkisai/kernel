@@ -86,13 +86,48 @@ pub struct ModelCapabilities {
     pub is_local: bool,
 }
 
+/// Type classification for extracted facts (KS67 — schema-driven extraction).
+///
+/// Maps to distinct retrieval patterns and supersession thresholds.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FactType {
+    Personal,
+    Project,
+    Preference,
+    Goal,
+    Status,
+    Event,
+    Relationship,
+}
+
+/// A structured fact extracted from memory content (KS67 — schema-driven extraction).
+///
+/// Replaces the flat `Vec<String>` fact representation with typed, entity-aware facts.
+/// The LLM outputs these as JSON objects; the regex fallback produces legacy `String`
+/// facts wrapped in `ExtractedFact { text, subject: None, .. }`.
+#[derive(Debug, Clone, Default)]
+pub struct ExtractedFact {
+    /// The fact as a complete sentence (e.g., "Sam works at Anthropic").
+    pub text: String,
+    /// The primary entity this fact is about (e.g., "Sam", "MLTK").
+    pub subject: Option<String>,
+    /// Classification of the fact type.
+    pub fact_type: Option<FactType>,
+    /// LLM confidence in this fact (0.0–1.0).
+    pub confidence: Option<f32>,
+}
+
 /// Structured output from the combined fact extraction + label classification call (ADR-015 D7).
 #[derive(Debug, Clone, Default)]
 pub struct ConsolidationOutput {
-    /// Extracted atomic facts (same as extract_facts output).
+    /// Extracted atomic facts as plain strings (legacy path, backward compat).
     pub facts: Vec<String>,
     /// Semantic labels from LLM classification (Tier 2). None for legacy consolidators.
     pub labels: Option<LabelSet>,
+    /// Structured facts with subject, type, and confidence (KS67 v2 path).
+    /// When non-empty, these take precedence over `facts` for child creation.
+    pub structured_facts: Vec<ExtractedFact>,
 }
 
 /// Semantic labels extracted by the LLM during consolidation (ADR-015).
@@ -152,6 +187,7 @@ pub trait Consolidator: Send + Sync {
         ConsolidationOutput {
             facts: self.extract_facts(text, max_facts),
             labels: None,
+            ..Default::default()
         }
     }
 
@@ -193,6 +229,51 @@ mod tests {
         let output = ConsolidationOutput::default();
         assert!(output.facts.is_empty());
         assert!(output.labels.is_none());
+        assert!(output.structured_facts.is_empty());
+    }
+
+    // --- KS67: ExtractedFact + FactType ---
+
+    #[test]
+    fn fact_type_serde_roundtrip() {
+        let types = vec![
+            FactType::Personal, FactType::Project, FactType::Preference,
+            FactType::Goal, FactType::Status, FactType::Event, FactType::Relationship,
+        ];
+        for ft in &types {
+            let json = serde_json::to_string(ft).unwrap();
+            let deserialized: FactType = serde_json::from_str(&json).unwrap();
+            assert_eq!(&deserialized, ft);
+        }
+        // Verify lowercase serialization
+        assert_eq!(serde_json::to_string(&FactType::Personal).unwrap(), "\"personal\"");
+        assert_eq!(serde_json::to_string(&FactType::Project).unwrap(), "\"project\"");
+    }
+
+    #[test]
+    fn extracted_fact_default() {
+        let fact = ExtractedFact::default();
+        assert!(fact.text.is_empty());
+        assert!(fact.subject.is_none());
+        assert!(fact.fact_type.is_none());
+        assert!(fact.confidence.is_none());
+    }
+
+    #[test]
+    fn consolidation_output_with_structured_facts() {
+        let output = ConsolidationOutput {
+            facts: vec!["Sam works at Anthropic".into()],
+            structured_facts: vec![ExtractedFact {
+                text: "Sam works at Anthropic".into(),
+                subject: Some("Sam".into()),
+                fact_type: Some(FactType::Personal),
+                confidence: Some(0.95),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(output.structured_facts.len(), 1);
+        assert_eq!(output.structured_facts[0].subject, Some("Sam".into()));
+        assert_eq!(output.structured_facts[0].fact_type, Some(FactType::Personal));
     }
 
     #[test]

@@ -56,6 +56,19 @@ const DUPLICATE_SIMILARITY_THRESHOLD: f32 = 0.95;
 /// will have their echo_count reduced by 1.
 const ECHO_DECAY_DAYS: i64 = 30;
 
+/// Compute dynamic max_facts based on content length (KS67).
+///
+/// Short memories (<30 words) get 1-3 facts to avoid hallucinated noise.
+/// Longer memories scale up to 12 facts to capture dense content.
+pub(crate) fn dynamic_max_facts(content: &str) -> usize {
+    let word_count = content.split_whitespace().count();
+    if word_count < 30 {
+        (word_count / 10).max(1).min(3)
+    } else {
+        (word_count / 20).max(3).min(12)
+    }
+}
+
 /// Perform a full consolidation pass on the Echo Memory engine components.
 ///
 /// This is the core cleanup routine. It acquires mutable references to
@@ -212,7 +225,19 @@ pub fn consolidate(
                 None => continue,
             };
 
-            let facts = consolidator.extract_facts(&content, config.max_facts_per_memory);
+            // KS67: dynamic max_facts + combined extraction
+            let max_facts = dynamic_max_facts(&content);
+            let output = consolidator.extract_facts_and_labels(&content, max_facts);
+
+            // Build indexed fact list with optional structured metadata
+            let fact_entries: Vec<(String, Option<&shrimpk_core::ExtractedFact>)> = if !output.structured_facts.is_empty() {
+                output.structured_facts.iter().map(|sf| (sf.text.clone(), Some(sf))).collect()
+            } else {
+                output.facts.iter().map(|f| (f.clone(), None)).collect()
+            };
+
+            // Derive flat facts list for supersedes detection
+            let facts: Vec<String> = fact_entries.iter().map(|(t, _)| t.clone()).collect();
 
             if !facts.is_empty() {
                 result.facts_extracted += facts.len();
@@ -223,6 +248,49 @@ pub fn consolidate(
                 );
             }
 
+            // Apply Tier 2 labels from the same response when available (KS67)
+            if let Some(label_set) = &output.labels {
+                if config.use_labels {
+                    let mut new_labels: Vec<String> = Vec::new();
+                    for topic in &label_set.topic {
+                        new_labels.push(format!("topic:{}", topic.to_lowercase()));
+                    }
+                    for domain in &label_set.domain {
+                        new_labels.push(format!("domain:{}", domain.to_lowercase()));
+                    }
+                    for action in &label_set.action {
+                        new_labels.push(format!("action:{}", action.to_lowercase()));
+                    }
+                    if let Some(ref mt) = label_set.memtype {
+                        new_labels.push(format!("memtype:{}", mt.to_lowercase()));
+                    }
+                    if let Some(ref sent) = label_set.sentiment {
+                        new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
+                    }
+
+                    if !new_labels.is_empty() {
+                        if let Some(entry) = store.entry_at_mut(idx) {
+                            for label in &new_labels {
+                                if !entry.labels.contains(label) {
+                                    entry.labels.push(label.clone());
+                                }
+                            }
+                            entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
+                            entry.label_version = 2;
+                            result.labels_enriched += 1;
+                        }
+
+                        for label in &new_labels {
+                            store
+                                .label_index_mut()
+                                .entry(label.clone())
+                                .or_default()
+                                .push(idx as u32);
+                        }
+                    }
+                }
+            }
+
             // Create child memories if embedder is available
             if let Some(embedder) = embedder {
                 let parent_id = match store.entry_at(idx) {
@@ -230,20 +298,41 @@ pub fn consolidate(
                     None => continue,
                 };
 
-                for fact in &facts {
+                let mut fact_embeddings: Vec<Vec<f32>> = Vec::with_capacity(fact_entries.len());
+
+                for (fact_text, structured_fact) in &fact_entries {
                     let embedding = match embedder.lock() {
-                        Ok(mut e) => match e.embed_text(fact) {
+                        Ok(mut e) => match e.embed_text(fact_text) {
                             Ok(emb) => emb,
                             Err(err) => {
                                 tracing::debug!(error = %err, "Failed to embed fact, skipping");
+                                fact_embeddings.push(Vec::new());
                                 continue;
                             }
                         },
-                        Err(_) => continue,
+                        Err(_) => {
+                            fact_embeddings.push(Vec::new());
+                            continue;
+                        }
                     };
 
+                    // KS67: Skip near-duplicate children (cosine > 0.95 with existing child of same parent)
+                    let is_dup = (0..store.len()).any(|i| {
+                        store.entry_at(i).is_some_and(|e| e.parent_id.as_ref() == Some(&parent_id))
+                            && store.embedding_at(i).map_or(false, |existing| {
+                                crate::similarity::cosine_similarity(&embedding, existing) > 0.95
+                            })
+                    });
+                    if is_dup {
+                        tracing::debug!(fact = %fact_text, "KS67: skipping near-duplicate child");
+                        fact_embeddings.push(embedding);
+                        continue;
+                    }
+
+                    fact_embeddings.push(embedding.clone());
+
                     let mut child = shrimpk_core::MemoryEntry::new(
-                        fact.clone(),
+                        fact_text.clone(),
                         embedding.clone(),
                         "enrichment".to_string(),
                     );
@@ -255,9 +344,17 @@ pub fn consolidate(
                         child.created_at = parent_entry.created_at;
                     }
 
-                    // Extract structured triple if possible (KS61)
-                    if let Some(triple) = extract_triples(fact) {
+                    // Extract structured triple if possible (KS61 + KS67 subject fallback)
+                    if let Some(triple) = extract_triples(fact_text) {
                         child.triples.push(triple);
+                    } else if let Some(sf) = structured_fact {
+                        if let Some(ref subj) = sf.subject {
+                            child.triples.push(shrimpk_core::Triple {
+                                subject: subj.clone(),
+                                predicate: shrimpk_core::TriplePredicate::Custom(fact_text.to_string()),
+                                object: fact_text.to_string(),
+                            });
+                        }
                     }
 
                     let child_idx = store.add(child) as u32;
@@ -267,12 +364,12 @@ pub fn consolidate(
                     // This prevents child facts from polluting candidate retrieval.
                     if !config.child_rescue_only {
                         lsh.insert(child_idx, &embedding);
-                        bloom.insert_memory(fact);
+                        bloom.insert_memory(fact_text);
                     }
 
                     // Detect typed relationship from fact text and create
                     // a Hebbian edge between parent and child.
-                    if let Some(rel) = detect_relationship(fact) {
+                    if let Some(rel) = detect_relationship(fact_text) {
                         hebbian.co_activate_with_relationship(
                             idx as u32, child_idx,
                             0.5, // moderate strength for extracted relationships
@@ -290,7 +387,7 @@ pub fn consolidate(
 
                 // Step 5b: Detect Supersedes edges — when a new fact
                 // contradicts an older fact about the same entity.
-                let supersedes_pairs = detect_supersedes_pairs(store, &facts, idx);
+                let supersedes_pairs = detect_supersedes_pairs(store, &facts, &fact_embeddings, idx);
                 for (old_idx, new_fact_text) in &supersedes_pairs {
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -630,14 +727,21 @@ pub fn extract_triples(fact: &str) -> Option<shrimpk_core::Triple> {
 /// - Old: "Alex works at Google" + New: "Alex works at Meta" -> Supersedes
 /// - Old: "User lives in NYC" + New: "User moved to SF" -> Supersedes
 ///
+/// Uses two signals:
+/// 1. Regex-based relationship detection (same category, different entity = contradiction)
+/// 2. Embedding cosine similarity (KS67): >0.95 = near-identity skip, >0.80 + subject overlap = supersession
+///
 /// Returns `(old_memory_index, new_fact_text)` pairs for each detected supersession.
 fn detect_supersedes_pairs(
     store: &EchoStore,
     new_facts: &[String],
+    new_embeddings: &[Vec<f32>],
     _current_parent_idx: usize,
 ) -> Vec<(usize, String)> {
     let mut pairs = Vec::new();
+    let mut matched_old_indices = std::collections::HashSet::new();
 
+    // Pass 1: Regex-based relationship detection (original logic)
     for fact in new_facts {
         let new_rel = match detect_relationship(fact) {
             Some(r) => r,
@@ -672,9 +776,57 @@ fn detect_supersedes_pairs(
                 // Check if the facts share a subject (simple heuristic:
                 // first word or first two words overlap)
                 if subjects_overlap(fact, &entry.content) {
+                    matched_old_indices.insert(i);
                     pairs.push((i, fact.clone()));
                     break; // One supersession per fact is enough
                 }
+            }
+        }
+    }
+
+    // Pass 2: Embedding-based supersession (KS67)
+    // For facts that have pre-computed embeddings, check cosine similarity
+    // against existing enrichment children. This catches semantic supersession
+    // that regex patterns miss (e.g., paraphrased contradictions).
+    for (fact_idx, fact) in new_facts.iter().enumerate() {
+        let new_emb = match new_embeddings.get(fact_idx) {
+            Some(emb) if !emb.is_empty() => emb,
+            _ => continue,
+        };
+
+        for i in 0..store.len() {
+            // Skip if already matched by regex pass
+            if matched_old_indices.contains(&i) {
+                continue;
+            }
+
+            let entry = match store.entry_at(i) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            // Only compare against enrichment-sourced entries (child facts)
+            if entry.source != "enrichment" {
+                continue;
+            }
+
+            let existing_emb = match store.embedding_at(i) {
+                Some(emb) if !emb.is_empty() => emb,
+                _ => continue,
+            };
+
+            let cosine = crate::similarity::cosine_similarity(new_emb, existing_emb);
+
+            // >0.95: near-identity repeat — skip (not a supersession, just a duplicate)
+            if cosine > 0.95 {
+                continue;
+            }
+
+            // >0.80 + subject overlap: semantic supersession
+            if cosine > 0.80 && subjects_overlap(fact, &entry.content) {
+                matched_old_indices.insert(i);
+                pairs.push((i, fact.clone()));
+                break; // One supersession per fact is enough
             }
         }
     }
@@ -715,7 +867,7 @@ fn subjects_overlap(fact_a: &str, fact_b: &str) -> bool {
 /// - "Alex works at Google" -> "Alex"
 /// - "User prefers Rust" -> "User"
 /// - "The project is part of Bellkis" -> "project"
-fn extract_subject(fact: &str) -> String {
+pub(crate) fn extract_subject(fact: &str) -> String {
     let trimmed = fact.trim();
     // Skip common articles
     let without_article = trimmed
@@ -1483,7 +1635,7 @@ mod tests {
         // New facts extracted from a new parent
         let new_facts = vec!["Alex works at Meta".to_string()];
 
-        let pairs = detect_supersedes_pairs(&store, &new_facts, 2);
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 2);
         assert_eq!(pairs.len(), 1, "Should detect one supersession");
         assert_eq!(pairs[0].0, 0, "Should reference old child at index 0");
         assert_eq!(pairs[0].1, "Alex works at Meta");
@@ -1502,7 +1654,7 @@ mod tests {
         // New fact about a different person
         let new_facts = vec!["Sarah works at Meta".to_string()];
 
-        let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 1);
         assert!(
             pairs.is_empty(),
             "Different subjects should not trigger supersedes"
@@ -1522,7 +1674,7 @@ mod tests {
         // Same fact repeated — should NOT create a supersedes edge
         let new_facts = vec!["Alex works at Google".to_string()];
 
-        let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 1);
         assert!(pairs.is_empty(), "Same fact should not trigger supersedes");
     }
 
@@ -1561,5 +1713,37 @@ mod tests {
     #[test]
     fn extract_triples_none_for_plain_fact() {
         assert!(extract_triples("The sky is blue").is_none());
+    }
+
+    // ---- KS67: dynamic_max_facts tests ----
+
+    #[test]
+    fn dynamic_max_facts_5_words() {
+        let content = "one two three four five";
+        assert_eq!(dynamic_max_facts(content), 1);
+    }
+
+    #[test]
+    fn dynamic_max_facts_20_words() {
+        let content = (0..20).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        assert_eq!(dynamic_max_facts(&content), 2);
+    }
+
+    #[test]
+    fn dynamic_max_facts_50_words() {
+        let content = (0..50).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        assert_eq!(dynamic_max_facts(&content), 3);
+    }
+
+    #[test]
+    fn dynamic_max_facts_200_words() {
+        let content = (0..200).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        assert_eq!(dynamic_max_facts(&content), 10);
+    }
+
+    #[test]
+    fn dynamic_max_facts_300_words_caps_at_12() {
+        let content = (0..300).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        assert_eq!(dynamic_max_facts(&content), 12);
     }
 }
