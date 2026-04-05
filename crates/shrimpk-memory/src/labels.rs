@@ -374,12 +374,16 @@ pub fn generate_tier1_labels(
             after_sentence_end = word.ends_with('.') || word.ends_with('!') || word.ends_with('?');
             continue;
         }
-        after_sentence_end = word.ends_with('.') || word.ends_with('!') || word.ends_with('?')
-            || word.ends_with(".\n") || word.ends_with(':');
+        after_sentence_end = word.ends_with('.')
+            || word.ends_with('!')
+            || word.ends_with('?')
+            || word.ends_with(".\n")
+            || word.ends_with(':');
 
         // Strip possessive suffix ('s / 's)
         let clean = clean
-            .strip_suffix("'s").or_else(|| clean.strip_suffix("\u{2019}s"))
+            .strip_suffix("'s")
+            .or_else(|| clean.strip_suffix("\u{2019}s"))
             .unwrap_or(clean);
 
         if clean.len() >= 2
@@ -540,7 +544,7 @@ fn is_stopword(word: &str) -> bool {
             // Additional common words that appear as false entities
             | "Congratulations" | "Additionally" | "Furthermore" | "Moreover"
             | "Specifically" | "Particularly" | "Especially" | "Absolutely"
-            | "Definitely" | "Exactly" | "Certainly" | "Probably" | "Possibly"
+            | "Definitely" | "Exactly" | "Probably" | "Possibly"
             | "Start" | "Started" | "Starting" | "Choose" | "Chose" | "Chosen"
             | "Use" | "Used" | "Uses" | "Time" | "Times"
             | "Yeah" | "Okay" | "Ok" | "Oh" | "Ah" | "Hmm" | "Wow"

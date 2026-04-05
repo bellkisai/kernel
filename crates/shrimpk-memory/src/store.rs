@@ -82,7 +82,10 @@ impl EchoStore {
         for triple in &entry.triples {
             let subj = triple.subject.to_lowercase();
             let obj = triple.object.to_lowercase();
-            self.entity_index.entry(subj).or_default().push(index as u32);
+            self.entity_index
+                .entry(subj)
+                .or_default()
+                .push(index as u32);
             self.entity_index.entry(obj).or_default().push(index as u32);
         }
         self.entries.push(entry);
@@ -99,12 +102,12 @@ impl EchoStore {
         let last_index = self.entries.len() - 1;
 
         // Clean parent-children index before swap_remove
-        if let Some(ref pid) = self.entries[index].parent_id {
-            if let Some(children) = self.parent_children.get_mut(pid) {
-                children.retain(|&i| i != index);
-                if children.is_empty() {
-                    self.parent_children.remove(pid);
-                }
+        if let Some(ref pid) = self.entries[index].parent_id
+            && let Some(children) = self.parent_children.get_mut(pid)
+        {
+            children.retain(|&i| i != index);
+            if children.is_empty() {
+                self.parent_children.remove(pid);
             }
         }
         self.parent_children.remove(&self.entries[index].id);
@@ -461,7 +464,10 @@ impl EchoStore {
     ///
     /// Clears every entry's labels and label_version, rebuilds the label index,
     /// then runs Tier 1 generation again. Useful after improving the stopword list.
-    pub fn rebootstrap_tier1_labels(&mut self, prototypes: &crate::labels::LabelPrototypes) -> usize {
+    pub fn rebootstrap_tier1_labels(
+        &mut self,
+        prototypes: &crate::labels::LabelPrototypes,
+    ) -> usize {
         // Clear label index
         self.label_index.clear();
         // Reset all entries
@@ -1161,20 +1167,14 @@ mod tests {
         let mut store = EchoStore::new();
         // Add entries with labels
         for i in 0..6 {
-            let mut entry = MemoryEntry::new(
-                format!("career memory {i}"),
-                vec![0.1; 384],
-                "test".into(),
-            );
+            let mut entry =
+                MemoryEntry::new(format!("career memory {i}"), vec![0.1; 384], "test".into());
             entry.labels = vec!["career".into()];
             store.add(entry);
         }
         for i in 0..2 {
-            let mut entry = MemoryEntry::new(
-                format!("hobby memory {i}"),
-                vec![0.2; 384],
-                "test".into(),
-            );
+            let mut entry =
+                MemoryEntry::new(format!("hobby memory {i}"), vec![0.2; 384], "test".into());
             entry.labels = vec!["hobby".into()];
             store.add(entry);
         }

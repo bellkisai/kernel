@@ -30,19 +30,27 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Exclude platform-specific crates that need system libs not available in CI
+      - run: cargo clippy --workspace --all-targets --exclude shrimpk-tray --exclude shrimpk-viz -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            exclude_crates: --exclude shrimpk-tray --exclude shrimpk-viz
+          - os: macos-latest
+            exclude_crates: --exclude shrimpk-tray --exclude shrimpk-viz
+          - os: windows-latest
+            exclude_crates: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      - run: cargo test --workspace ${{ matrix.exclude_crates }}
         # Integration tests requiring fastembed model download are #[ignore]
         # and will not run in CI. This is by design.
 
@@ -54,4 +62,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --workspace --no-deps
+      # Exclude platform-specific crates that need system libs not available in CI
+      - run: cargo doc --workspace --no-deps --exclude shrimpk-tray --exclude shrimpk-viz

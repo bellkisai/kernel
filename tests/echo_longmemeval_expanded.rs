@@ -2340,6 +2340,7 @@ fn longmemeval_expanded_combined_scorecard() {
     // =====================================================================
     println!("\n--- Category 4: Knowledge Update (9 tests, isolated engines) ---");
 
+    #[allow(clippy::type_complexity)]
     let ku_tests: Vec<(&str, &str, &[&str], Vec<(&str, &str)>)> = vec![
         (
             "KU-1: Job Change",
@@ -2547,6 +2548,7 @@ fn longmemeval_expanded_combined_scorecard() {
     // =====================================================================
     println!("\n--- Category 5: Preference Tracking (10 tests, isolated engines) ---");
 
+    #[allow(clippy::type_complexity)]
     let pt_tests: Vec<(&str, &str, &[&str], Vec<(&str, &str)>)> = vec![
         (
             "PT-1: IDE",

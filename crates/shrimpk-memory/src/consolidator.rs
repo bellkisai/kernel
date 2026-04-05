@@ -10,7 +10,9 @@
 //!
 //! Use [`from_config`] to construct the right provider from [`EchoConfig`].
 
-use shrimpk_core::{ConsolidationOutput, Consolidator, EchoConfig, ExtractedFact, FactType, LabelSet};
+use shrimpk_core::{
+    ConsolidationOutput, Consolidator, EchoConfig, ExtractedFact, FactType, LabelSet,
+};
 
 // ---- Shared prompt + parser ----
 
@@ -113,7 +115,8 @@ fn combined_enrichment_prompt(max_facts: usize) -> String {
          - Use consistent entity names across facts (don't mix \"Sam\" and \"the user\" for the same person)\n\
          - Include facts about ALL entities mentioned, not just the primary one\n\
          - For temporal facts, include time references (e.g., \"since 2023\", \"last month\")\n\
-         - Each fact must be self-contained and understandable without context\n\n\
+         - Each fact must be self-contained and understandable without context\n\
+         - Use simple present/past tense with these verb patterns: \"works at\", \"lives in\", \"moved to\", \"joined\", \"uses\", \"prefers\", \"switched to\"\n\n\
          2. \"labels\": Classify based on what this memory IS ABOUT, not just the words it contains.\n\
             A memory about attending a class implies learning/education.\n\
             A memory about running implies exercise/health.\n\n\
@@ -134,7 +137,7 @@ fn combined_enrichment_prompt(max_facts: usize) -> String {
 /// Handles two fact formats:
 /// - v2 (KS67): facts as array of objects with text/subject/type/confidence
 /// - v1 (legacy): facts as array of strings
-/// Falls back to plain-text parsing for non-JSON responses.
+///   Falls back to plain-text parsing for non-JSON responses.
 fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutput {
     // Try to parse as JSON first
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
@@ -145,7 +148,8 @@ fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutp
             for item in arr.iter().take(max_facts) {
                 if let Some(obj) = item.as_object() {
                     // v2 path: structured fact object
-                    let text = obj.get("text")
+                    let text = obj
+                        .get("text")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .trim()
@@ -154,20 +158,21 @@ fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutp
                         continue;
                     }
 
-                    let subject = obj.get("subject")
+                    let subject = obj
+                        .get("subject")
                         .and_then(|v| v.as_str())
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty());
 
-                    let fact_type = obj.get("type")
-                        .and_then(|v| v.as_str())
-                        .and_then(|s| {
-                            serde_json::from_value::<FactType>(
-                                serde_json::Value::String(s.to_lowercase())
-                            ).ok()
-                        });
+                    let fact_type = obj.get("type").and_then(|v| v.as_str()).and_then(|s| {
+                        serde_json::from_value::<FactType>(serde_json::Value::String(
+                            s.to_lowercase(),
+                        ))
+                        .ok()
+                    });
 
-                    let confidence = obj.get("confidence")
+                    let confidence = obj
+                        .get("confidence")
                         .and_then(|v| v.as_f64())
                         .map(|c| c as f32);
 
@@ -201,7 +206,11 @@ fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutp
             None
         };
 
-        ConsolidationOutput { facts, labels, structured_facts }
+        ConsolidationOutput {
+            facts,
+            labels,
+            structured_facts,
+        }
     } else {
         // Fallback: parse as plain text facts (backward compat with non-JSON responses)
         ConsolidationOutput {
@@ -338,7 +347,11 @@ impl Consolidator for OllamaConsolidator {
         let json: serde_json::Value = resp.body_mut().read_json().ok()?;
         let content = json["message"]["content"].as_str()?;
         let trimmed = content.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
 }
 
@@ -547,16 +560,20 @@ mod tests {
 
     #[test]
     fn from_config_none_returns_noop() {
-        let mut config = EchoConfig::default();
-        config.consolidation_provider = "none".to_string();
+        let config = EchoConfig {
+            consolidation_provider: "none".to_string(),
+            ..Default::default()
+        };
         let c = from_config(&config);
         assert_eq!(c.name(), "noop");
     }
 
     #[test]
     fn from_config_unknown_returns_noop() {
-        let mut config = EchoConfig::default();
-        config.consolidation_provider = "banana".to_string();
+        let config = EchoConfig {
+            consolidation_provider: "banana".to_string(),
+            ..Default::default()
+        };
         let c = from_config(&config);
         assert_eq!(c.name(), "noop");
     }
@@ -570,27 +587,33 @@ mod tests {
 
     #[test]
     fn from_config_http_with_consent() {
-        let mut config = EchoConfig::default();
-        config.consolidation_provider = "http".to_string();
-        config.consolidation_consent_given = true;
+        let config = EchoConfig {
+            consolidation_provider: "http".to_string(),
+            consolidation_consent_given: true,
+            ..Default::default()
+        };
         let c = from_config(&config);
         assert_eq!(c.name(), "http");
     }
 
     #[test]
     fn from_config_http_without_consent_falls_back_to_noop() {
-        let mut config = EchoConfig::default();
-        config.consolidation_provider = "http".to_string();
-        config.consolidation_consent_given = false;
+        let config = EchoConfig {
+            consolidation_provider: "http".to_string(),
+            consolidation_consent_given: false,
+            ..Default::default()
+        };
         let c = from_config(&config);
         assert_eq!(c.name(), "noop");
     }
 
     #[test]
     fn from_config_openai_without_consent_falls_back_to_noop() {
-        let mut config = EchoConfig::default();
-        config.consolidation_provider = "openai".to_string();
-        config.consolidation_consent_given = false;
+        let config = EchoConfig {
+            consolidation_provider: "openai".to_string(),
+            consolidation_consent_given: false,
+            ..Default::default()
+        };
         let c = from_config(&config);
         assert_eq!(c.name(), "noop");
     }
@@ -751,7 +774,10 @@ mod tests {
         let sf = &output.structured_facts[0];
         assert_eq!(sf.text, "The system is running Linux");
         assert_eq!(sf.subject, Some("system".into()));
-        assert!(sf.fact_type.is_none(), "Unknown type 'infrastructure' should be None");
+        assert!(
+            sf.fact_type.is_none(),
+            "Unknown type 'infrastructure' should be None"
+        );
         assert_eq!(sf.confidence, Some(0.7));
     }
 
@@ -780,18 +806,42 @@ mod tests {
         let text = "The user uses Neovim\nThe user lives in Berlin";
         let output = parse_combined_response(text, 10);
         assert_eq!(output.facts.len(), 2);
-        assert!(output.structured_facts.is_empty(), "Fallback should have no structured_facts");
+        assert!(
+            output.structured_facts.is_empty(),
+            "Fallback should have no structured_facts"
+        );
     }
 
     #[test]
     fn combined_prompt_v2_contains_structured_instructions() {
         let prompt = combined_enrichment_prompt(5);
-        assert!(prompt.contains("\"subject\""), "Prompt should mention subject field");
-        assert!(prompt.contains("\"type\""), "Prompt should mention type field");
-        assert!(prompt.contains("\"confidence\""), "Prompt should mention confidence field");
-        assert!(prompt.contains("consistent entity names"), "Prompt should mention entity consistency");
-        assert!(prompt.contains("ALL entities"), "Prompt should mention multi-entity extraction");
-        assert!(prompt.contains("temporal facts"), "Prompt should mention temporal references");
-        assert!(!prompt.contains("The user"), "v2 prompt should not require 'The user' prefix");
+        assert!(
+            prompt.contains("\"subject\""),
+            "Prompt should mention subject field"
+        );
+        assert!(
+            prompt.contains("\"type\""),
+            "Prompt should mention type field"
+        );
+        assert!(
+            prompt.contains("\"confidence\""),
+            "Prompt should mention confidence field"
+        );
+        assert!(
+            prompt.contains("consistent entity names"),
+            "Prompt should mention entity consistency"
+        );
+        assert!(
+            prompt.contains("ALL entities"),
+            "Prompt should mention multi-entity extraction"
+        );
+        assert!(
+            prompt.contains("temporal facts"),
+            "Prompt should mention temporal references"
+        );
+        assert!(
+            !prompt.contains("The user"),
+            "v2 prompt should not require 'The user' prefix"
+        );
     }
 }

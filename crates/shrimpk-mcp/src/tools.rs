@@ -496,9 +496,7 @@ pub async fn handle_entity_search(
     Ok(serde_json::to_string_pretty(&output).unwrap_or_else(|_| "[]".into()))
 }
 
-pub async fn handle_community_summaries(
-    engine: &Arc<EchoEngine>,
-) -> Result<String, String> {
+pub async fn handle_community_summaries(engine: &Arc<EchoEngine>) -> Result<String, String> {
     let summaries = engine.community_summaries().await;
     if summaries.is_empty() {
         return Ok(json!({"summaries": [], "count": 0, "note": "No community summaries yet. They are generated during consolidation for label clusters with enough members."}).to_string());
@@ -806,9 +804,7 @@ pub fn handle_config_set(args: &Value) -> Result<String, String> {
         "use_power_law_decay" => {
             fc.use_power_law_decay = Some(value.parse().map_err(|_| "Invalid boolean")?)
         }
-        "use_importance" => {
-            fc.use_importance = Some(value.parse().map_err(|_| "Invalid boolean")?)
-        }
+        "use_importance" => fc.use_importance = Some(value.parse().map_err(|_| "Invalid boolean")?),
         "use_actr_activation" => {
             fc.use_actr_activation = Some(value.parse().map_err(|_| "Invalid boolean")?)
         }

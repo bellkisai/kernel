@@ -283,7 +283,7 @@ pub fn rerank_with_llm(
 
     // Parse the ranking: "3, 1, 5, 2, 4" -> [3, 1, 5, 2, 4]
     let indices: Vec<usize> = content
-        .split(|c: char| c == ',' || c == ' ' || c == '\n')
+        .split([',', ' ', '\n'])
         .filter_map(|s| s.trim().parse::<usize>().ok())
         .filter(|&i| i >= 1 && i <= results.len())
         .map(|i| i - 1) // 1-indexed to 0-indexed

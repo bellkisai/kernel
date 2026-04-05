@@ -31,6 +31,7 @@ fn micro_config(data_dir: PathBuf) -> EchoConfig {
         similarity_threshold: 0.15,
         max_echo_results: 10,
         ram_budget_bytes: 100_000_000,
+        supersedes_demotion: 0.15,
         data_dir,
         embedding_dim: 384,
         ..Default::default()
@@ -43,18 +44,26 @@ fn micro_config(data_dir: PathBuf) -> EchoConfig {
 
 fn top_n_contains(results: &[EchoResult], n: usize, needle: &str) -> bool {
     let lc = needle.to_lowercase();
-    results.iter().take(n).any(|r| r.content.to_lowercase().contains(&lc))
+    results
+        .iter()
+        .take(n)
+        .any(|r| r.content.to_lowercase().contains(&lc))
 }
 
 fn any_needle_in_top_n(results: &[EchoResult], n: usize, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| top_n_contains(results, n, needle))
+    needles
+        .iter()
+        .any(|needle| top_n_contains(results, n, needle))
 }
 
 fn print_results(label: &str, results: &[EchoResult]) {
     println!("\n{label}:");
     for (i, r) in results.iter().enumerate().take(5) {
-        println!("  #{}: sim={:.3} score={:.3} {}",
-            i + 1, r.similarity, r.final_score,
+        println!(
+            "  #{}: sim={:.3} score={:.3} {}",
+            i + 1,
+            r.similarity,
+            r.final_score,
             &r.content[..r.content.len().min(100)]
         );
     }
@@ -206,108 +215,132 @@ fn seed_micro_dataset(engine: &EchoEngine, rt: &tokio::runtime::Runtime) {
 fn run_benchmark(engine: &EchoEngine, rt: &tokio::runtime::Runtime) -> (usize, usize) {
     let questions: Vec<(&str, &[&str], &str)> = vec![
         // --- Information Extraction (5) ---
-        ("What is Sam's job? Where does Sam work?",
-         &["Stripe", "senior engineer", "billing"],
-         "IE-1: Current job"),
-
-        ("Does Sam have any pets?",
-         &["golden retriever", "Pixel"],
-         "IE-2: Pet recall"),
-
-        ("Where did Sam go to university?",
-         &["University of British Columbia", "UBC"],
-         "IE-3: Education"),
-
-        ("What food allergies or dietary restrictions does Sam have?",
-         &["vegetarian", "cats", "allergic"],
-         "IE-4: Health/diet"),
-
-        ("What martial art does Sam practice?",
-         &["jiu-jitsu", "Brazilian", "Gracie"],
-         "IE-5: Hobby recall"),
-
+        (
+            "What is Sam's job? Where does Sam work?",
+            &["Stripe", "senior engineer", "billing"],
+            "IE-1: Current job",
+        ),
+        (
+            "Does Sam have any pets?",
+            &["golden retriever", "Pixel"],
+            "IE-2: Pet recall",
+        ),
+        (
+            "Where did Sam go to university?",
+            &["University of British Columbia", "UBC"],
+            "IE-3: Education",
+        ),
+        (
+            "What food allergies or dietary restrictions does Sam have?",
+            &["vegetarian", "cats", "allergic"],
+            "IE-4: Health/diet",
+        ),
+        (
+            "What martial art does Sam practice?",
+            &["jiu-jitsu", "Brazilian", "Gracie"],
+            "IE-5: Hobby recall",
+        ),
         // --- Knowledge Update / Supersession (5) ---
-        ("Where does Sam work now?",
-         &["Stripe"],  // NOT Shopify
-         "KU-1: Current job (supersession)"),
-
-        ("Where does Sam live currently?",
-         &["San Francisco"],  // NOT Oakland
-         "KU-2: Current location (supersession)"),
-
-        ("What IDE does Sam use?",
-         &["Neovim", "LazyVim"],  // NOT VS Code
-         "KU-3: Current IDE (preference evolution)"),
-
-        ("What OS does Sam run on personal machines?",
-         &["Arch Linux", "Hyprland"],  // NOT Windows
-         "KU-4: Current OS (preference evolution)"),
-
-        ("What is Sam currently working on at ShrimPK?",
-         &["KS67", "fact extraction", "schema"],
-         "KU-5: Recent status"),
-
+        (
+            "Where does Sam work now?",
+            &["Stripe"], // NOT Shopify
+            "KU-1: Current job (supersession)",
+        ),
+        (
+            "Where does Sam live currently?",
+            &["San Francisco"], // NOT Oakland
+            "KU-2: Current location (supersession)",
+        ),
+        (
+            "What IDE does Sam use?",
+            &["Neovim", "LazyVim"], // NOT VS Code
+            "KU-3: Current IDE (preference evolution)",
+        ),
+        (
+            "What OS does Sam run on personal machines?",
+            &["Arch Linux", "Hyprland"], // NOT Windows
+            "KU-4: Current OS (preference evolution)",
+        ),
+        (
+            "What is Sam currently working on at ShrimPK?",
+            &["KS67", "fact extraction", "schema"],
+            "KU-5: Recent status",
+        ),
         // --- Temporal Reasoning (3) ---
-        ("When did Sam start at the current job?",
-         &["Stripe", "just started", "last month"],
-         "TR-1: Job start timing"),
-
-        ("Where has Sam traveled recently?",
-         &["Tokyo", "November", "Shinjuku"],
-         "TR-2: Recent travel"),
-
-        ("What upcoming deadlines does Sam have?",
-         &["patent", "April 15", "ROSCon", "April 26"],
-         "TR-3: Future deadlines"),
-
+        (
+            "When did Sam start at the current job?",
+            &["Stripe", "just started", "last month"],
+            "TR-1: Job start timing",
+        ),
+        (
+            "Where has Sam traveled recently?",
+            &["Tokyo", "November", "Shinjuku"],
+            "TR-2: Recent travel",
+        ),
+        (
+            "What upcoming deadlines does Sam have?",
+            &["patent", "April 15", "ROSCon", "April 26"],
+            "TR-3: Future deadlines",
+        ),
         // --- Multi-Entity / Project Facts (4) ---
-        ("What is ShrimPK? What tech stack does it use?",
-         &["Rust", "memory kernel", "fastembed"],
-         "ME-1: Project ShrimPK"),
-
-        ("What is MLTK? What is it built with?",
-         &["VS Code", "React", "TypeScript", "extension"],
-         "ME-2: Project MLTK"),
-
-        ("What programming languages does Sam prefer?",
-         &["Rust", "Go"],
-         "ME-3: Language preferences"),
-
-        ("What databases does Sam use?",
-         &["PostgreSQL", "ClickHouse"],
-         "ME-4: Database preferences"),
-
+        (
+            "What is ShrimPK? What tech stack does it use?",
+            &["Rust", "memory kernel", "fastembed"],
+            "ME-1: Project ShrimPK",
+        ),
+        (
+            "What is MLTK? What is it built with?",
+            &["VS Code", "React", "TypeScript", "extension"],
+            "ME-2: Project MLTK",
+        ),
+        (
+            "What programming languages does Sam prefer?",
+            &["Rust", "Go"],
+            "ME-3: Language preferences",
+        ),
+        (
+            "What databases does Sam use?",
+            &["PostgreSQL", "ClickHouse"],
+            "ME-4: Database preferences",
+        ),
         // --- Preference Tracking (3) ---
-        ("How does Sam make coffee?",
-         &["pour-over", "Hario", "V60"],
-         "PT-1: Coffee method"),
-
-        ("Who is Sam's partner?",
-         &["Jordan", "UX designer", "Figma"],
-         "PT-2: Relationship"),
-
-        ("What language is Sam learning?",
-         &["Japanese", "JLPT", "N3"],
-         "PT-3: Language learning"),
+        (
+            "How does Sam make coffee?",
+            &["pour-over", "Hario", "V60"],
+            "PT-1: Coffee method",
+        ),
+        (
+            "Who is Sam's partner?",
+            &["Jordan", "UX designer", "Figma"],
+            "PT-2: Relationship",
+        ),
+        (
+            "What language is Sam learning?",
+            &["Japanese", "JLPT", "N3"],
+            "PT-3: Language learning",
+        ),
     ];
 
     let mut passed = 0;
     let total = questions.len();
 
     for (query, needles, label) in &questions {
-        let results = rt.block_on(async {
-            engine.echo(query, 5).await.expect("echo")
-        });
+        let results = rt.block_on(async { engine.echo(query, 5).await.expect("echo") });
 
         let hit = any_needle_in_top_n(&results, 3, needles);
-        if hit { passed += 1; }
+        if hit {
+            passed += 1;
+        }
 
         let status = if hit { "PASS" } else { "FAIL" };
         print_results(&format!("[{status}] {label} — \"{query}\""), &results);
     }
 
     println!("\n============================================================");
-    println!("MICRO-BENCHMARK RESULT: {passed}/{total} ({:.0}%)", passed as f64 / total as f64 * 100.0);
+    println!(
+        "MICRO-BENCHMARK RESULT: {passed}/{total} ({:.0}%)",
+        passed as f64 / total as f64 * 100.0
+    );
     println!("============================================================");
 
     (passed, total)
@@ -352,9 +385,7 @@ fn micro_benchmark_with_consolidation() {
     // Run consolidation (enriches all 20 memories with the v2 extraction pipeline)
     println!("\n=== Running consolidation (this takes ~2 min with Ollama) ===");
     let start = std::time::Instant::now();
-    let consol_result = rt.block_on(async {
-        engine.consolidate_now().await
-    });
+    let consol_result = rt.block_on(async { engine.consolidate_now().await });
     let elapsed = start.elapsed();
     println!("Consolidation completed in {:.1}s", elapsed.as_secs_f64());
     println!("Result: {:?}", consol_result);
@@ -363,9 +394,7 @@ fn micro_benchmark_with_consolidation() {
     // (MAX_ENRICHMENTS_PER_CYCLE = 10, so 20 memories need 2 passes)
     println!("\n=== Running second consolidation pass ===");
     let start2 = std::time::Instant::now();
-    let consol_result2 = rt.block_on(async {
-        engine.consolidate_now().await
-    });
+    let consol_result2 = rt.block_on(async { engine.consolidate_now().await });
     let elapsed2 = start2.elapsed();
     println!("Second pass completed in {:.1}s", elapsed2.as_secs_f64());
     println!("Result: {:?}", consol_result2);
@@ -375,5 +404,8 @@ fn micro_benchmark_with_consolidation() {
     drop(rt);
 
     println!("\nWith consolidation: {passed}/{total}");
-    assert!(passed >= 15, "KS67 target: at least 75% (15/20). Got {passed}/20");
+    assert!(
+        passed >= 15,
+        "KS67 target: at least 75% (15/20). Got {passed}/20"
+    );
 }

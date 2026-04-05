@@ -237,8 +237,13 @@ mod tests {
     #[test]
     fn fact_type_serde_roundtrip() {
         let types = vec![
-            FactType::Personal, FactType::Project, FactType::Preference,
-            FactType::Goal, FactType::Status, FactType::Event, FactType::Relationship,
+            FactType::Personal,
+            FactType::Project,
+            FactType::Preference,
+            FactType::Goal,
+            FactType::Status,
+            FactType::Event,
+            FactType::Relationship,
         ];
         for ft in &types {
             let json = serde_json::to_string(ft).unwrap();
@@ -246,8 +251,14 @@ mod tests {
             assert_eq!(&deserialized, ft);
         }
         // Verify lowercase serialization
-        assert_eq!(serde_json::to_string(&FactType::Personal).unwrap(), "\"personal\"");
-        assert_eq!(serde_json::to_string(&FactType::Project).unwrap(), "\"project\"");
+        assert_eq!(
+            serde_json::to_string(&FactType::Personal).unwrap(),
+            "\"personal\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FactType::Project).unwrap(),
+            "\"project\""
+        );
     }
 
     #[test]
@@ -273,7 +284,10 @@ mod tests {
         };
         assert_eq!(output.structured_facts.len(), 1);
         assert_eq!(output.structured_facts[0].subject, Some("Sam".into()));
-        assert_eq!(output.structured_facts[0].fact_type, Some(FactType::Personal));
+        assert_eq!(
+            output.structured_facts[0].fact_type,
+            Some(FactType::Personal)
+        );
     }
 
     #[test]

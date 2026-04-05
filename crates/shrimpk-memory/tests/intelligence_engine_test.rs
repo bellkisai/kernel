@@ -114,7 +114,7 @@ fn power_law_decay_basic() {
     );
 
     // Retention should always be in [0, 1]
-    assert!(r_365d >= 0.0 && r_365d <= 1.0, "Out of range: {r_365d}");
+    assert!((0.0..=1.0).contains(&r_365d), "Out of range: {r_365d}");
 
     // Edge case: zero stability should return 0.0
     let r_zero_stability = power_law_decay(86400.0, 0.0);
@@ -201,11 +201,11 @@ fn actr_activation_increases_with_echoes() {
 
     // Activation should be within the clamped range [-6, 4]
     assert!(
-        act_0 >= -6.0 && act_0 <= 4.0,
+        (-6.0..=4.0).contains(&act_0),
         "Out of clamped range: {act_0}"
     );
     assert!(
-        act_20 >= -6.0 && act_20 <= 4.0,
+        (-6.0..=4.0).contains(&act_20),
         "Out of clamped range: {act_20}"
     );
 }

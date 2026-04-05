@@ -107,7 +107,10 @@ fn detect_query_entities(
     }
     let words: Vec<String> = query
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| c.is_ascii_punctuation()).to_lowercase())
+        .map(|w| {
+            w.trim_matches(|c: char| c.is_ascii_punctuation())
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect();
 
@@ -146,8 +149,7 @@ fn reciprocal_rank_fusion(
     k: usize,
 ) -> Vec<(usize, f32)> {
     // Accumulate RRF score + track cosine similarity per item
-    let mut scores: std::collections::HashMap<usize, (f64, f32)> =
-        std::collections::HashMap::new();
+    let mut scores: std::collections::HashMap<usize, (f64, f32)> = std::collections::HashMap::new();
 
     for (rank, &(idx, cosine)) in vector.iter().enumerate() {
         let entry = scores.entry(idx).or_insert((0.0, cosine));
@@ -165,7 +167,10 @@ fn reciprocal_rank_fusion(
         .collect();
     merged.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    merged.into_iter().map(|(idx, cosine, _)| (idx, cosine)).collect()
+    merged
+        .into_iter()
+        .map(|(idx, cosine, _)| (idx, cosine))
+        .collect()
 }
 
 impl EchoEngine {
@@ -237,7 +242,10 @@ impl EchoEngine {
             bloom_dirty: Mutex::new(false),
             pii_filter,
             reformulator,
-            hebbian: RwLock::new(HebbianGraph::new(config.hebbian_half_life_secs, config.hebbian_prune_threshold)),
+            hebbian: RwLock::new(HebbianGraph::new(
+                config.hebbian_half_life_secs,
+                config.hebbian_prune_threshold,
+            )),
             config,
             stats: Mutex::new(EchoStats::default()),
             consolidation_handle: Mutex::new(None),
@@ -948,7 +956,9 @@ impl EchoEngine {
             QueryMode::Auto => {
                 // Run text channel (mut needed when vision feature merges results)
                 #[allow(unused_mut)]
-                let mut results = self.echo_text(query, max_results, label_filter, None).await?;
+                let mut results = self
+                    .echo_text(query, max_results, label_filter, None)
+                    .await?;
 
                 // Run vision channel if available
                 #[cfg(feature = "vision")]
@@ -1169,13 +1179,12 @@ impl EchoEngine {
                     let mut graph_with_cosine: Vec<(usize, f32)> = Vec::new();
                     for &(node_id, _weight) in &graph_results {
                         let idx = node_id as usize;
-                        if !ranked_set.contains(&idx) {
-                            if let Some(emb) = embeddings.get(idx) {
-                                let sim =
-                                    similarity::cosine_similarity(&query_embedding, emb);
-                                if sim > near_miss_threshold {
-                                    graph_with_cosine.push((idx, sim));
-                                }
+                        if !ranked_set.contains(&idx)
+                            && let Some(emb) = embeddings.get(idx)
+                        {
+                            let sim = similarity::cosine_similarity(&query_embedding, emb);
+                            if sim > near_miss_threshold {
+                                graph_with_cosine.push((idx, sim));
                             }
                         }
                     }
@@ -1208,7 +1217,8 @@ impl EchoEngine {
 
         let threshold = self.config.similarity_threshold;
         let child_rescue_only = self.config.child_rescue_only;
-        let (pipe_a, pipe_b): (Vec<(usize, f32)>, Vec<(usize, f32)>) =
+        type ScoredIndices = Vec<(usize, f32)>;
+        let (pipe_a, pipe_b): (ScoredIndices, ScoredIndices) =
             all_ranked.into_iter().partition(|&(idx, score)| {
                 if score < threshold {
                     return false; // below threshold → Pipe B
@@ -1216,7 +1226,7 @@ impl EchoEngine {
                 // When child_rescue_only is true, children go to Pipe B even if above threshold.
                 // They can still rescue parents but never appear in direct ranking.
                 if child_rescue_only {
-                    store.entry_at(idx).map_or(true, |e| e.parent_id.is_none())
+                    store.entry_at(idx).is_none_or(|e| e.parent_id.is_none())
                 } else {
                     true
                 }
@@ -1327,7 +1337,9 @@ impl EchoEngine {
                                         }
                                     }
                                     crate::hebbian::RelationshipType::CoActivation => {}
-                                    _ => { boost += 0.05; }
+                                    _ => {
+                                        boost += 0.05;
+                                    }
                                 }
                             }
                         }
@@ -1349,7 +1361,9 @@ impl EchoEngine {
                                         }
                                     }
                                     crate::hebbian::RelationshipType::CoActivation => {}
-                                    _ => { boost += 0.05; }
+                                    _ => {
+                                        boost += 0.05;
+                                    }
                                 }
                             }
                         }
@@ -1441,17 +1455,18 @@ impl EchoEngine {
 
         // 7e. Optional reranker: reorder top-N by true relevance (KS23 LLM / KS24 cross-encoder)
         let effective_backend = self.config.effective_reranker_backend();
-        if effective_backend != shrimpk_core::RerankerBackend::None && !results.is_empty() {
-            if let Some(reranked) = crate::reranker::rerank(&self.config, query, &results) {
-                tracing::debug!(
-                    target: "shrimpk::audit",
-                    backend = %effective_backend,
-                    original_top1 = %results.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
-                    reranked_top1 = %reranked.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
-                    "Reranker applied"
-                );
-                results = reranked;
-            }
+        if effective_backend != shrimpk_core::RerankerBackend::None
+            && !results.is_empty()
+            && let Some(reranked) = crate::reranker::rerank(&self.config, query, &results)
+        {
+            tracing::debug!(
+                target: "shrimpk::audit",
+                backend = %effective_backend,
+                original_top1 = %results.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
+                reranked_top1 = %reranked.first().map(|r| &r.content[..r.content.len().min(40)]).unwrap_or(""),
+                "Reranker applied"
+            );
+            results = reranked;
         }
 
         // 7f. Community summary fallback (KS64): if top result is weak,
@@ -1467,36 +1482,35 @@ impl EchoEngine {
                         if !summary.embedding.is_empty() {
                             let sim =
                                 similarity::cosine_similarity(&query_embedding, &summary.embedding);
-                            if best_summary.map_or(true, |(_, _, s)| sim > s) {
-                                best_summary =
-                                    Some((&summary.label, &summary.summary, sim));
+                            if best_summary.is_none_or(|(_, _, s)| sim > s) {
+                                best_summary = Some((&summary.label, &summary.summary, sim));
                             }
                         }
                     }
-                    if let Some((label, text, sim)) = best_summary {
-                        if sim > 0.1 {
-                            tracing::debug!(
-                                label = %label,
-                                sim,
-                                top_score,
-                                "Community summary fallback injected"
-                            );
-                            results.push(EchoResult {
-                                memory_id: MemoryId::new(),
-                                content: format!("[{}] {}", label, truncate_content(text, 200)),
-                                similarity: sim,
-                                final_score: sim as f64,
-                                source: "community_summary".to_string(),
-                                echoed_at: Utc::now(),
-                                modality: Modality::Text,
-                                labels: vec![label.to_string()],
-                            });
-                            results.sort_by(|a, b| {
-                                b.final_score
-                                    .partial_cmp(&a.final_score)
-                                    .unwrap_or(std::cmp::Ordering::Equal)
-                            });
-                        }
+                    if let Some((label, text, sim)) = best_summary
+                        && sim > 0.1
+                    {
+                        tracing::debug!(
+                            label = %label,
+                            sim,
+                            top_score,
+                            "Community summary fallback injected"
+                        );
+                        results.push(EchoResult {
+                            memory_id: MemoryId::new(),
+                            content: format!("[{}] {}", label, truncate_content(text, 200)),
+                            similarity: sim,
+                            final_score: sim as f64,
+                            source: "community_summary".to_string(),
+                            echoed_at: Utc::now(),
+                            modality: Modality::Text,
+                            labels: vec![label.to_string()],
+                        });
+                        results.sort_by(|a, b| {
+                            b.final_score
+                                .partial_cmp(&a.final_score)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
                     }
                 }
             }
@@ -2028,7 +2042,10 @@ impl EchoEngine {
         }
 
         // Embed the entity name for ranking
-        let mut embedder = self.embedder.lock().map_err(|e| ShrimPKError::Memory(format!("lock: {e}")))?;
+        let mut embedder = self
+            .embedder
+            .lock()
+            .map_err(|e| ShrimPKError::Memory(format!("lock: {e}")))?;
         let query_emb = embedder.embed_text(entity)?;
         drop(embedder);
 
@@ -2142,7 +2159,11 @@ impl EchoEngine {
             })
             .collect();
 
-        neighbors.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+        neighbors.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         neighbors.truncate(max_results);
 
         Ok(GraphNeighborsResult { node, neighbors })
@@ -2210,7 +2231,8 @@ impl EchoEngine {
                             source: a.id.clone(),
                             target: b.id.clone(),
                             weight: decayed_weight,
-                            relationship: edge.and_then(|e| e.relationship.as_ref().map(|r| format!("{r:?}"))),
+                            relationship: edge
+                                .and_then(|e| e.relationship.as_ref().map(|r| format!("{r:?}"))),
                         });
                     }
                 }
@@ -2246,7 +2268,7 @@ impl EchoEngine {
             for (label, member_count) in &label_clusters {
                 let summary = store.get_summary(label).map(|s| s.summary.clone());
 
-                let member_indices = store.query_labels(&[label.clone()]);
+                let member_indices = store.query_labels(std::slice::from_ref(label));
                 let mut members_with_importance: Vec<(usize, f32)> = member_indices
                     .iter()
                     .filter_map(|&idx| {
@@ -2255,9 +2277,8 @@ impl EchoEngine {
                             .map(|e| (idx as usize, e.importance))
                     })
                     .collect();
-                members_with_importance.sort_by(|a, b| {
-                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                members_with_importance
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let top_members: Vec<GraphNodePreview> = members_with_importance
                     .iter()
@@ -2271,8 +2292,7 @@ impl EchoEngine {
                     .collect();
 
                 // Cache member set for inter-edge computation (after lock release)
-                member_sets
-                    .push((label.clone(), member_indices.into_iter().collect()));
+                member_sets.push((label.clone(), member_indices.into_iter().collect()));
 
                 clusters.push(GraphCluster {
                     label: label.clone(),
@@ -2408,7 +2428,9 @@ impl EchoEngine {
         let mut loaded_store = EchoStore::load(&store_path)?;
 
         // Load community summaries sidecar (KS64)
-        if let Err(e) = crate::persistence::load_community_summaries(&mut loaded_store, &config.data_dir) {
+        if let Err(e) =
+            crate::persistence::load_community_summaries(&mut loaded_store, &config.data_dir)
+        {
             tracing::warn!(error = %e, "Failed to load community summaries, continuing without");
         }
 
@@ -2430,9 +2452,17 @@ impl EchoEngine {
 
         // Load Hebbian graph from disk
         let hebbian_path = config.data_dir.join("hebbian.json");
-        let hebbian = HebbianGraph::load(&hebbian_path, config.hebbian_half_life_secs, config.hebbian_prune_threshold).unwrap_or_else(|e| {
+        let hebbian = HebbianGraph::load(
+            &hebbian_path,
+            config.hebbian_half_life_secs,
+            config.hebbian_prune_threshold,
+        )
+        .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "Failed to load Hebbian graph, starting fresh");
-            HebbianGraph::new(config.hebbian_half_life_secs, config.hebbian_prune_threshold)
+            HebbianGraph::new(
+                config.hebbian_half_life_secs,
+                config.hebbian_prune_threshold,
+            )
         });
 
         // Rebuild vision LSH from loaded entries' vision_embedding fields
@@ -2539,8 +2569,7 @@ impl EchoEngine {
             return 0;
         }
         tracing::info!(unlabeled, "Starting Tier 1 label bootstrap");
-        let updated = store.bootstrap_tier1_labels(&self.prototypes);
-        updated
+        store.bootstrap_tier1_labels(&self.prototypes)
     }
 
     /// Reset and re-run Tier 1 labels on all entries.
@@ -2552,8 +2581,7 @@ impl EchoEngine {
             return 0;
         }
         let mut store = self.store.write().await;
-        let updated = store.rebootstrap_tier1_labels(&self.prototypes);
-        updated
+        store.rebootstrap_tier1_labels(&self.prototypes)
     }
 
     /// Run a consolidation pass immediately, acquiring all necessary locks.
@@ -2678,8 +2706,12 @@ fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
 
 /// Build a map from parent memory IDs to subject strings from their children.
 /// Used for subject diversity enforcement in echo results (KS67).
-fn build_subject_map(store: &EchoStore, results: &[(usize, f32)]) -> std::collections::HashMap<MemoryId, Vec<String>> {
-    let mut subject_map: std::collections::HashMap<MemoryId, Vec<String>> = std::collections::HashMap::new();
+fn build_subject_map(
+    store: &EchoStore,
+    results: &[(usize, f32)],
+) -> std::collections::HashMap<MemoryId, Vec<String>> {
+    let mut subject_map: std::collections::HashMap<MemoryId, Vec<String>> =
+        std::collections::HashMap::new();
 
     for &(idx, _score) in results {
         if let Some(entry) = store.entry_at(idx) {
@@ -2727,7 +2759,8 @@ fn enforce_subject_diversity(
     subject_map: &std::collections::HashMap<MemoryId, Vec<String>>,
     max_per_subject: usize,
 ) {
-    let mut subject_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut subject_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     results.retain(|r| {
         let subjects = subject_map.get(&r.memory_id).cloned().unwrap_or_default();
 
@@ -2742,9 +2775,9 @@ fn enforce_subject_diversity(
         }
 
         // Check if any subject is already at cap
-        let dominated = subjects.iter().any(|s| {
-            *subject_counts.get(s).unwrap_or(&0) >= max_per_subject
-        });
+        let dominated = subjects
+            .iter()
+            .any(|s| *subject_counts.get(s).unwrap_or(&0) >= max_per_subject);
         if dominated {
             return false;
         }
