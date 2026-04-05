@@ -772,9 +772,7 @@ fn detect_supersedes_pairs(
     let mut matched_old_indices = std::collections::HashSet::new();
 
     // Get current parent's ID so we can skip sibling children from same extraction
-    let current_parent_id = store
-        .entry_at(current_parent_idx)
-        .map(|e| e.id.clone());
+    let current_parent_id = store.entry_at(current_parent_idx).map(|e| e.id.clone());
 
     // Pass 1: Regex-based relationship detection (original logic)
     // Limited to single-valued relationship categories (WorksAt, LivesIn) where
@@ -806,10 +804,10 @@ fn detect_supersedes_pairs(
 
             // Skip siblings from the same parent — they're from the same
             // extraction run and shouldn't supersede each other
-            if let Some(ref pid) = entry.parent_id {
-                if current_parent_id.as_ref() == Some(pid) {
-                    continue;
-                }
+            if let Some(ref pid) = entry.parent_id
+                && current_parent_id.as_ref() == Some(pid)
+            {
+                continue;
             }
 
             // Detect the relationship in the old fact
