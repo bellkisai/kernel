@@ -453,6 +453,10 @@ pub fn consolidate(
                     {
                         // Find the old parent's store index
                         for i in 0..store.len() {
+                            // Never create a Supersedes self-edge
+                            if i == idx {
+                                continue;
+                            }
                             if let Some(e) = store.entry_at(i)
                                 && e.id == *old_parent_id
                             {
@@ -767,6 +771,11 @@ fn detect_supersedes_pairs(
     let mut pairs = Vec::new();
     let mut matched_old_indices = std::collections::HashSet::new();
 
+    // Get current parent's ID so we can skip sibling children from same extraction
+    let current_parent_id = store
+        .entry_at(current_parent_idx)
+        .map(|e| e.id.clone());
+
     // Pass 1: Regex-based relationship detection (original logic)
     // Limited to single-valued relationship categories (WorksAt, LivesIn) where
     // a person can only have one current value. PrefersTool/PartOf are multi-valued
@@ -793,6 +802,14 @@ fn detect_supersedes_pairs(
             // Only compare against enrichment-sourced entries (child facts)
             if entry.source != "enrichment" {
                 continue;
+            }
+
+            // Skip siblings from the same parent — they're from the same
+            // extraction run and shouldn't supersede each other
+            if let Some(ref pid) = entry.parent_id {
+                if current_parent_id.as_ref() == Some(pid) {
+                    continue;
+                }
             }
 
             // Detect the relationship in the old fact
