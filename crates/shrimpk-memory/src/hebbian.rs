@@ -215,7 +215,7 @@ impl HebbianGraph {
 
     /// Record co-activation of two memories with a typed relationship.
     ///
-    /// Same as [`co_activate`] but also sets the relationship type on the edge.
+    /// Same as [`HebbianGraph::co_activate`] but also sets the relationship type on the edge.
     /// If the edge already exists, the relationship is updated (overwritten).
     pub fn co_activate_with_relationship(
         &mut self,

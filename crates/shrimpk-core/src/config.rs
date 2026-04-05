@@ -220,7 +220,7 @@ pub struct EchoConfig {
     /// Weight of importance boost in scoring formula (0.0 = consolidation only).
     #[serde(default)]
     pub importance_weight: f32,
-    /// Enable full ACT-R retrieval history (Vec<u32> ring buffer). Future.
+    /// Enable full ACT-R retrieval history (`Vec<u32>` ring buffer). Future.
     #[serde(default)]
     pub use_full_actr_history: bool,
 
