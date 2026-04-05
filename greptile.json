@@ -1,0 +1,91 @@
+{
+  "comment": "AI review by Greptile — focus: correctness, safety, API stability",
+  "strictness": 2,
+  "triggerOnUpdates": true,
+  "triggerOnDrafts": false,
+  "statusCheck": true,
+  "fixWithAI": false,
+  "commentTypes": ["logic", "syntax"],
+  "instructions": "Rust workspace (11 crates). Focus on: memory safety, async correctness (Tokio), public API semver stability, and panic paths (unwrap/expect outside tests). Do not flag formatting — rustfmt + clippy handle it. This is a push-based AI memory kernel; correctness of embedding math, LSH bucket hashing, Hebbian decay, and FSRS scheduling is high priority.",
+  "ignorePatterns": "target/**\n*.lock\n**/.cargo/**\n.github/**\ndist/**\n*.tar.gz\n*.zip\nSHA256SUMS\n*.profraw\n*.profdata\nbenches/criterion/**",
+  "directoryRules": {
+    "crates/shrimpk-core/**": {
+      "strictness": 2,
+      "commentTypes": ["logic", "syntax"],
+      "instructions": "Shared type definitions. Any public API change risks breaking semver. Flag without mercy."
+    },
+    "crates/shrimpk-memory/**": {
+      "strictness": 2,
+      "commentTypes": ["logic", "syntax"],
+      "instructions": "Main engine. Flag: RwLock held across await, incorrect float comparisons, off-by-one in LSH/FSRS math, panics."
+    },
+    "crates/shrimpk-daemon/**": {
+      "strictness": 2,
+      "commentTypes": ["logic", "syntax"],
+      "instructions": "axum server. Check: error handler coverage, response shape consistency, missing auth."
+    },
+    "crates/shrimpk-mcp/**": {
+      "strictness": 2,
+      "commentTypes": ["logic"],
+      "instructions": "MCP stdio server. Flag JSON-RPC protocol violations and panics."
+    },
+    "crates/shrimpk-context/**": {
+      "strictness": 2,
+      "commentTypes": ["logic", "syntax"],
+      "instructions": "Token-budgeted context assembly. Flag off-by-one token counts and budget overflow."
+    },
+    "crates/shrimpk-python/**": {
+      "strictness": 2,
+      "commentTypes": ["logic", "syntax"],
+      "instructions": "PyO3 bindings. All Results must map to PyErr — flag any unwrap() or panic path."
+    },
+    "tests/**": {
+      "strictness": 3,
+      "commentTypes": ["logic"],
+      "instructions": "Test files only. Flag logic bugs causing false results; ignore style."
+    },
+    "crates/shrimpk-ros2/**": {
+      "strictness": 3,
+      "commentTypes": ["logic"],
+      "instructions": "Stub crate. Flag only panics or compilation errors."
+    },
+    "crates/shrimpk-security/**": {
+      "strictness": 3,
+      "commentTypes": ["logic"],
+      "instructions": "PII stub. Flag only incorrect regex patterns that miss PII."
+    }
+  },
+  "customContext": {
+    "rules": [
+      {
+        "rule": "Do not use unwrap() or expect() outside of #[cfg(test)] blocks",
+        "scope": ["crates/**/*.rs"]
+      },
+      {
+        "rule": "Do not hold RwLock or Mutex guards across an .await point",
+        "scope": ["crates/shrimpk-daemon/**", "crates/shrimpk-mcp/**", "crates/shrimpk-memory/**"]
+      },
+      {
+        "rule": "Public types in shrimpk-core must derive Serialize and Deserialize consistently — flag missing impls",
+        "scope": ["crates/shrimpk-core/**"]
+      },
+      {
+        "rule": "New public APIs require a corresponding integration test",
+        "scope": ["crates/shrimpk-memory/**", "crates/shrimpk-core/**"]
+      }
+    ],
+    "files": [
+      {"path": "CLAUDE.md", "scope": ["**"]}
+    ],
+    "other": [
+      {
+        "context": "Apache 2.0 Rust workspace. shrimpk-core=shared types, shrimpk-memory=EchoEngine+embedder+LSH+Hebbian+FSRS, shrimpk-daemon=axum HTTP, shrimpk-mcp=MCP stdio, shrimpk-context=token-budgeted prompts, shrimpk-router=cascade routing, shrimpk-python=PyO3, shrimpk-ros2=stub, shrimpk-kernel=facade re-export.",
+        "scope": ["**"]
+      },
+      {
+        "context": "Benchmarks use criterion. Benchmark harness boilerplate (black_box, criterion_group!, criterion_main!) is intentional — do not flag as dead code or unused imports.",
+        "scope": ["benches/**", "tests/echo_micro_benchmark.rs"]
+      }
+    ]
+  }
+}
