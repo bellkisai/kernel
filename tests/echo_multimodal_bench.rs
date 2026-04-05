@@ -592,12 +592,11 @@ fn get_rss_mb(_pid: u32) -> f64 {
     {
         if let Ok(status) = std::fs::read_to_string(format!("/proc/{_pid}/status")) {
             for line in status.lines() {
-                if line.starts_with("VmRSS:") {
-                    if let Some(kb_str) = line.split_whitespace().nth(1) {
-                        if let Ok(kb) = kb_str.parse::<f64>() {
-                            return kb / 1024.0;
-                        }
-                    }
+                if line.starts_with("VmRSS:")
+                    && let Some(kb_str) = line.split_whitespace().nth(1)
+                    && let Ok(kb) = kb_str.parse::<f64>()
+                {
+                    return kb / 1024.0;
                 }
             }
         }
