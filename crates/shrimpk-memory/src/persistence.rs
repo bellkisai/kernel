@@ -331,10 +331,10 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     // No-op on Windows (NTFS handles directory entry durability automatically).
     #[cfg(unix)]
     {
-        if let Some(parent) = path.parent() {
-            if let Ok(dir) = std::fs::File::open(parent) {
-                let _ = dir.sync_all();
-            }
+        if let Some(parent) = path.parent()
+            && let Ok(dir) = std::fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
         }
     }
 
