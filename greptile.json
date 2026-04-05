@@ -6,7 +6,7 @@
   "statusCheck": true,
   "fixWithAI": false,
   "commentTypes": ["logic", "syntax"],
-  "instructions": "Rust workspace (11 crates). Focus on: memory safety, async correctness (Tokio), public API semver stability, and panic paths (unwrap/expect outside tests). Do not flag formatting — rustfmt + clippy handle it. This is a push-based AI memory kernel; correctness of embedding math, LSH bucket hashing, Hebbian decay, and FSRS scheduling is high priority.",
+  "instructions": "Rust workspace (11 crates). Focus on: memory safety, async correctness (Tokio), public API semver stability, and panic paths (unwrap/expect outside tests). Do not flag formatting — rustfmt + clippy handle it. This is a push-based AI memory kernel; correctness of embedding math, LSH bucket hashing, Hebbian decay, and FSRS scheduling is high priority.\n\nREVIEW COMMENT FORMAT: An AI coding agent (Claude Code) will read your comments to fix issues. Make each comment self-contained so the agent does not need to re-fetch the PR diff. Always include: (1) the exact file path and line number(s), (2) the problematic code snippet, (3) what is wrong and why, (4) a concrete fix with corrected code. Use fenced Rust code blocks for suggested fixes. Keep each comment actionable in one shot — no vague guidance like 'consider refactoring'.",
   "ignorePatterns": "target/**\n*.lock\n**/.cargo/**\n.github/**\ndist/**\n*.tar.gz\n*.zip\nSHA256SUMS\n*.profraw\n*.profdata\nbenches/criterion/**",
   "directoryRules": {
     "crates/shrimpk-core/**": {

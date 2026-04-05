@@ -227,7 +227,8 @@ pub fn consolidate(
             };
 
             // KS67: dynamic max_facts + combined extraction
-            let max_facts = dynamic_max_facts(&content);
+            // Use dynamic scaling but cap at the operator-configured limit
+            let max_facts = dynamic_max_facts(&content).min(config.max_facts_per_memory);
             let output = consolidator.extract_facts_and_labels(&content, max_facts);
 
             tracing::info!(
@@ -916,7 +917,9 @@ fn detect_supersedes_pairs(
 
                 let (old_category, _old_entity) = categorize_relationship(&old_rel);
 
-                if new_category == old_category && new_rel != old_rel {
+                if new_category == old_category && new_rel != old_rel
+                    && subjects_overlap(fact, sentence)
+                {
                     matched_old_indices.insert(i);
                     pairs.push((i, fact.clone()));
                     break;
