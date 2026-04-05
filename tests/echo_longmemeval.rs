@@ -1873,8 +1873,6 @@ fn longmemeval_consolidated_scorecard() {
         ] {
             engine.store(text, "profile").await.expect("store");
         }
-
-        ()
     });
 
     // Run consolidation OUTSIDE block_on (uses its own thread+runtime)
@@ -1953,8 +1951,6 @@ fn longmemeval_consolidated_scorecard() {
         ] {
             engine2.store(text, "profile").await.expect("store");
         }
-
-        ()
     });
     println!("\nRunning MSR consolidation...");
     run_full_consolidation(&engine2);
@@ -2017,8 +2013,6 @@ fn longmemeval_consolidated_scorecard() {
         engine3.store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new").await.unwrap();
         engine3.store("Python is my go-to programming language for everything", "old").await.unwrap();
         engine3.store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new").await.unwrap();
-
-        ()
     });
     println!("\nRunning KU consolidation...");
     run_full_consolidation(&engine3);
@@ -2067,8 +2061,6 @@ fn longmemeval_consolidated_scorecard() {
         engine4.store("I use Windows 11 on all my machines for gaming and development", "m1").await.unwrap();
         engine4.store("I dual-boot Linux Mint alongside Windows now for dev work", "m3").await.unwrap();
         engine4.store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "m6").await.unwrap();
-
-        ()
     });
     println!("\nRunning PT consolidation...");
     run_full_consolidation(&engine4);
@@ -2547,8 +2539,6 @@ fn longmemeval_hyde_scorecard() {
         ] {
             engine.store(text, "profile").await.expect("store");
         }
-
-        ()
     });
 
     // Run consolidation OUTSIDE block_on (uses its own thread+runtime)
@@ -2624,8 +2614,6 @@ fn longmemeval_hyde_scorecard() {
         ] {
             engine2.store(text, "profile").await.expect("store");
         }
-
-        ()
     });
     println!("\nRunning MSR consolidation...");
     run_full_consolidation(&engine2);
@@ -2688,8 +2676,6 @@ fn longmemeval_hyde_scorecard() {
         engine3.store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new").await.unwrap();
         engine3.store("Python is my go-to programming language for everything", "old").await.unwrap();
         engine3.store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new").await.unwrap();
-
-        ()
     });
     println!("\nRunning KU consolidation...");
     run_full_consolidation(&engine3);
@@ -2738,8 +2724,6 @@ fn longmemeval_hyde_scorecard() {
         engine4.store("I use Windows 11 on all my machines for gaming and development", "m1").await.unwrap();
         engine4.store("I dual-boot Linux Mint alongside Windows now for dev work", "m3").await.unwrap();
         engine4.store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "m6").await.unwrap();
-
-        ()
     });
     println!("\nRunning PT consolidation...");
     run_full_consolidation(&engine4);
@@ -2875,7 +2859,6 @@ fn longmemeval_combined_scorecard() {
         ] {
             engine.store(text, "profile").await.expect("store");
         }
-        ()
     });
     println!("Running consolidation...");
     run_full_consolidation(&engine);
@@ -2935,7 +2918,6 @@ fn longmemeval_combined_scorecard() {
         ] {
             engine2.store(text, "profile").await.expect("store");
         }
-        ()
     });
     println!("\nRunning MSR consolidation...");
     run_full_consolidation(&engine2);
@@ -2996,7 +2978,6 @@ fn longmemeval_combined_scorecard() {
         engine3.store("I just moved to Portland, Oregon and I'm renting a house in the Pearl District", "new").await.unwrap();
         engine3.store("Python is my go-to programming language for everything", "old").await.unwrap();
         engine3.store("I've switched from Python to Rust as my main language. The type system and performance are worth the learning curve", "new").await.unwrap();
-        ()
     });
     println!("\nRunning KU consolidation...");
     run_full_consolidation(&engine3);
@@ -3043,7 +3024,6 @@ fn longmemeval_combined_scorecard() {
         engine4.store("I use Windows 11 on all my machines for gaming and development", "m1").await.unwrap();
         engine4.store("I dual-boot Linux Mint alongside Windows now for dev work", "m3").await.unwrap();
         engine4.store("I've gone all-in on Arch Linux with Hyprland compositor, retired Windows completely", "m6").await.unwrap();
-        ()
     });
     println!("\nRunning PT consolidation...");
     run_full_consolidation(&engine4);

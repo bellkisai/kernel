@@ -220,7 +220,7 @@ pub struct EchoConfig {
     /// Weight of importance boost in scoring formula (0.0 = consolidation only).
     #[serde(default)]
     pub importance_weight: f32,
-    /// Enable full ACT-R retrieval history (Vec<u32> ring buffer). Future.
+    /// Enable full ACT-R retrieval history (`Vec<u32>` ring buffer). Future.
     #[serde(default)]
     pub use_full_actr_history: bool,
 
@@ -354,7 +354,7 @@ fn default_enrichment_model() -> String {
 }
 
 fn default_max_facts_per_memory() -> usize {
-    5
+    12
 }
 
 fn default_consolidation_provider() -> String {
@@ -388,7 +388,7 @@ impl Default for EchoConfig {
             recency_weight: default_recency_weight(),
             child_rescue_only: default_child_rescue_only(),
             child_memory_penalty: 0.0,
-            supersedes_demotion: 0.0,
+            supersedes_demotion: 0.15,
             fact_extraction_prompt: None,
             query_expansion_enabled: false,
             reranker_enabled: false,
@@ -832,10 +832,10 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     if let Ok(v) = std::env::var("SHRIMPK_RERANKER") {
         config.reranker_enabled = v.parse().unwrap_or(false);
     }
-    if let Ok(v) = std::env::var("SHRIMPK_RERANKER_BACKEND") {
-        if let Ok(backend) = v.parse::<RerankerBackend>() {
-            config.reranker_backend = backend;
-        }
+    if let Ok(v) = std::env::var("SHRIMPK_RERANKER_BACKEND")
+        && let Ok(backend) = v.parse::<RerankerBackend>()
+    {
+        config.reranker_backend = backend;
     }
     if let Some(v) = env_f64("SHRIMPK_HEBBIAN_HALF_LIFE")? {
         config.hebbian_half_life_secs = v;

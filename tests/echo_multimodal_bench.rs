@@ -6,6 +6,9 @@
 //!     cargo test --test echo_multimodal_bench -- --nocapture --test-threads=1
 //!     cargo test --test echo_multimodal_bench --features shrimpk-memory/vision -- --ignored --nocapture --test-threads=1
 
+#![allow(unexpected_cfgs)]
+
+#[allow(unused_imports)]
 use shrimpk_core::{EchoConfig, EchoResult, Modality, QueryMode};
 use shrimpk_memory::EchoEngine;
 use std::path::PathBuf;
@@ -28,6 +31,7 @@ fn make_config(data_dir: PathBuf) -> EchoConfig {
     }
 }
 
+#[allow(dead_code)]
 fn top_n_contains(results: &[EchoResult], n: usize, needle: &str) -> bool {
     let lc = needle.to_lowercase();
     results
@@ -497,6 +501,7 @@ fn mixed_modal_throughput() {
 // ---------------------------------------------------------------------------
 
 /// Create a minimal PNG image with a solid color.
+#[allow(dead_code)]
 fn create_test_png(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     let mut buf = Vec::new();
     // PNG signature
@@ -511,6 +516,7 @@ fn create_test_png(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     write_png_chunk(&mut buf, b"IHDR", &ihdr_data);
     // IDAT chunk (uncompressed, minimal)
     let mut raw = Vec::new();
+    #[allow(clippy::same_item_push)]
     for _ in 0..height {
         raw.push(0); // filter byte: None
         for _ in 0..width {
@@ -540,6 +546,7 @@ fn create_test_png(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     buf
 }
 
+#[allow(dead_code)]
 fn write_png_chunk(buf: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
     buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
     buf.extend_from_slice(chunk_type);
@@ -551,6 +558,7 @@ fn write_png_chunk(buf: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
     buf.extend_from_slice(&crc.to_be_bytes());
 }
 
+#[allow(dead_code)]
 fn crc32_png(data: &[u8]) -> u32 {
     let mut crc: u32 = 0xFFFFFFFF;
     for &byte in data {
@@ -566,6 +574,7 @@ fn crc32_png(data: &[u8]) -> u32 {
     crc ^ 0xFFFFFFFF
 }
 
+#[allow(dead_code)]
 fn adler32(data: &[u8]) -> u32 {
     let mut a: u32 = 1;
     let mut b: u32 = 0;
@@ -576,18 +585,18 @@ fn adler32(data: &[u8]) -> u32 {
     (b << 16) | a
 }
 
-fn get_rss_mb(pid: u32) -> f64 {
+#[allow(dead_code)]
+fn get_rss_mb(_pid: u32) -> f64 {
     // Simple /proc/pid/status parser for Linux, fallback for others
     #[cfg(target_os = "linux")]
     {
-        if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) {
+        if let Ok(status) = std::fs::read_to_string(format!("/proc/{_pid}/status")) {
             for line in status.lines() {
-                if line.starts_with("VmRSS:") {
-                    if let Some(kb_str) = line.split_whitespace().nth(1) {
-                        if let Ok(kb) = kb_str.parse::<f64>() {
-                            return kb / 1024.0;
-                        }
-                    }
+                if line.starts_with("VmRSS:")
+                    && let Some(kb_str) = line.split_whitespace().nth(1)
+                    && let Ok(kb) = kb_str.parse::<f64>()
+                {
+                    return kb / 1024.0;
                 }
             }
         }

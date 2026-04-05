@@ -56,6 +56,19 @@ const DUPLICATE_SIMILARITY_THRESHOLD: f32 = 0.95;
 /// will have their echo_count reduced by 1.
 const ECHO_DECAY_DAYS: i64 = 30;
 
+/// Compute dynamic max_facts based on content length (KS67).
+///
+/// Short memories (<30 words) get 1-3 facts to avoid hallucinated noise.
+/// Longer memories scale up to 12 facts to capture dense content.
+pub(crate) fn dynamic_max_facts(content: &str) -> usize {
+    let word_count = content.split_whitespace().count();
+    if word_count < 30 {
+        (word_count / 10).clamp(1, 3)
+    } else {
+        (word_count / 20).clamp(3, 12)
+    }
+}
+
 /// Perform a full consolidation pass on the Echo Memory engine components.
 ///
 /// This is the core cleanup routine. It acquires mutable references to
@@ -68,6 +81,7 @@ const ECHO_DECAY_DAYS: i64 = 30;
 /// * `bloom_dirty` - Flag indicating the Bloom filter needs a rebuild
 /// * `_config` - Engine configuration (reserved for future threshold tuning)
 #[allow(clippy::field_reassign_with_default)]
+#[allow(clippy::too_many_arguments)]
 pub fn consolidate(
     store: &mut EchoStore,
     hebbian: &mut HebbianGraph,
@@ -212,7 +226,35 @@ pub fn consolidate(
                 None => continue,
             };
 
-            let facts = consolidator.extract_facts(&content, config.max_facts_per_memory);
+            // KS67: dynamic max_facts + combined extraction
+            // Use dynamic scaling but cap at the operator-configured limit
+            let max_facts = dynamic_max_facts(&content).min(config.max_facts_per_memory);
+            let output = consolidator.extract_facts_and_labels(&content, max_facts);
+
+            tracing::info!(
+                idx,
+                max_facts,
+                legacy_facts = output.facts.len(),
+                structured_facts = output.structured_facts.len(),
+                has_labels = output.labels.is_some(),
+                content_preview = %&content[..content.len().min(60)],
+                "KS67: extraction result"
+            );
+
+            // Build indexed fact list with optional structured metadata
+            let fact_entries: Vec<(String, Option<&shrimpk_core::ExtractedFact>)> =
+                if !output.structured_facts.is_empty() {
+                    output
+                        .structured_facts
+                        .iter()
+                        .map(|sf| (sf.text.clone(), Some(sf)))
+                        .collect()
+                } else {
+                    output.facts.iter().map(|f| (f.clone(), None)).collect()
+                };
+
+            // Derive flat facts list for supersedes detection
+            let facts: Vec<String> = fact_entries.iter().map(|(t, _)| t.clone()).collect();
 
             if !facts.is_empty() {
                 result.facts_extracted += facts.len();
@@ -223,6 +265,49 @@ pub fn consolidate(
                 );
             }
 
+            // Apply Tier 2 labels from the same response when available (KS67)
+            if let Some(label_set) = &output.labels
+                && config.use_labels
+            {
+                let mut new_labels: Vec<String> = Vec::new();
+                for topic in &label_set.topic {
+                    new_labels.push(format!("topic:{}", topic.to_lowercase()));
+                }
+                for domain in &label_set.domain {
+                    new_labels.push(format!("domain:{}", domain.to_lowercase()));
+                }
+                for action in &label_set.action {
+                    new_labels.push(format!("action:{}", action.to_lowercase()));
+                }
+                if let Some(ref mt) = label_set.memtype {
+                    new_labels.push(format!("memtype:{}", mt.to_lowercase()));
+                }
+                if let Some(ref sent) = label_set.sentiment {
+                    new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
+                }
+
+                if !new_labels.is_empty() {
+                    if let Some(entry) = store.entry_at_mut(idx) {
+                        for label in &new_labels {
+                            if !entry.labels.contains(label) {
+                                entry.labels.push(label.clone());
+                            }
+                        }
+                        entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
+                        entry.label_version = 2;
+                        result.labels_enriched += 1;
+                    }
+
+                    for label in &new_labels {
+                        store
+                            .label_index_mut()
+                            .entry(label.clone())
+                            .or_default()
+                            .push(idx as u32);
+                    }
+                }
+            }
+
             // Create child memories if embedder is available
             if let Some(embedder) = embedder {
                 let parent_id = match store.entry_at(idx) {
@@ -230,20 +315,43 @@ pub fn consolidate(
                     None => continue,
                 };
 
-                for fact in &facts {
+                let mut fact_embeddings: Vec<Vec<f32>> = Vec::with_capacity(fact_entries.len());
+
+                for (fact_text, structured_fact) in &fact_entries {
                     let embedding = match embedder.lock() {
-                        Ok(mut e) => match e.embed_text(fact) {
+                        Ok(mut e) => match e.embed_text(fact_text) {
                             Ok(emb) => emb,
                             Err(err) => {
                                 tracing::debug!(error = %err, "Failed to embed fact, skipping");
+                                fact_embeddings.push(Vec::new());
                                 continue;
                             }
                         },
-                        Err(_) => continue,
+                        Err(_) => {
+                            fact_embeddings.push(Vec::new());
+                            continue;
+                        }
                     };
 
+                    // KS67: Skip near-duplicate children (cosine > 0.95 with existing child of same parent)
+                    let is_dup = (0..store.len()).any(|i| {
+                        store
+                            .entry_at(i)
+                            .is_some_and(|e| e.parent_id.as_ref() == Some(&parent_id))
+                            && store.embedding_at(i).is_some_and(|existing| {
+                                crate::similarity::cosine_similarity(&embedding, existing) > 0.95
+                            })
+                    });
+                    if is_dup {
+                        tracing::debug!(fact = %fact_text, "KS67: skipping near-duplicate child");
+                        fact_embeddings.push(embedding);
+                        continue;
+                    }
+
+                    fact_embeddings.push(embedding.clone());
+
                     let mut child = shrimpk_core::MemoryEntry::new(
-                        fact.clone(),
+                        fact_text.clone(),
                         embedding.clone(),
                         "enrichment".to_string(),
                     );
@@ -255,9 +363,17 @@ pub fn consolidate(
                         child.created_at = parent_entry.created_at;
                     }
 
-                    // Extract structured triple if possible (KS61)
-                    if let Some(triple) = extract_triples(fact) {
+                    // Extract structured triple if possible (KS61 + KS67 subject fallback)
+                    if let Some(triple) = extract_triples(fact_text) {
                         child.triples.push(triple);
+                    } else if let Some(sf) = structured_fact
+                        && let Some(ref subj) = sf.subject
+                    {
+                        child.triples.push(shrimpk_core::Triple {
+                            subject: subj.clone(),
+                            predicate: shrimpk_core::TriplePredicate::Custom(fact_text.to_string()),
+                            object: fact_text.to_string(),
+                        });
                     }
 
                     let child_idx = store.add(child) as u32;
@@ -267,12 +383,12 @@ pub fn consolidate(
                     // This prevents child facts from polluting candidate retrieval.
                     if !config.child_rescue_only {
                         lsh.insert(child_idx, &embedding);
-                        bloom.insert_memory(fact);
+                        bloom.insert_memory(fact_text);
                     }
 
                     // Detect typed relationship from fact text and create
                     // a Hebbian edge between parent and child.
-                    if let Some(rel) = detect_relationship(fact) {
+                    if let Some(rel) = detect_relationship(fact_text) {
                         hebbian.co_activate_with_relationship(
                             idx as u32, child_idx,
                             0.5, // moderate strength for extracted relationships
@@ -290,7 +406,8 @@ pub fn consolidate(
 
                 // Step 5b: Detect Supersedes edges — when a new fact
                 // contradicts an older fact about the same entity.
-                let supersedes_pairs = detect_supersedes_pairs(store, &facts, idx);
+                let supersedes_pairs =
+                    detect_supersedes_pairs(store, &facts, &fact_embeddings, idx);
                 for (old_idx, new_fact_text) in &supersedes_pairs {
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -303,14 +420,16 @@ pub fn consolidate(
                     let old_assocs: Vec<(u32, f64, bool)> = hebbian
                         .get_associations_typed(*old_idx as u32, 0.0)
                         .into_iter()
-                        .filter(|(_, _, rel)| matches!(
-                            rel,
-                            Some(RelationshipType::WorksAt(_))
-                            | Some(RelationshipType::LivesIn(_))
-                            | Some(RelationshipType::PrefersTool(_))
-                            | Some(RelationshipType::PartOf(_))
-                            | Some(RelationshipType::Custom(_))
-                        ))
+                        .filter(|(_, _, rel)| {
+                            matches!(
+                                rel,
+                                Some(RelationshipType::WorksAt(_))
+                                    | Some(RelationshipType::LivesIn(_))
+                                    | Some(RelationshipType::PrefersTool(_))
+                                    | Some(RelationshipType::PartOf(_))
+                                    | Some(RelationshipType::Custom(_))
+                            )
+                        })
                         .map(|(n, w, _)| (n, w, false))
                         .collect();
                     for (neighbor, _, _) in &old_assocs {
@@ -329,22 +448,26 @@ pub fn consolidate(
                     // ALSO create edge between OLD PARENT and NEW PARENT (KS22).
                     // This ensures the Supersedes demotion fires in Pipe A ranking
                     // (where only parents appear when child_rescue_only is true).
-                    if let Some(old_entry) = store.entry_at(*old_idx) {
-                        if let Some(ref old_parent_id) = old_entry.parent_id {
-                            // Find the old parent's store index
-                            for i in 0..store.len() {
-                                if let Some(e) = store.entry_at(i) {
-                                    if e.id == *old_parent_id {
-                                        hebbian.co_activate_with_relationship(
-                                            i as u32,
-                                            idx as u32,
-                                            0.3,
-                                            RelationshipType::Supersedes,
-                                        );
-                                        hebbian.set_valid_from(i as u32, idx as u32, now_secs);
-                                        break;
-                                    }
-                                }
+                    if let Some(old_entry) = store.entry_at(*old_idx)
+                        && let Some(ref old_parent_id) = old_entry.parent_id
+                    {
+                        // Find the old parent's store index
+                        for i in 0..store.len() {
+                            // Never create a Supersedes self-edge
+                            if i == idx {
+                                continue;
+                            }
+                            if let Some(e) = store.entry_at(i)
+                                && e.id == *old_parent_id
+                            {
+                                hebbian.co_activate_with_relationship(
+                                    i as u32,
+                                    idx as u32,
+                                    0.3,
+                                    RelationshipType::Supersedes,
+                                );
+                                hebbian.set_valid_from(i as u32, idx as u32, now_secs);
+                                break;
                             }
                         }
                     }
@@ -454,15 +577,15 @@ pub fn consolidate(
                 break;
             }
             // Skip if we already have an up-to-date summary
-            if let Some(existing) = store.get_summary(label) {
-                if existing.member_count == *member_count {
-                    continue;
-                }
+            if let Some(existing) = store.get_summary(label)
+                && existing.member_count == *member_count
+            {
+                continue;
             }
 
             // Collect up to 20 member contents
             let member_contents: Vec<&str> = store
-                .query_labels(&[label.clone()])
+                .query_labels(std::slice::from_ref(label))
                 .into_iter()
                 .take(20)
                 .filter_map(|idx| store.entry_at(idx as usize).map(|e| e.content.as_str()))
@@ -523,46 +646,46 @@ pub fn detect_relationship(fact: &str) -> Option<RelationshipType> {
 
     // WorksAt patterns: "X works at Y", "X employed at Y", "X joined Y"
     let works_re =
-        Regex::new(r"(?i)(?:works?\s+at|employed\s+at|joined|works?\s+for|employed\s+by)\s+(.+)")
+        Regex::new(r"(?i)(?:works?\s+at|working\s+at|started\s+at|starting\s+at|employed\s+at|joined|works?\s+for|employed\s+by)\s+(.+)")
             .ok()?;
     if let Some(caps) = works_re.captures(&lower) {
         let entity = caps
             .get(1)
             .map(|m| extract_entity(fact, m.start(), m.end()));
-        if let Some(e) = entity {
-            if !e.is_empty() {
-                return Some(RelationshipType::WorksAt(e));
-            }
+        if let Some(e) = entity
+            && !e.is_empty()
+        {
+            return Some(RelationshipType::WorksAt(e));
         }
     }
 
     // LivesIn patterns: "X lives in Y", "X moved to Y", "X based in Y"
     let lives_re = Regex::new(
-        r"(?i)(?:lives?\s+in|moved\s+to|based\s+in|relocated\s+to|resides?\s+in)\s+(.+)",
+        r"(?i)(?:lives?\s+in|living\s+in|moved\s+to|moving\s+to|based\s+in|relocated\s+to|relocating\s+to|resides?\s+in)\s+(.+)",
     )
     .ok()?;
     if let Some(caps) = lives_re.captures(&lower) {
         let entity = caps
             .get(1)
             .map(|m| extract_entity(fact, m.start(), m.end()));
-        if let Some(e) = entity {
-            if !e.is_empty() {
-                return Some(RelationshipType::LivesIn(e));
-            }
+        if let Some(e) = entity
+            && !e.is_empty()
+        {
+            return Some(RelationshipType::LivesIn(e));
         }
     }
 
     // PrefersTool patterns: "X prefers Y", "X uses Y", "X likes Y", "X switched to Y"
     let pref_re =
-        Regex::new(r"(?i)(?:prefers?\s+|likes?\s+|uses?\s+|switched\s+to\s+|chose\s+)(.+)").ok()?;
+        Regex::new(r"(?i)(?:prefers?\s+|preferring\s+|likes?\s+|uses?\s+|using\s+|switched\s+to\s+|switching\s+to\s+|chose\s+)(.+)").ok()?;
     if let Some(caps) = pref_re.captures(&lower) {
         let entity = caps
             .get(1)
             .map(|m| extract_entity(fact, m.start(), m.end()));
-        if let Some(e) = entity {
-            if !e.is_empty() {
-                return Some(RelationshipType::PrefersTool(e));
-            }
+        if let Some(e) = entity
+            && !e.is_empty()
+        {
+            return Some(RelationshipType::PrefersTool(e));
         }
     }
 
@@ -573,10 +696,10 @@ pub fn detect_relationship(fact: &str) -> Option<RelationshipType> {
         let entity = caps
             .get(1)
             .map(|m| extract_entity(fact, m.start(), m.end()));
-        if let Some(e) = entity {
-            if !e.is_empty() {
-                return Some(RelationshipType::PartOf(e));
-            }
+        if let Some(e) = entity
+            && !e.is_empty()
+        {
+            return Some(RelationshipType::PartOf(e));
         }
     }
 
@@ -594,7 +717,7 @@ fn extract_entity(original: &str, start: usize, end: usize) -> String {
     let end = end.min(original.len());
     let raw = &original[start..end];
     raw.trim()
-        .trim_end_matches(|c: char| c == '.' || c == ',' || c == ';' || c == '!' || c == '?')
+        .trim_end_matches(['.', ',', ';', '!', '?'])
         .trim()
         .to_string()
 }
@@ -620,7 +743,11 @@ pub fn extract_triples(fact: &str) -> Option<shrimpk_core::Triple> {
         _ => return None, // CoActivation, TemporalSequence, Supersedes are graph-edge-only
     };
 
-    Some(Triple { subject, predicate, object })
+    Some(Triple {
+        subject,
+        predicate,
+        object,
+    })
 }
 
 /// Detect entity-level contradictions between new facts and existing memories.
@@ -630,22 +757,38 @@ pub fn extract_triples(fact: &str) -> Option<shrimpk_core::Triple> {
 /// - Old: "Alex works at Google" + New: "Alex works at Meta" -> Supersedes
 /// - Old: "User lives in NYC" + New: "User moved to SF" -> Supersedes
 ///
+/// Uses two signals:
+/// 1. Regex-based relationship detection (same category, different entity = contradiction)
+/// 2. Embedding cosine similarity (KS67): >0.95 = near-identity skip, >0.80 + subject overlap = supersession
+///
 /// Returns `(old_memory_index, new_fact_text)` pairs for each detected supersession.
 fn detect_supersedes_pairs(
     store: &EchoStore,
     new_facts: &[String],
-    _current_parent_idx: usize,
+    new_embeddings: &[Vec<f32>],
+    current_parent_idx: usize,
 ) -> Vec<(usize, String)> {
     let mut pairs = Vec::new();
+    let mut matched_old_indices = std::collections::HashSet::new();
 
+    // Get current parent's ID so we can skip sibling children from same extraction
+    let current_parent_id = store.entry_at(current_parent_idx).map(|e| e.id.clone());
+
+    // Pass 1: Regex-based relationship detection (original logic)
+    // Limited to single-valued relationship categories (WorksAt, LivesIn) where
+    // a person can only have one current value. PrefersTool/PartOf are multi-valued
+    // (person can prefer multiple tools) and cause false-positive supersession.
     for fact in new_facts {
         let new_rel = match detect_relationship(fact) {
             Some(r) => r,
             None => continue,
         };
 
-        // Extract the relationship category and entity for comparison
+        // Only supersede single-valued relationships
         let (new_category, _new_entity) = categorize_relationship(&new_rel);
+        if new_category != "works_at" && new_category != "lives_in" {
+            continue;
+        }
 
         // Scan existing enriched child memories for contradictions
         for i in 0..store.len() {
@@ -656,6 +799,14 @@ fn detect_supersedes_pairs(
 
             // Only compare against enrichment-sourced entries (child facts)
             if entry.source != "enrichment" {
+                continue;
+            }
+
+            // Skip siblings from the same parent — they're from the same
+            // extraction run and shouldn't supersede each other
+            if let Some(ref pid) = entry.parent_id
+                && current_parent_id.as_ref() == Some(pid)
+            {
                 continue;
             }
 
@@ -672,9 +823,127 @@ fn detect_supersedes_pairs(
                 // Check if the facts share a subject (simple heuristic:
                 // first word or first two words overlap)
                 if subjects_overlap(fact, &entry.content) {
+                    matched_old_indices.insert(i);
                     pairs.push((i, fact.clone()));
                     break; // One supersession per fact is enough
                 }
+            }
+        }
+    }
+
+    // Pass 2: Embedding-based supersession (KS67)
+    // For facts that have pre-computed embeddings, check cosine similarity
+    // against existing enrichment children. This catches semantic supersession
+    // that regex patterns miss (e.g., paraphrased contradictions).
+    for (fact_idx, fact) in new_facts.iter().enumerate() {
+        let new_emb = match new_embeddings.get(fact_idx) {
+            Some(emb) if !emb.is_empty() => emb,
+            _ => continue,
+        };
+
+        for i in 0..store.len() {
+            // Skip if already matched by regex pass
+            if matched_old_indices.contains(&i) {
+                continue;
+            }
+
+            let entry = match store.entry_at(i) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            // Only compare against enrichment-sourced entries (child facts)
+            if entry.source != "enrichment" {
+                continue;
+            }
+
+            let existing_emb = match store.embedding_at(i) {
+                Some(emb) if !emb.is_empty() => emb,
+                _ => continue,
+            };
+
+            let cosine = crate::similarity::cosine_similarity(new_emb, existing_emb);
+
+            // >0.95: near-identity repeat — skip (not a supersession, just a duplicate)
+            if cosine > 0.95 {
+                continue;
+            }
+
+            // >0.70 + subject overlap: semantic supersession (lowered from 0.80
+            // to catch v2 open-domain facts with different verb forms)
+            if cosine > 0.70 && subjects_overlap(fact, &entry.content) {
+                matched_old_indices.insert(i);
+                pairs.push((i, fact.clone()));
+                break; // One supersession per fact is enough
+            }
+        }
+    }
+
+    // Pass 3: Parent-content supersession (KS67)
+    // Checks new facts against PARENT memory content directly, not just children.
+    // This handles the case where an old parent got 0 extracted children (LLM failure)
+    // but its raw content still contains relationship patterns.
+    // Limited to WorksAt/LivesIn to avoid false positives.
+    for fact in new_facts {
+        let new_rel = match detect_relationship(fact) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let (new_category, _new_entity) = categorize_relationship(&new_rel);
+        if new_category != "works_at" && new_category != "lives_in" {
+            continue;
+        }
+
+        for i in 0..store.len() {
+            if matched_old_indices.contains(&i) {
+                continue;
+            }
+            // Skip the current parent being enriched
+            if i == current_parent_idx {
+                continue;
+            }
+
+            let entry = match store.entry_at(i) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            // Only compare against non-enrichment entries (parent memories)
+            if entry.source == "enrichment" {
+                continue;
+            }
+
+            // Detect relationship in the old parent's full content.
+            // Parent content may contain multiple sentences, so we split
+            // and check each for relationships.
+            let old_sentences: Vec<&str> = entry
+                .content
+                .split(['.', '!', '?'])
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            for sentence in &old_sentences {
+                let old_rel = match detect_relationship(sentence) {
+                    Some(r) => r,
+                    None => continue,
+                };
+
+                let (old_category, _old_entity) = categorize_relationship(&old_rel);
+
+                if new_category == old_category
+                    && new_rel != old_rel
+                    && subjects_overlap(fact, sentence)
+                {
+                    matched_old_indices.insert(i);
+                    pairs.push((i, fact.clone()));
+                    break;
+                }
+            }
+
+            if matched_old_indices.contains(&i) {
+                break; // Found a match for this fact
             }
         }
     }
@@ -715,7 +984,7 @@ fn subjects_overlap(fact_a: &str, fact_b: &str) -> bool {
 /// - "Alex works at Google" -> "Alex"
 /// - "User prefers Rust" -> "User"
 /// - "The project is part of Bellkis" -> "project"
-fn extract_subject(fact: &str) -> String {
+pub(crate) fn extract_subject(fact: &str) -> String {
     let trimmed = fact.trim();
     // Skip common articles
     let without_article = trimmed
@@ -1461,6 +1730,28 @@ mod tests {
     }
 
     #[test]
+    fn detect_v2_verb_forms() {
+        // KS67: v2 open-domain extraction uses free-form verbs
+        let rel = detect_relationship("I am now working at Stripe").expect("working at");
+        assert!(matches!(rel, RelationshipType::WorksAt(_)));
+
+        let rel = detect_relationship("I just started at Stripe").expect("started at");
+        assert!(matches!(rel, RelationshipType::WorksAt(_)));
+
+        let rel = detect_relationship("I am living in San Francisco").expect("living in");
+        assert!(matches!(rel, RelationshipType::LivesIn(_)));
+
+        let rel = detect_relationship("I am moving to Oakland next month").expect("moving to");
+        assert!(matches!(rel, RelationshipType::LivesIn(_)));
+
+        let rel = detect_relationship("I am using Neovim for development").expect("using");
+        assert!(matches!(rel, RelationshipType::PrefersTool(_)));
+
+        let rel = detect_relationship("I am switching to Arch Linux").expect("switching to");
+        assert!(matches!(rel, RelationshipType::PrefersTool(_)));
+    }
+
+    #[test]
     fn extract_subject_strips_articles() {
         assert_eq!(extract_subject("The project is part of Bellkis"), "project");
         assert_eq!(extract_subject("Alex works at Google"), "Alex");
@@ -1483,7 +1774,7 @@ mod tests {
         // New facts extracted from a new parent
         let new_facts = vec!["Alex works at Meta".to_string()];
 
-        let pairs = detect_supersedes_pairs(&store, &new_facts, 2);
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 2);
         assert_eq!(pairs.len(), 1, "Should detect one supersession");
         assert_eq!(pairs[0].0, 0, "Should reference old child at index 0");
         assert_eq!(pairs[0].1, "Alex works at Meta");
@@ -1502,7 +1793,7 @@ mod tests {
         // New fact about a different person
         let new_facts = vec!["Sarah works at Meta".to_string()];
 
-        let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 1);
         assert!(
             pairs.is_empty(),
             "Different subjects should not trigger supersedes"
@@ -1522,8 +1813,50 @@ mod tests {
         // Same fact repeated — should NOT create a supersedes edge
         let new_facts = vec!["Alex works at Google".to_string()];
 
-        let pairs = detect_supersedes_pairs(&store, &new_facts, 1);
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 1);
         assert!(pairs.is_empty(), "Same fact should not trigger supersedes");
+    }
+
+    #[test]
+    fn detect_supersedes_parent_content() {
+        // KS67: Pass 3 — detect supersession against parent content
+        let mut store = EchoStore::new();
+
+        // Index 0: old PARENT memory about working at Shopify
+        // (no enrichment children — simulates LLM extraction failure)
+        let parent = make_entry(
+            "I work at Shopify on the payments team. I joined in 2019.",
+            vec![1.0, 0.0, 0.0],
+        );
+        store.add(parent);
+
+        // New fact from a different parent (current_parent_idx = 1)
+        let new_facts = vec!["I started at Stripe as a senior engineer".to_string()];
+
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 1);
+        assert_eq!(pairs.len(), 1, "Should detect parent-content supersession");
+        assert_eq!(pairs[0].0, 0, "Should reference old parent at index 0");
+    }
+
+    #[test]
+    fn detect_supersedes_parent_location() {
+        let mut store = EchoStore::new();
+
+        // Old parent about living in Oakland
+        let parent = make_entry(
+            "I live in Oakland, California. I moved here after college.",
+            vec![1.0, 0.0, 0.0],
+        );
+        store.add(parent);
+
+        let new_facts = vec!["I moved to San Francisco last month".to_string()];
+
+        let pairs = detect_supersedes_pairs(&store, &new_facts, &[], 1);
+        assert_eq!(
+            pairs.len(),
+            1,
+            "Should detect location supersession via parent"
+        );
     }
 
     // ---- Triple extraction tests (KS61 Track C) ----
@@ -1561,5 +1894,49 @@ mod tests {
     #[test]
     fn extract_triples_none_for_plain_fact() {
         assert!(extract_triples("The sky is blue").is_none());
+    }
+
+    // ---- KS67: dynamic_max_facts tests ----
+
+    #[test]
+    fn dynamic_max_facts_5_words() {
+        let content = "one two three four five";
+        assert_eq!(dynamic_max_facts(content), 1);
+    }
+
+    #[test]
+    fn dynamic_max_facts_20_words() {
+        let content = (0..20)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(dynamic_max_facts(&content), 2);
+    }
+
+    #[test]
+    fn dynamic_max_facts_50_words() {
+        let content = (0..50)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(dynamic_max_facts(&content), 3);
+    }
+
+    #[test]
+    fn dynamic_max_facts_200_words() {
+        let content = (0..200)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(dynamic_max_facts(&content), 10);
+    }
+
+    #[test]
+    fn dynamic_max_facts_300_words_caps_at_12() {
+        let content = (0..300)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(dynamic_max_facts(&content), 12);
     }
 }

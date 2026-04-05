@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
 
@@ -54,8 +56,15 @@ impl SortMode {
 
 /// Flattened connection list entry — either a label header or a memory item.
 enum FlatConn {
-    Header { label: String, count: usize },
-    Memory { id: MemoryId, content: String, importance: f32 },
+    Header {
+        label: String,
+        count: usize,
+    },
+    Memory {
+        id: MemoryId,
+        content: String,
+        importance: f32,
+    },
 }
 
 /// Saved explore state for back-navigation.
@@ -97,8 +106,11 @@ impl App {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        let id_map: HashMap<MemoryId, usize> =
-            memories.iter().enumerate().map(|(i, m)| (m.id.clone(), i)).collect();
+        let id_map: HashMap<MemoryId, usize> = memories
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.id.clone(), i))
+            .collect();
 
         let filtered: Vec<usize> = (0..memories.len()).collect();
 
@@ -301,13 +313,13 @@ pub async fn run_explore(engine: &EchoEngine) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| render(&mut app, frame))?;
 
-        if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                handle_key(&mut app, key.code, engine).await;
+        if event::poll(Duration::from_millis(50))?
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
             }
+            handle_key(&mut app, key.code, engine).await;
         }
 
         if app.quit {
@@ -374,7 +386,11 @@ fn render_list(app: &mut App, frame: &mut Frame, area: Rect) {
     };
 
     let list = List::new(items)
-        .block(Block::bordered().title(title).title_style(Style::new().fg(Color::Cyan).bold()))
+        .block(
+            Block::bordered()
+                .title(title)
+                .title_style(Style::new().fg(Color::Cyan).bold()),
+        )
         .highlight_style(Style::new().reversed())
         .highlight_symbol("> ");
 
@@ -401,7 +417,10 @@ fn render_explore(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let card = Paragraph::new(vec![
         Line::from(Span::styled(
-            format!("\"{}\"", trunc(&m.content, area.width.saturating_sub(6) as usize)),
+            format!(
+                "\"{}\"",
+                trunc(&m.content, area.width.saturating_sub(6) as usize)
+            ),
             Style::new().bold(),
         )),
         Line::raw(""),
@@ -411,13 +430,19 @@ fn render_explore(app: &mut App, frame: &mut Frame, area: Rect) {
             Span::raw("  echoed: "),
             Span::styled(format!("{}x", m.echo_count), Style::new().fg(Color::Yellow)),
             Span::raw("  importance: "),
-            Span::styled(format!("{:.2}", m.importance), Style::new().fg(Color::Green)),
+            Span::styled(
+                format!("{:.2}", m.importance),
+                Style::new().fg(Color::Green),
+            ),
         ]),
         Line::from(vec![
             Span::raw("category: "),
             Span::styled(format!("{:?}", m.category), Style::new().fg(Color::Magenta)),
             Span::raw("  novelty: "),
-            Span::styled(format!("{:.2}", m.novelty_score), Style::new().fg(Color::Yellow)),
+            Span::styled(
+                format!("{:.2}", m.novelty_score),
+                Style::new().fg(Color::Yellow),
+            ),
         ]),
         Line::from(vec![
             Span::raw("labels: "),
@@ -436,12 +461,10 @@ fn render_explore(app: &mut App, frame: &mut Frame, area: Rect) {
         .flat_conns
         .iter()
         .map(|c| match c {
-            FlatConn::Header { label, count } => ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("  {} ({count})", label),
-                    Style::new().fg(Color::Cyan).bold(),
-                ),
-            ])),
+            FlatConn::Header { label, count } => ListItem::new(Line::from(vec![Span::styled(
+                format!("  {} ({count})", label),
+                Style::new().fg(Color::Cyan).bold(),
+            )])),
             FlatConn::Memory {
                 content,
                 importance,
@@ -484,11 +507,10 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         View::List if app.searching => {
             " [Esc] cancel  [Enter] confirm  [Backspace] delete".to_string()
         }
-        View::List => " [Up/Down] navigate  [Enter] explore  [/] search  [s] sort  [q] quit"
-            .to_string(),
-        View::Explore => {
-            " [Up/Down] select  [Enter] drill in  [Esc] back  [q] quit".to_string()
+        View::List => {
+            " [Up/Down] navigate  [Enter] explore  [/] search  [s] sort  [q] quit".to_string()
         }
+        View::Explore => " [Up/Down] select  [Enter] drill in  [Esc] back  [q] quit".to_string(),
     };
     let bar = Paragraph::new(text).style(Style::new().fg(Color::White).bg(Color::DarkGray));
     frame.render_widget(bar, area);

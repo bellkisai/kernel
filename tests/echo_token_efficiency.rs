@@ -30,7 +30,7 @@ use shrimpk_memory::similarity::cosine_similarity;
 fn estimate_tokens(text: &str) -> usize {
     // Standard LLM heuristic: ~4 characters per token on average.
     // GPT tokenizers vary (3.5-4.5), but 4 is the accepted industry estimate.
-    (text.len() + 3) / 4 // ceil division
+    text.len().div_ceil(4)
 }
 
 // ===========================================================================

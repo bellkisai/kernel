@@ -605,16 +605,14 @@ async fn stress_full_corpus() {
                         // With a 0.15 threshold some spurious hits are expected.
                         // The assertion is that the TOP score is below 0.35
                         // (i.e., nothing is strongly relevant).
-                        if let Some(top) = results.first() {
-                            if top.similarity > 0.35 {
-                                eprintln!(
-                                    "  WARN [{}]: NoMatch top similarity {:.3} > 0.35 for: {:?}  (content: {:?})",
-                                    tq.label,
-                                    top.similarity,
-                                    tq.query,
-                                    &top.content[..top.content.len().min(80)],
-                                );
-                            }
+                        if let Some(top) = results.first().filter(|t| t.similarity > 0.35) {
+                            eprintln!(
+                                "  WARN [{}]: NoMatch top similarity {:.3} > 0.35 for: {:?}  (content: {:?})",
+                                tq.label,
+                                top.similarity,
+                                tq.query,
+                                &top.content[..top.content.len().min(80)],
+                            );
                         }
                     }
                     Err(e) => {

@@ -73,11 +73,11 @@ fn inject_memories(messages: &mut Vec<ChatMessage>, memory_block: &str) {
     if memory_block.is_empty() {
         return;
     }
-    if let Some(first) = messages.first_mut() {
-        if first.role == "system" {
-            first.content = format!("{}{}", first.content, memory_block);
-            return;
-        }
+    if let Some(first) = messages.first_mut()
+        && first.role == "system"
+    {
+        first.content = format!("{}{}", first.content, memory_block);
+        return;
     }
     messages.insert(
         0,
@@ -343,7 +343,7 @@ async fn forward_streaming(
     // Raw byte stream passthrough — no SSE parsing needed
     let byte_stream = resp
         .bytes_stream()
-        .map(|result| result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+        .map(|result| result.map_err(std::io::Error::other));
 
     let body = axum::body::Body::from_stream(byte_stream);
 

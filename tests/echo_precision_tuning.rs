@@ -741,6 +741,7 @@ async fn query_formulation_analysis() {
     println!();
 
     // Group by memory text
+    #[allow(clippy::type_complexity)]
     let mut groups: Vec<(&str, Vec<(&str, &str, f32)>)> = Vec::new();
     let mut current_memory: Option<&str> = None;
 
@@ -778,7 +779,7 @@ async fn query_formulation_analysis() {
             println!("    {:>50} -> {:.4}{}", query_text, score, marker);
 
             // Track by query style (extract style from label suffix)
-            let style = label.split(':').last().unwrap_or("unknown");
+            let style = label.split(':').next_back().unwrap_or("unknown");
             if let Some(entry) = style_scores.iter_mut().find(|(s, _)| *s == style) {
                 entry.1.push(score);
             } else {
@@ -790,7 +791,7 @@ async fn query_formulation_analysis() {
                 best_label = label;
             }
         }
-        let best_style = best_label.split(':').last().unwrap_or("unknown");
+        let best_style = best_label.split(':').next_back().unwrap_or("unknown");
         println!(
             "    >>> Best: {} ({:.4}) -- style: {}",
             best_label, best_score, best_style

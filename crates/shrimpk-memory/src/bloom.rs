@@ -217,7 +217,7 @@ mod tests {
         let before_no_match = filter.might_match("chocolate cake recipe");
 
         // Rebuild from scratch
-        let text_refs: Vec<&str> = texts.iter().copied().collect();
+        let text_refs: Vec<&str> = texts.to_vec();
         filter.rebuild(&text_refs);
 
         assert_eq!(

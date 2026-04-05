@@ -215,7 +215,7 @@ impl HebbianGraph {
 
     /// Record co-activation of two memories with a typed relationship.
     ///
-    /// Same as [`co_activate`] but also sets the relationship type on the edge.
+    /// Same as [`HebbianGraph::co_activate`] but also sets the relationship type on the edge.
     /// If the edge already exists, the relationship is updated (overwritten).
     pub fn co_activate_with_relationship(
         &mut self,
@@ -384,15 +384,15 @@ impl HebbianGraph {
                 let key = Self::key(id, neighbor);
                 self.edges.get(&key).and_then(|co| {
                     // Temporal validity check
-                    if let Some(until) = co.valid_until {
-                        if at_time > until {
-                            return None; // expired
-                        }
+                    if let Some(until) = co.valid_until
+                        && at_time > until
+                    {
+                        return None; // expired
                     }
-                    if let Some(from) = co.valid_from {
-                        if at_time < from {
-                            return None; // not yet valid
-                        }
+                    if let Some(from) = co.valid_from
+                        && at_time < from
+                    {
+                        return None; // not yet valid
                     }
                     // Decay weight
                     let elapsed = at_time - co.last_activated;
@@ -464,9 +464,7 @@ impl HebbianGraph {
         for _hop in 0..max_hops {
             let mut next_frontier: Vec<(u32, f64)> = Vec::new();
             for &(node, path_weight) in &frontier {
-                for (neighbor, edge_weight) in
-                    self.get_associations(node, self.prune_threshold)
-                {
+                for (neighbor, edge_weight) in self.get_associations(node, self.prune_threshold) {
                     if visited.insert(neighbor) {
                         let new_weight = path_weight * edge_weight;
                         next_frontier.push((neighbor, new_weight));
@@ -770,7 +768,7 @@ mod tests {
 
         // Node 20 should be completely gone from adjacency
         assert!(
-            graph.adjacency.get(&20).is_none(),
+            !graph.adjacency.contains_key(&20),
             "Node 20 should have no adjacency entry"
         );
     }
@@ -801,7 +799,7 @@ mod tests {
 
         // Node 3 should have no adjacency entry (its only edge was pruned)
         assert!(
-            graph.adjacency.get(&3).is_none() || graph.adjacency.get(&3).unwrap().is_empty(),
+            graph.adjacency.get(&3).is_none_or(|v| v.is_empty()),
             "Node 3 should have no neighbors after its edge was pruned"
         );
     }
@@ -1120,7 +1118,10 @@ mod tests {
         let ids: Vec<u32> = results.iter().map(|&(id, _)| id).collect();
         assert!(ids.contains(&1), "Anchor should be in results");
         assert!(ids.contains(&2), "1-hop neighbor should be in results");
-        assert!(!ids.contains(&3), "2-hop neighbor should NOT be in 1-hop results");
+        assert!(
+            !ids.contains(&3),
+            "2-hop neighbor should NOT be in 1-hop results"
+        );
     }
 
     #[test]
@@ -1135,11 +1136,17 @@ mod tests {
         assert!(ids.contains(&1));
         assert!(ids.contains(&2));
         assert!(ids.contains(&3), "2-hop neighbor should be reached");
-        assert!(!ids.contains(&4), "3-hop should NOT be reached with max_hops=2");
+        assert!(
+            !ids.contains(&4),
+            "3-hop should NOT be reached with max_hops=2"
+        );
 
         // Verify multiplicative weights
         let w3 = results.iter().find(|&&(id, _)| id == 3).unwrap().1;
-        assert!(w3 < 0.6, "2-hop weight should be < direct edge weight, got {w3}");
+        assert!(
+            w3 < 0.6,
+            "2-hop weight should be < direct edge weight, got {w3}"
+        );
     }
 
     #[test]
@@ -1263,7 +1270,10 @@ mod tests {
 
         // Before valid_from: should NOT appear
         let before = graph.get_valid_associations(1, t0 + 100.0, 0.0);
-        assert!(before.is_empty(), "Edge should not be valid before valid_from");
+        assert!(
+            before.is_empty(),
+            "Edge should not be valid before valid_from"
+        );
 
         // After valid_from: should appear
         let after = graph.get_valid_associations(1, t0 + 600.0, 0.0);

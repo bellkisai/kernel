@@ -331,10 +331,10 @@ pub fn save_binary(store: &EchoStore, path: &Path) -> Result<()> {
     // No-op on Windows (NTFS handles directory entry durability automatically).
     #[cfg(unix)]
     {
-        if let Some(parent) = path.parent() {
-            if let Ok(dir) = std::fs::File::open(parent) {
-                let _ = dir.sync_all();
-            }
+        if let Some(parent) = path.parent()
+            && let Ok(dir) = std::fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
         }
     }
 
@@ -799,10 +799,7 @@ fn read_optional_section(
 ///
 /// Stored alongside the SHRM binary as `community_summaries.json`.
 /// Avoids touching the binary format — easier to debug and version independently.
-pub fn save_community_summaries(
-    store: &EchoStore,
-    data_dir: &Path,
-) -> Result<()> {
+pub fn save_community_summaries(store: &EchoStore, data_dir: &Path) -> Result<()> {
     let summaries = store.all_summaries();
     if summaries.is_empty() {
         return Ok(());
@@ -821,10 +818,7 @@ pub fn save_community_summaries(
 /// Load community summaries from the sidecar JSON file (KS64).
 ///
 /// Returns an empty map if the file does not exist.
-pub fn load_community_summaries(
-    store: &mut EchoStore,
-    data_dir: &Path,
-) -> Result<()> {
+pub fn load_community_summaries(store: &mut EchoStore, data_dir: &Path) -> Result<()> {
     let path = data_dir.join("community_summaries.json");
     if !path.exists() {
         return Ok(());
@@ -1614,6 +1608,7 @@ mod tests {
         // Find vision section: after header + meta + text section
         let meta_len = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
         let text_start = 16 + 4 + meta_len + 4;
+        #[allow(clippy::identity_op)]
         let text_bytes = 1 * 2 * 4; // 1 entry * 2 dim * 4 bytes
         let vision_start = text_start + text_bytes + 4; // +4 for text CRC
         // Corrupt the bitmap byte of the vision section

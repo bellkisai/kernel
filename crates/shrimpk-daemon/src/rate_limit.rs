@@ -77,10 +77,10 @@ pub async fn rate_limit_middleware(req: Request, next: Next) -> Result<Response,
     // Extract the rate limiter from request extensions.
     let limiter = req.extensions().get::<RateLimiter>().cloned();
 
-    if let Some(limiter) = limiter {
-        if !limiter.check() {
-            return Err(StatusCode::TOO_MANY_REQUESTS);
-        }
+    if let Some(limiter) = limiter
+        && !limiter.check()
+    {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
     Ok(next.run(req).await)

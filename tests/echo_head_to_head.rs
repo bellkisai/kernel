@@ -170,7 +170,7 @@ const OLLAMA_BASE: &str = "http://localhost:11434";
 
 /// Estimate token count (~4 chars per token).
 fn estimate_tokens(text: &str) -> usize {
-    (text.len() + 3) / 4
+    text.len().div_ceil(4)
 }
 
 /// Count how many expected keywords appear in the response (case-insensitive).

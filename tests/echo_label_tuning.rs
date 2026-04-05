@@ -172,7 +172,10 @@ fn threshold_sweep_10k() {
     println!("Threshold | P50 (ms) | P95 (ms) | Avg Results | Notes");
     println!("----------|----------|----------|-------------|------");
 
-    for &threshold in &thresholds {
+    // Only run for the first threshold since we can't change threshold at runtime yet
+    // TODO: Add runtime threshold override for sweep testing
+    let threshold = thresholds[0];
+    {
         let dir = tempdir().expect("temp dir");
         let mut config = make_config(dir.path().to_path_buf(), true);
         config.use_labels = true;
@@ -227,10 +230,6 @@ fn threshold_sweep_10k() {
         drop(rt);
         drop(engine);
         drop(dir);
-
-        // Only run once since we can't change threshold at runtime yet
-        // TODO: Add runtime threshold override for sweep testing
-        break;
     }
 
     println!("\nNote: Full threshold sweep requires runtime threshold override.");
