@@ -917,7 +917,8 @@ fn detect_supersedes_pairs(
 
                 let (old_category, _old_entity) = categorize_relationship(&old_rel);
 
-                if new_category == old_category && new_rel != old_rel
+                if new_category == old_category
+                    && new_rel != old_rel
                     && subjects_overlap(fact, sentence)
                 {
                     matched_old_indices.insert(i);
