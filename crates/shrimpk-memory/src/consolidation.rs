@@ -268,44 +268,9 @@ pub fn consolidate(
             // Apply Tier 2 labels from the same response when available (KS67)
             if let Some(label_set) = &output.labels
                 && config.use_labels
+                && apply_tier2_labels(store, idx, label_set)
             {
-                let mut new_labels: Vec<String> = Vec::new();
-                for topic in &label_set.topic {
-                    new_labels.push(format!("topic:{}", topic.to_lowercase()));
-                }
-                for domain in &label_set.domain {
-                    new_labels.push(format!("domain:{}", domain.to_lowercase()));
-                }
-                for action in &label_set.action {
-                    new_labels.push(format!("action:{}", action.to_lowercase()));
-                }
-                if let Some(ref mt) = label_set.memtype {
-                    new_labels.push(format!("memtype:{}", mt.to_lowercase()));
-                }
-                if let Some(ref sent) = label_set.sentiment {
-                    new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
-                }
-
-                if !new_labels.is_empty() {
-                    if let Some(entry) = store.entry_at_mut(idx) {
-                        for label in &new_labels {
-                            if !entry.labels.contains(label) {
-                                entry.labels.push(label.clone());
-                            }
-                        }
-                        entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
-                        entry.label_version = 2;
-                        result.labels_enriched += 1;
-                    }
-
-                    for label in &new_labels {
-                        store
-                            .label_index_mut()
-                            .entry(label.clone())
-                            .or_default()
-                            .push(idx as u32);
-                    }
-                }
+                result.labels_enriched += 1;
             }
 
             // Create child memories if embedder is available
@@ -334,14 +299,7 @@ pub fn consolidate(
                     };
 
                     // KS67: Skip near-duplicate children (cosine > 0.95 with existing child of same parent)
-                    let is_dup = (0..store.len()).any(|i| {
-                        store
-                            .entry_at(i)
-                            .is_some_and(|e| e.parent_id.as_ref() == Some(&parent_id))
-                            && store.embedding_at(i).is_some_and(|existing| {
-                                crate::similarity::cosine_similarity(&embedding, existing) > 0.95
-                            })
-                    });
+                    let is_dup = is_near_dup_child(store, &parent_id, &embedding);
                     if is_dup {
                         tracing::debug!(fact = %fact_text, "KS67: skipping near-duplicate child");
                         fact_embeddings.push(embedding);
@@ -519,45 +477,10 @@ pub fn consolidate(
 
             let output = consolidator.extract_facts_and_labels(&content, 5);
 
-            if let Some(label_set) = output.labels {
-                let mut new_labels: Vec<String> = Vec::new();
-
-                for topic in &label_set.topic {
-                    new_labels.push(format!("topic:{}", topic.to_lowercase()));
-                }
-                for domain in &label_set.domain {
-                    new_labels.push(format!("domain:{}", domain.to_lowercase()));
-                }
-                for action in &label_set.action {
-                    new_labels.push(format!("action:{}", action.to_lowercase()));
-                }
-                if let Some(ref mt) = label_set.memtype {
-                    new_labels.push(format!("memtype:{}", mt.to_lowercase()));
-                }
-                if let Some(ref sent) = label_set.sentiment {
-                    new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
-                }
-
-                if let Some(entry) = store.entry_at_mut(idx) {
-                    // Merge: add new labels that aren't already present
-                    for label in &new_labels {
-                        if !entry.labels.contains(label) {
-                            entry.labels.push(label.clone());
-                        }
-                    }
-                    entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
-                    entry.label_version = 2;
-                    result.labels_enriched += 1;
-                }
-
-                // Update label index for new labels
-                for label in &new_labels {
-                    store
-                        .label_index_mut()
-                        .entry(label.clone())
-                        .or_default()
-                        .push(idx as u32);
-                }
+            if let Some(label_set) = output.labels
+                && apply_tier2_labels(store, idx, &label_set)
+            {
+                result.labels_enriched += 1;
             }
         }
     }
@@ -1002,6 +925,95 @@ pub(crate) fn extract_subject(fact: &str) -> String {
         .to_string()
 }
 
+/// Apply Tier 2 labels from a `LabelSet` onto a store entry.
+///
+/// Converts the label set fields into prefixed label strings, merges them
+/// with existing labels (dedup), truncates at `MAX_LABELS_PER_ENTRY`, sets
+/// `label_version = 2`, and updates the store's label index.
+///
+/// Returns `true` if labels were applied (for counting in `ConsolidationResult`).
+fn apply_tier2_labels(
+    store: &mut EchoStore,
+    idx: usize,
+    label_set: &shrimpk_core::LabelSet,
+) -> bool {
+    let mut new_labels: Vec<String> = Vec::new();
+    for topic in &label_set.topic {
+        new_labels.push(format!("topic:{}", topic.to_lowercase()));
+    }
+    for domain in &label_set.domain {
+        new_labels.push(format!("domain:{}", domain.to_lowercase()));
+    }
+    for action in &label_set.action {
+        new_labels.push(format!("action:{}", action.to_lowercase()));
+    }
+    if let Some(ref mt) = label_set.memtype {
+        new_labels.push(format!("memtype:{}", mt.to_lowercase()));
+    }
+    if let Some(ref sent) = label_set.sentiment {
+        new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
+    }
+
+    if new_labels.is_empty() {
+        return false;
+    }
+
+    let applied = if let Some(entry) = store.entry_at_mut(idx) {
+        for label in &new_labels {
+            if !entry.labels.contains(label) {
+                entry.labels.push(label.clone());
+            }
+        }
+        entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
+        entry.label_version = 2;
+        true
+    } else {
+        false
+    };
+
+    if applied {
+        let surviving: std::collections::HashSet<String> = store
+            .entry_at(idx)
+            .map(|e| e.labels.iter().cloned().collect())
+            .unwrap_or_default();
+        for label in &new_labels {
+            if surviving.contains(label) {
+                store
+                    .label_index_mut()
+                    .entry(label.clone())
+                    .or_default()
+                    .push(idx as u32);
+            }
+        }
+    }
+
+    applied
+}
+
+/// Check if a new child embedding is a near-duplicate of any existing child
+/// of the same parent (cosine > 0.95).
+///
+/// Used during fact extraction to prevent storing semantically identical
+/// child facts when the LLM produces overlapping extractions.
+pub(crate) fn is_near_dup_child(
+    store: &EchoStore,
+    parent_id: &shrimpk_core::MemoryId,
+    new_embedding: &[f32],
+) -> bool {
+    if new_embedding.is_empty() {
+        return false;
+    }
+    (0..store.len()).any(|i| {
+        store
+            .entry_at(i)
+            .is_some_and(|e| e.parent_id.as_ref() == Some(parent_id))
+            && store.embedding_at(i).is_some_and(|existing| {
+                crate::similarity::cosine_similarity(new_embedding, existing)
+                    > DUPLICATE_SIMILARITY_THRESHOLD
+            })
+    })
+}
+
 /// Detect and merge near-duplicate memory pairs.
 ///
 /// For each pair of memories, computes cosine similarity. If above 0.95,
@@ -1144,6 +1156,35 @@ mod tests {
 
     fn make_entry(content: &str, embedding: Vec<f32>) -> MemoryEntry {
         MemoryEntry::new(content.to_string(), embedding, "test".to_string())
+    }
+
+    /// Mock consolidator that returns a fixed label set (for Tier 2 label tests).
+    struct LabelMockConsolidator;
+
+    impl shrimpk_core::Consolidator for LabelMockConsolidator {
+        fn extract_facts(&self, _text: &str, _max_facts: usize) -> Vec<String> {
+            Vec::new()
+        }
+        fn name(&self) -> &str {
+            "label-mock"
+        }
+        fn extract_facts_and_labels(
+            &self,
+            _text: &str,
+            _max_facts: usize,
+        ) -> shrimpk_core::ConsolidationOutput {
+            shrimpk_core::ConsolidationOutput {
+                facts: Vec::new(),
+                labels: Some(shrimpk_core::LabelSet {
+                    topic: vec!["career".to_string(), "technology".to_string()],
+                    domain: vec!["work".to_string()],
+                    action: Vec::new(),
+                    memtype: Some("fact".to_string()),
+                    sentiment: Some("positive".to_string()),
+                }),
+                structured_facts: Vec::new(),
+            }
+        }
     }
 
     #[test]
@@ -1938,5 +1979,279 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert_eq!(dynamic_max_facts(&content), 12);
+    }
+
+    // ---- G1: Child near-dup dedup tests ----
+
+    #[test]
+    fn is_near_dup_child_detects_duplicate() {
+        let mut store = EchoStore::new();
+        let parent_id = shrimpk_core::MemoryId::new();
+
+        // Existing child of parent with a known embedding
+        let mut existing_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        existing_child.parent_id = Some(parent_id.clone());
+        existing_child.source = "enrichment".to_string();
+        store.add(existing_child);
+
+        // Near-duplicate embedding (cosine > 0.95 with [1.0, 0.0, 0.0])
+        let near_dup_emb = vec![0.99, 0.01, 0.0];
+        let sim = similarity::cosine_similarity(&[1.0, 0.0, 0.0], &near_dup_emb);
+        assert!(
+            sim > 0.95,
+            "Test precondition: vectors must be near-dups, got {sim}"
+        );
+
+        assert!(
+            is_near_dup_child(&store, &parent_id, &near_dup_emb),
+            "Should detect near-duplicate child of same parent"
+        );
+    }
+
+    #[test]
+    fn is_near_dup_child_different_parent_not_detected() {
+        let mut store = EchoStore::new();
+        let parent_1 = shrimpk_core::MemoryId::new();
+        let parent_2 = shrimpk_core::MemoryId::new();
+
+        // Existing child of parent_1
+        let mut existing_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        existing_child.parent_id = Some(parent_1);
+        existing_child.source = "enrichment".to_string();
+        store.add(existing_child);
+
+        // Same embedding but checking against a different parent
+        let near_dup_emb = vec![0.99, 0.01, 0.0];
+        assert!(
+            !is_near_dup_child(&store, &parent_2, &near_dup_emb),
+            "Should NOT detect dup when parent_id differs"
+        );
+    }
+
+    #[test]
+    fn is_near_dup_child_dissimilar_not_detected() {
+        let mut store = EchoStore::new();
+        let parent_id = shrimpk_core::MemoryId::new();
+
+        let mut existing_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        existing_child.parent_id = Some(parent_id.clone());
+        store.add(existing_child);
+
+        // Orthogonal embedding (cosine = 0.0)
+        let dissimilar_emb = vec![0.0, 1.0, 0.0];
+        assert!(
+            !is_near_dup_child(&store, &parent_id, &dissimilar_emb),
+            "Should NOT detect dup for dissimilar embedding"
+        );
+    }
+
+    #[test]
+    fn is_near_dup_child_empty_embedding_returns_false() {
+        let store = EchoStore::new();
+        let parent_id = shrimpk_core::MemoryId::new();
+        assert!(
+            !is_near_dup_child(&store, &parent_id, &[]),
+            "Empty embedding should return false"
+        );
+    }
+
+    // ---- G3: Tier 2 label enrichment tests ----
+
+    #[test]
+    fn tier2_label_enrichment_upgrades_label_version() {
+        let mut config = test_config();
+        config.use_labels = true;
+        let mut store = EchoStore::new();
+        let mut hebbian = HebbianGraph::new(604_800.0, 0.01);
+        let mut bloom = TopicFilter::new(1000, 0.01);
+        let mut bloom_dirty = false;
+
+        // Create an entry that has been enriched (Step 5 done) but only has Tier 1 labels
+        let mut entry = make_entry(
+            "I got promoted to senior engineer at Anthropic",
+            vec![1.0, 0.0, 0.0],
+        );
+        entry.enriched = true;
+        entry.label_version = 1;
+        entry.labels = vec!["topic:career".to_string()]; // existing Tier 1 label
+        store.add(entry);
+
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+            &LabelMockConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
+        );
+
+        assert_eq!(result.labels_enriched, 1, "Should enrich 1 entry");
+
+        let updated = store.entry_at(0).expect("Entry should exist");
+        assert_eq!(
+            updated.label_version, 2,
+            "label_version should be upgraded to 2"
+        );
+
+        // Existing Tier 1 label should be preserved
+        assert!(
+            updated.labels.contains(&"topic:career".to_string()),
+            "Existing label should be preserved, got: {:?}",
+            updated.labels
+        );
+        // New Tier 2 labels should be merged in
+        assert!(
+            updated.labels.contains(&"topic:technology".to_string()),
+            "topic:technology should be added, got: {:?}",
+            updated.labels
+        );
+        assert!(
+            updated.labels.contains(&"domain:work".to_string()),
+            "domain:work should be added, got: {:?}",
+            updated.labels
+        );
+        assert!(
+            updated.labels.contains(&"memtype:fact".to_string()),
+            "memtype:fact should be added, got: {:?}",
+            updated.labels
+        );
+        assert!(
+            updated.labels.contains(&"sentiment:positive".to_string()),
+            "sentiment:positive should be added, got: {:?}",
+            updated.labels
+        );
+    }
+
+    #[test]
+    fn tier2_label_enrichment_skips_already_upgraded() {
+        let mut config = test_config();
+        config.use_labels = true;
+        let mut store = EchoStore::new();
+        let mut hebbian = HebbianGraph::new(604_800.0, 0.01);
+        let mut bloom = TopicFilter::new(1000, 0.01);
+        let mut bloom_dirty = false;
+
+        // Entry already at label_version 2 — should NOT be re-enriched
+        let mut entry = make_entry("Already enriched", vec![1.0, 0.0, 0.0]);
+        entry.enriched = true;
+        entry.label_version = 2;
+        store.add(entry);
+
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+            &LabelMockConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
+        );
+
+        assert_eq!(
+            result.labels_enriched, 0,
+            "Should NOT re-enrich label_version 2 entries"
+        );
+    }
+
+    #[test]
+    fn tier2_label_index_only_contains_surviving_labels() {
+        let mut store = EchoStore::new();
+
+        // Entry with MAX_LABELS - 1 existing labels (leaves room for exactly 1 new one)
+        let mut entry = make_entry("Dense memory with many labels", vec![1.0, 0.0, 0.0]);
+        entry.enriched = true;
+        entry.label_version = 1;
+        entry.labels = (0..crate::labels::MAX_LABELS_PER_ENTRY - 1)
+            .map(|i| format!("existing:label{i}"))
+            .collect();
+        store.add(entry);
+
+        // Apply 3 new labels — only 1 should survive truncation
+        let label_set = shrimpk_core::LabelSet {
+            topic: vec!["alpha".to_string(), "beta".to_string()],
+            domain: vec!["gamma".to_string()],
+            action: Vec::new(),
+            memtype: None,
+            sentiment: None,
+        };
+
+        let applied = apply_tier2_labels(&mut store, 0, &label_set);
+        assert!(applied);
+
+        let entry = store.entry_at(0).unwrap();
+        assert_eq!(
+            entry.labels.len(),
+            crate::labels::MAX_LABELS_PER_ENTRY,
+            "Labels should be truncated to MAX"
+        );
+
+        // Only "topic:alpha" should have survived (first new label added)
+        let surviving: std::collections::HashSet<&str> =
+            entry.labels.iter().map(String::as_str).collect();
+        assert!(
+            surviving.contains("topic:alpha"),
+            "First new label should survive truncation"
+        );
+
+        // Verify label index only contains surviving labels
+        let alpha_hits = store.query_labels(&["topic:alpha".to_string()]);
+        assert!(
+            !alpha_hits.is_empty(),
+            "Surviving label 'topic:alpha' should be in index"
+        );
+
+        // "topic:beta" and "domain:gamma" were truncated — must NOT be in index
+        let beta_hits = store.query_labels(&["topic:beta".to_string()]);
+        let gamma_hits = store.query_labels(&["domain:gamma".to_string()]);
+        assert!(
+            beta_hits.is_empty(),
+            "Truncated label 'topic:beta' must not be in index, got {beta_hits:?}"
+        );
+        assert!(
+            gamma_hits.is_empty(),
+            "Truncated label 'domain:gamma' must not be in index, got {gamma_hits:?}"
+        );
+    }
+
+    #[test]
+    fn tier2_label_enrichment_respects_max_labels() {
+        let mut config = test_config();
+        config.use_labels = true;
+        let mut store = EchoStore::new();
+        let mut hebbian = HebbianGraph::new(604_800.0, 0.01);
+        let mut bloom = TopicFilter::new(1000, 0.01);
+        let mut bloom_dirty = false;
+
+        // Entry already at MAX_LABELS - 1, adding 5 more should truncate
+        let mut entry = make_entry("Dense memory", vec![1.0, 0.0, 0.0]);
+        entry.enriched = true;
+        entry.label_version = 1;
+        entry.labels = (0..crate::labels::MAX_LABELS_PER_ENTRY - 1)
+            .map(|i| format!("existing:label{i}"))
+            .collect();
+        store.add(entry);
+
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+            &LabelMockConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
+        );
+
+        assert_eq!(result.labels_enriched, 1);
+        let updated = store.entry_at(0).unwrap();
+        assert!(
+            updated.labels.len() <= crate::labels::MAX_LABELS_PER_ENTRY,
+            "Labels should be truncated at MAX ({}), got {}",
+            crate::labels::MAX_LABELS_PER_ENTRY,
+            updated.labels.len()
+        );
     }
 }

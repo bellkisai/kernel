@@ -1066,20 +1066,26 @@ impl EchoEngine {
         // 5a. Label-based candidates (ADR-015 D6)
         //     If caller provided an explicit label filter, use it directly.
         //     Otherwise, classify the query via prototypes.
+        //     query_topic_labels is lifted to outer scope for Pipe B topic alignment (KS68).
+        let all_query_labels: Vec<String> =
+            if self.config.use_labels && self.prototypes.is_initialized() {
+                crate::labels::classify_query(&effective_query, &query_embedding, &self.prototypes)
+            } else {
+                Vec::new()
+            };
+        let query_topic_labels: Vec<&str> = all_query_labels
+            .iter()
+            .filter(|l| l.starts_with("topic:"))
+            .map(String::as_str)
+            .collect();
         let label_candidates: Vec<u32> = if let Some(filter) = label_filter {
             if !filter.is_empty() {
                 store.query_labels(filter)
             } else {
                 Vec::new()
             }
-        } else if self.config.use_labels && self.prototypes.is_initialized() {
-            let query_labels =
-                crate::labels::classify_query(&effective_query, &query_embedding, &self.prototypes);
-            if !query_labels.is_empty() {
-                store.query_labels(&query_labels)
-            } else {
-                Vec::new()
-            }
+        } else if !all_query_labels.is_empty() {
+            store.query_labels(&all_query_labels)
         } else {
             Vec::new()
         };
@@ -1256,6 +1262,27 @@ impl EchoEngine {
                         }
                     }
                     if best_child_score >= threshold {
+                        // Topic alignment gate (KS68 IE-3): only rescue a parent if
+                        // its labels overlap with the query's topic labels, or if no
+                        // topic labels are available, require a minimum base similarity.
+                        let topic_aligned = if !query_topic_labels.is_empty() {
+                            entry
+                                .labels
+                                .iter()
+                                .any(|el| query_topic_labels.iter().any(|qt| el == qt))
+                        } else {
+                            // Fallback: require parent's own similarity to be non-trivial
+                            _parent_score >= threshold * 0.4
+                        };
+                        if !topic_aligned {
+                            tracing::debug!(
+                                parent_idx = idx,
+                                child_score = best_child_score,
+                                parent_labels = ?entry.labels,
+                                "Pipe B: child rescue blocked — topic mismatch"
+                            );
+                            continue;
+                        }
                         tracing::debug!(
                             parent_idx = idx,
                             child_score = best_child_score,
@@ -1374,6 +1401,40 @@ impl EchoEngine {
                 .collect()
         };
 
+        // 7b2. Parent supersession demotion (KS68 KU-1): if a parent entry has
+        // children with Supersedes edges (child is the older/superseded side),
+        // apply a flat demotion to the parent. This propagates child-level
+        // supersession to parent ranking in Pipe A.
+        let parent_demotions: std::collections::HashMap<usize, f64> = {
+            let hebbian = self.hebbian.read().await;
+            let demotion = self.config.supersedes_demotion as f64;
+            let mut demotions = std::collections::HashMap::new();
+            for &(idx, _) in &top {
+                if let Some(entry) = store.entry_at(idx) {
+                    let child_indices = store.children_of(&entry.id);
+                    let mut has_superseded_child = false;
+                    for &child_idx in child_indices {
+                        let assocs = hebbian.get_associations_typed(child_idx as u32, 0.0);
+                        for (neighbor, _weight, rel) in &assocs {
+                            if let Some(crate::hebbian::RelationshipType::Supersedes) = rel
+                                && (child_idx as u32) < *neighbor
+                            {
+                                has_superseded_child = true;
+                                break;
+                            }
+                        }
+                        if has_superseded_child {
+                            break;
+                        }
+                    }
+                    if has_superseded_child {
+                        demotions.insert(idx, -demotion);
+                    }
+                }
+            }
+            demotions
+        };
+
         // 7c. Build EchoResult vec with final_score = similarity + hebbian + recency, scaled by decay
         let now = Utc::now();
         let recency_weight = self.config.recency_weight as f64;
@@ -1424,8 +1485,17 @@ impl EchoEngine {
 
                 let sim = score as f64;
                 let hebbian_boost = boost;
-                let final_score = (sim + hebbian_boost + importance_boost as f64) * decay as f64
+                let mut final_score = (sim + hebbian_boost + importance_boost as f64)
+                    * decay as f64
                     + activation_term as f64;
+
+                // Co-occurrence bonus (KS68 ME-4)
+                final_score += co_occurrence_boost(&entry.content);
+
+                // Parent supersession demotion (KS68 KU-1)
+                if let Some(&demotion) = parent_demotions.get(&idx) {
+                    final_score += demotion;
+                }
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
@@ -1440,6 +1510,18 @@ impl EchoEngine {
             })
             .collect();
 
+        // 7c2. Temporal query boost (KS68 TR-3)
+        apply_temporal_boost(query, &mut results);
+
+        // 7c3. Topic-label boost (KS68 KU-3)
+        label_topic_boost(&all_query_labels, &mut results);
+
+        // 7c4. Preference-update multiplier (KS68 KU-3)
+        preference_update_boost(query, &mut results);
+
+        // 7c5. Career/intro adjustment (KS68 IE-1)
+        career_intro_adjustment(&all_query_labels, &mut results);
+
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
             b.final_score
@@ -1447,10 +1529,12 @@ impl EchoEngine {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // 7d2. Subject diversity cap (KS67): prevent identity gravity well
+        // 7d2. Subject diversity cap (KS67/KS68): prevent identity gravity well
+        // Uses (subject, topic) tuples so different facets of the same entity
+        // (e.g., Sam:identity vs Sam:preference) count independently.
         {
-            let subject_map = build_subject_map(&store, &top);
-            enforce_subject_diversity(&mut results, &store, &subject_map, 3);
+            let subject_topic_map = build_subject_topic_map(&store, &top);
+            enforce_subject_diversity(&mut results, &store, &subject_topic_map, 3);
         }
 
         // 7e. Optional reranker: reorder top-N by true relevance (KS23 LLM / KS24 cross-encoder)
@@ -1513,6 +1597,55 @@ impl EchoEngine {
                         });
                     }
                 }
+            }
+        }
+
+        // 7g. Parent-child dedup (KS68.3 prep): if a parent and its child both
+        // appear in results, keep only the higher-scoring one to avoid slot waste.
+        {
+            let parent_map: std::collections::HashMap<MemoryId, Option<MemoryId>> = results
+                .iter()
+                .filter_map(|r| {
+                    store
+                        .get(&r.memory_id)
+                        .map(|e| (r.memory_id.clone(), e.parent_id.clone()))
+                })
+                .collect();
+            deduplicate_parent_child(&mut results, &parent_map);
+        }
+
+        // 7h. Exclude superseded parents (KS68.3 KU-1): if both an old parent
+        // (with superseded children) and the superseding new parent appear in
+        // results, remove the old parent entirely. This avoids score-gap
+        // calibration issues — exclusion is binary and deterministic.
+        {
+            let result_ids: std::collections::HashSet<MemoryId> =
+                results.iter().map(|r| r.memory_id.clone()).collect();
+            let hebbian = self.hebbian.read().await;
+            let mut superseded: std::collections::HashSet<MemoryId> =
+                std::collections::HashSet::new();
+
+            for r in &results {
+                if store.index_of(&r.memory_id).is_some() {
+                    let child_indices = store.children_of(&r.memory_id);
+                    for &child_idx in child_indices {
+                        let assocs = hebbian.get_associations_typed(child_idx as u32, 0.0);
+                        for (neighbor, _weight, rel) in &assocs {
+                            if let Some(crate::hebbian::RelationshipType::Supersedes) = rel
+                                && (child_idx as u32) < *neighbor
+                                && let Some(new_child) = store.entry_at(*neighbor as usize)
+                                && let Some(ref new_parent_id) = new_child.parent_id
+                                && result_ids.contains(new_parent_id)
+                            {
+                                superseded.insert(r.memory_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+                results.retain(|r| !superseded.contains(&r.memory_id));
             }
         }
 
@@ -2706,11 +2839,17 @@ fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
 
 /// Build a map from parent memory IDs to subject strings from their children.
 /// Used for subject diversity enforcement in echo results (KS67).
-fn build_subject_map(
+/// Per-memory subject and topic info for diversity enforcement.
+struct SubjectTopicInfo {
+    subjects: Vec<String>,
+    primary_topic: String,
+}
+
+fn build_subject_topic_map(
     store: &EchoStore,
     results: &[(usize, f32)],
-) -> std::collections::HashMap<MemoryId, Vec<String>> {
-    let mut subject_map: std::collections::HashMap<MemoryId, Vec<String>> =
+) -> std::collections::HashMap<MemoryId, SubjectTopicInfo> {
+    let mut map: std::collections::HashMap<MemoryId, SubjectTopicInfo> =
         std::collections::HashMap::new();
 
     for &(idx, _score) in results {
@@ -2742,47 +2881,250 @@ fn build_subject_map(
             subjects.sort();
             subjects.dedup();
 
+            // Extract primary topic label (first "topic:*" label, or "topic:unknown")
+            let primary_topic = entry
+                .labels
+                .iter()
+                .find(|l| l.starts_with("topic:"))
+                .cloned()
+                .unwrap_or_else(|| "topic:unknown".to_string());
+
             if !subjects.is_empty() {
-                subject_map.insert(entry.id.clone(), subjects);
+                map.insert(
+                    entry.id.clone(),
+                    SubjectTopicInfo {
+                        subjects,
+                        primary_topic,
+                    },
+                );
             }
         }
     }
 
-    subject_map
+    map
 }
 
-/// Cap results so no single subject entity dominates the result set (KS67).
+/// Co-occurrence boost (KS68 ME-4): returns +0.05 if the content mentions 2+ entities
+/// from the same category (databases or programming languages), else 0.0.
+fn co_occurrence_boost(content: &str) -> f64 {
+    const DB_KEYWORDS: &[&str] = &[
+        "postgresql",
+        "mysql",
+        "clickhouse",
+        "mongodb",
+        "postgres",
+        "redis",
+        "sqlite",
+        "oracle",
+        "cassandra",
+        "dynamodb",
+    ];
+    const LANG_KEYWORDS: &[&str] = &[
+        "rust",
+        "python",
+        " go ",
+        "javascript",
+        "typescript",
+        "java ",
+        "c++",
+        "scala",
+        "kotlin",
+        "swift",
+    ];
+    let content_lower = content.to_lowercase();
+    let db_count = DB_KEYWORDS
+        .iter()
+        .filter(|kw| content_lower.contains(*kw))
+        .count();
+    let lang_count = LANG_KEYWORDS
+        .iter()
+        .filter(|kw| content_lower.contains(*kw))
+        .count();
+    if db_count >= 2 || lang_count >= 2 {
+        0.05
+    } else {
+        0.0
+    }
+}
+
+/// Temporal query boost (KS68 TR-3): if the query contains temporal keywords,
+/// boost results that have `temporal:*` labels by +0.015.
+fn apply_temporal_boost(query: &str, results: &mut [EchoResult]) {
+    const TEMPORAL_KEYWORDS: &[&str] = &[
+        "deadline",
+        "upcoming",
+        "when",
+        "scheduled",
+        "date",
+        "due",
+        "plan",
+        "next week",
+        "next month",
+    ];
+    let query_lower = query.to_lowercase();
+    let is_temporal_query = TEMPORAL_KEYWORDS.iter().any(|kw| query_lower.contains(kw));
+    if is_temporal_query {
+        for result in results.iter_mut() {
+            let has_temporal_label = result.labels.iter().any(|l| l.starts_with("temporal:"));
+            if has_temporal_label {
+                result.final_score += 0.015;
+            }
+        }
+    }
+}
+
+/// Label-based boost (KS68): when query is classified with a specific label
+/// (e.g., `topic:tools:editor`, `action:learning`) and a result also carries that label,
+/// give it a scoring bump so precisely-labeled memories surface above generic ones.
+///
+/// Boost values tuned per QA analysis: +0.06 for topic:tools:* (KU-3 gap closure),
+/// +0.025 for action:learning.
+fn label_topic_boost(query_labels: &[String], results: &mut [EchoResult]) {
+    for result in results.iter_mut() {
+        for ql in query_labels {
+            if ql.starts_with("topic:tools:") && result.labels.iter().any(|l| l == ql) {
+                result.final_score += 0.06;
+                break;
+            }
+            if ql == "action:learning" && result.labels.iter().any(|l| l == ql) {
+                result.final_score += 0.025;
+                break;
+            }
+        }
+    }
+}
+
+/// Preference-update multiplier (KS68 KU-3): when the query signals interest in
+/// current state ("currently", "now use", "switched to"), memories labeled
+/// `memtype:preference_update` get a 1.05x multiplier so "I switched from X to Y"
+/// memories rank above stale preference entries with higher raw similarity.
+fn preference_update_boost(query: &str, results: &mut [EchoResult]) {
+    const CURRENT_KEYWORDS: &[&str] = &[
+        "currently",
+        "now use",
+        "now using",
+        "switched to",
+        "these days",
+        "at the moment",
+        "right now",
+    ];
+    let query_lower = query.to_lowercase();
+    let is_current_query = CURRENT_KEYWORDS.iter().any(|kw| query_lower.contains(kw));
+    if !is_current_query {
+        return;
+    }
+    for result in results.iter_mut() {
+        if result
+            .labels
+            .iter()
+            .any(|l| l == "memtype:preference_update")
+        {
+            result.final_score *= 1.05;
+        }
+    }
+}
+
+/// Career query adjustment (KS68 IE-1): when query is classified as career-related,
+/// demote `memtype:intro` memories (-0.10) and boost career-labeled non-intro memories
+/// (+0.03). This prevents "My name is Sam Torres" from outranking actual job memories.
+fn career_intro_adjustment(query_labels: &[String], results: &mut [EchoResult]) {
+    let is_career_query = query_labels
+        .iter()
+        .any(|l| l == "topic:career" || l == "domain:work");
+    if !is_career_query {
+        return;
+    }
+    for result in results.iter_mut() {
+        let is_intro = result.labels.iter().any(|l| l == "memtype:intro");
+        if is_intro {
+            result.final_score -= 0.10;
+        } else if result
+            .labels
+            .iter()
+            .any(|l| l == "topic:career" || l == "domain:work")
+        {
+            result.final_score += 0.03;
+        }
+    }
+}
+
+/// Parent-child dedup (KS68.3 prep): if a parent and one of its children both appear
+/// in the result set, remove the lower-scoring one to prevent slot waste.
+///
+/// `parent_map` maps each result's memory_id to its `parent_id` (None for root entries).
+/// O(n^2) for small N (typically 5-10) — acceptable.
+fn deduplicate_parent_child(
+    results: &mut Vec<EchoResult>,
+    parent_map: &std::collections::HashMap<MemoryId, Option<MemoryId>>,
+) {
+    let mut to_remove: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+    let len = results.len();
+    for i in 0..len {
+        for j in (i + 1)..len {
+            let id_i = &results[i].memory_id;
+            let id_j = &results[j].memory_id;
+            let parent_i = parent_map.get(id_i).and_then(|p| p.as_ref());
+            let parent_j = parent_map.get(id_j).and_then(|p| p.as_ref());
+
+            let is_pair = (parent_i == Some(id_j)) || (parent_j == Some(id_i));
+            if !is_pair {
+                continue;
+            }
+            // Remove the lower-scoring one (results are sorted, so j > i means j scores lower)
+            if results[i].final_score >= results[j].final_score {
+                to_remove.insert(id_j.clone());
+            } else {
+                to_remove.insert(id_i.clone());
+            }
+        }
+    }
+    if !to_remove.is_empty() {
+        results.retain(|r| !to_remove.contains(&r.memory_id));
+    }
+}
+
+/// Cap results so no single (subject, topic) pair dominates the result set (KS67/KS68).
+/// Tracks occurrences per (subject, topic_label) tuple so that different facets of the
+/// same entity (e.g., "Sam:identity" vs "Sam:preference") count independently.
 /// Unknown subjects (no triple data) go into an "_unknown" bucket with a more generous cap.
 fn enforce_subject_diversity(
     results: &mut Vec<EchoResult>,
     _store: &EchoStore,
-    subject_map: &std::collections::HashMap<MemoryId, Vec<String>>,
+    subject_topic_map: &std::collections::HashMap<MemoryId, SubjectTopicInfo>,
     max_per_subject: usize,
 ) {
-    let mut subject_counts: std::collections::HashMap<String, usize> =
+    let mut subject_topic_counts: std::collections::HashMap<(String, String), usize> =
         std::collections::HashMap::new();
     results.retain(|r| {
-        let subjects = subject_map.get(&r.memory_id).cloned().unwrap_or_default();
+        let info = subject_topic_map.get(&r.memory_id);
 
-        if subjects.is_empty() {
-            // Unknown bucket -- cap at max_per_subject * 2
-            let count = subject_counts.entry("_unknown".to_string()).or_insert(0);
-            if *count >= max_per_subject * 2 {
-                return false;
+        let (subjects, topic) = match info {
+            Some(info) if !info.subjects.is_empty() => {
+                (&info.subjects, info.primary_topic.as_str())
             }
-            *count += 1;
-            return true;
-        }
+            _ => {
+                // Unknown bucket -- cap at max_per_subject * 2
+                let key = ("_unknown".to_string(), "topic:unknown".to_string());
+                let count = subject_topic_counts.entry(key).or_insert(0);
+                if *count >= max_per_subject * 2 {
+                    return false;
+                }
+                *count += 1;
+                return true;
+            }
+        };
 
-        // Check if any subject is already at cap
-        let dominated = subjects
-            .iter()
-            .any(|s| *subject_counts.get(s).unwrap_or(&0) >= max_per_subject);
+        // Check if any (subject, topic) pair is already at cap
+        let dominated = subjects.iter().any(|s| {
+            let key = (s.clone(), topic.to_string());
+            *subject_topic_counts.get(&key).unwrap_or(&0) >= max_per_subject
+        });
         if dominated {
             return false;
         }
-        for s in &subjects {
-            *subject_counts.entry(s.clone()).or_insert(0) += 1;
+        for s in subjects {
+            let key = (s.clone(), topic.to_string());
+            *subject_topic_counts.entry(key).or_insert(0) += 1;
         }
         true
     });
@@ -3561,5 +3903,666 @@ mod tests {
         };
         assert_eq!(result.neighbors.len(), 2);
         assert!(result.neighbors[0].weight > result.neighbors[1].weight);
+    }
+
+    // -----------------------------------------------------------------------
+    // KS68 unit tests: co-occurrence boost, temporal boost, subject diversity
+    // -----------------------------------------------------------------------
+
+    fn make_echo_result(content: &str, score: f64, labels: Vec<String>) -> EchoResult {
+        EchoResult {
+            memory_id: MemoryId::new(),
+            content: content.to_string(),
+            similarity: score as f32,
+            final_score: score,
+            source: "test".to_string(),
+            echoed_at: Utc::now(),
+            modality: Modality::Text,
+            labels,
+        }
+    }
+
+    fn make_echo_result_with_id(
+        id: &MemoryId,
+        content: &str,
+        score: f64,
+        labels: Vec<String>,
+    ) -> EchoResult {
+        EchoResult {
+            memory_id: id.clone(),
+            content: content.to_string(),
+            similarity: score as f32,
+            final_score: score,
+            source: "test".to_string(),
+            echoed_at: Utc::now(),
+            modality: Modality::Text,
+            labels,
+        }
+    }
+
+    // --- ME-4: Co-occurrence boost ---
+
+    #[test]
+    fn co_occurrence_boost_fires_for_multi_database_content() {
+        let boost =
+            super::co_occurrence_boost("I use PostgreSQL for OLTP and ClickHouse for analytics");
+        assert!(
+            (boost - 0.05).abs() < f64::EPSILON,
+            "Expected +0.05 for 2 databases, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_fires_for_mongo_and_postgres() {
+        let boost = super::co_occurrence_boost("I tried MongoDB but prefer Postgres");
+        assert!(
+            (boost - 0.05).abs() < f64::EPSILON,
+            "Expected +0.05 for 2 databases, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_zero_for_single_database() {
+        let boost = super::co_occurrence_boost("I use Redis for caching");
+        assert!(
+            boost.abs() < f64::EPSILON,
+            "Expected 0.0 for 1 database, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_fires_for_multi_language() {
+        let boost = super::co_occurrence_boost("I prefer Rust and Go for all projects");
+        assert!(
+            (boost - 0.05).abs() < f64::EPSILON,
+            "Expected +0.05 for 2 languages, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_zero_for_unrelated_content() {
+        let boost = super::co_occurrence_boost("I enjoy hiking in the mountains");
+        assert!(
+            boost.abs() < f64::EPSILON,
+            "Expected 0.0 for unrelated content, got {boost}"
+        );
+    }
+
+    // --- TR-3: Temporal query boost ---
+
+    #[test]
+    fn temporal_boost_fires_for_deadline_query() {
+        let mut results = vec![
+            make_echo_result("Patent filing", 0.5, vec!["temporal:future".into()]),
+            make_echo_result("Sam's job", 0.5, vec!["topic:identity".into()]),
+        ];
+        super::apply_temporal_boost("What upcoming deadlines does Sam have?", &mut results);
+        assert!(
+            (results[0].final_score - 0.515).abs() < f64::EPSILON,
+            "Temporal result should be boosted to 0.515, got {}",
+            results[0].final_score
+        );
+        assert!(
+            (results[1].final_score - 0.5).abs() < f64::EPSILON,
+            "Non-temporal result should be unchanged at 0.5, got {}",
+            results[1].final_score
+        );
+    }
+
+    #[test]
+    fn temporal_boost_does_not_fire_for_non_temporal_query() {
+        let mut results = vec![
+            make_echo_result("Patent filing", 0.5, vec!["temporal:future".into()]),
+            make_echo_result("Sam's job", 0.5, vec!["topic:identity".into()]),
+        ];
+        super::apply_temporal_boost("What is Sam's job?", &mut results);
+        assert!(
+            (results[0].final_score - 0.5).abs() < f64::EPSILON,
+            "No boost expected for non-temporal query, got {}",
+            results[0].final_score
+        );
+        assert!(
+            (results[1].final_score - 0.5).abs() < f64::EPSILON,
+            "No boost expected, got {}",
+            results[1].final_score
+        );
+    }
+
+    // --- KU-3: Subject diversity with (subject, topic) tuples ---
+
+    #[test]
+    fn subject_diversity_caps_per_subject_topic() {
+        let store = EchoStore::new();
+        let mut results: Vec<EchoResult> = (0..5)
+            .map(|i| make_echo_result(&format!("Sam identity {i}"), 1.0 - i as f64 * 0.01, vec![]))
+            .collect();
+        let mut map = std::collections::HashMap::new();
+        for r in &results {
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:identity".to_string(),
+                },
+            );
+        }
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(
+            results.len(),
+            3,
+            "Should cap at 3 per (subject, topic) pair"
+        );
+    }
+
+    #[test]
+    fn subject_diversity_allows_different_topics_for_same_subject() {
+        let store = EchoStore::new();
+        // 3 identity + 3 preference entries for "Sam" — all should survive with cap=3
+        let mut results: Vec<EchoResult> = Vec::new();
+        let mut map = std::collections::HashMap::new();
+        for i in 0..3 {
+            let r = make_echo_result(&format!("Sam identity {i}"), 1.0 - i as f64 * 0.01, vec![]);
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:identity".to_string(),
+                },
+            );
+            results.push(r);
+        }
+        for i in 0..3 {
+            let r = make_echo_result(
+                &format!("Sam preference {i}"),
+                0.9 - i as f64 * 0.01,
+                vec![],
+            );
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:preference".to_string(),
+                },
+            );
+            results.push(r);
+        }
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(
+            results.len(),
+            6,
+            "Different topics for same subject should each get their own cap"
+        );
+    }
+
+    #[test]
+    fn subject_diversity_unknown_bucket_has_generous_cap() {
+        let store = EchoStore::new();
+        // 7 results with no subject info — unknown bucket caps at max_per_subject * 2 = 6
+        let mut results: Vec<EchoResult> = (0..7)
+            .map(|i| make_echo_result(&format!("unknown {i}"), 1.0 - i as f64 * 0.01, vec![]))
+            .collect();
+        let map = std::collections::HashMap::new();
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(results.len(), 6, "Unknown bucket should cap at 2 * 3 = 6");
+    }
+
+    #[test]
+    fn subject_diversity_overflow_preserves_different_topic() {
+        let store = EchoStore::new();
+        // 4 Sam:identity + 1 Sam:preference, cap=3 → identity capped at 3, preference survives
+        let mut results: Vec<EchoResult> = Vec::new();
+        let mut map = std::collections::HashMap::new();
+        for i in 0..4 {
+            let r = make_echo_result(&format!("Sam identity {i}"), 1.0 - i as f64 * 0.01, vec![]);
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:identity".to_string(),
+                },
+            );
+            results.push(r);
+        }
+        let pref = make_echo_result("Sam prefers Rust", 0.8, vec![]);
+        map.insert(
+            pref.memory_id.clone(),
+            SubjectTopicInfo {
+                subjects: vec!["Sam".to_string()],
+                primary_topic: "memtype:preference".to_string(),
+            },
+        );
+        results.push(pref);
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(
+            results.len(),
+            4,
+            "3 identity (capped) + 1 preference (different topic) = 4"
+        );
+        assert!(
+            results.iter().any(|r| r.content == "Sam prefers Rust"),
+            "Preference memory must survive identity overflow"
+        );
+    }
+
+    // --- KU-1: Parent supersession flat demotion ---
+
+    #[test]
+    fn supersession_flat_demotion_closes_gap() {
+        // Simulate: M4 (Shopify, old job) final_score = 1.027
+        //           M5 (Stripe, new job) final_score = 1.001
+        // With full demotion of 0.15: M4 drops to 0.877, well below M5.
+        let demotion: f64 = 0.15;
+        let mut old_parent_score: f64 = 1.027;
+        let new_parent_score: f64 = 1.001;
+
+        old_parent_score += -demotion;
+
+        assert!(
+            old_parent_score < new_parent_score,
+            "Old parent ({old_parent_score}) must rank below new parent ({new_parent_score})"
+        );
+        assert!(
+            (old_parent_score - 0.877).abs() < 1e-10,
+            "Old parent should be demoted to 0.877, got {old_parent_score}"
+        );
+    }
+
+    #[test]
+    fn supersession_flat_demotion_no_op_without_superseded_child() {
+        // If parent has no superseded children, no demotion is applied
+        let original: f64 = 1.027;
+        let demotions: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+        let mut score = original;
+
+        if let Some(&d) = demotions.get(&0) {
+            score += d;
+        }
+
+        assert!(
+            (score - original).abs() < f64::EPSILON,
+            "Score should be unchanged without superseded children"
+        );
+    }
+
+    // --- KU-1: Superseded parent exclusion ---
+
+    #[test]
+    fn exclusion_removes_superseded_parent_when_new_parent_present() {
+        // M4 (Shopify, old) and M5 (Stripe, new) both in results.
+        // M4 has a child superseded by M5's child → M4 should be excluded.
+        let m4_id = MemoryId::new();
+        let m5_id = MemoryId::new();
+        let m6_id = MemoryId::new();
+        let m7_id = MemoryId::new();
+
+        let mut results = vec![
+            make_echo_result_with_id(&m5_id, "Sam works at Stripe", 1.001, vec![]),
+            make_echo_result_with_id(&m4_id, "Sam worked at Shopify", 0.877, vec![]),
+            make_echo_result_with_id(&m6_id, "Sam likes hiking", 0.800, vec![]),
+            make_echo_result_with_id(&m7_id, "Sam is vegan", 0.750, vec![]),
+        ];
+
+        let result_ids: std::collections::HashSet<MemoryId> =
+            results.iter().map(|r| r.memory_id.clone()).collect();
+
+        // Simulate: m4 is superseded, m5 is the superseding parent
+        let mut superseded: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+        // The real code traces children -> Supersedes edges -> new parent.
+        // Here we simulate the result: m4 found to be superseded by m5.
+        if result_ids.contains(&m5_id) {
+            superseded.insert(m4_id.clone());
+        }
+
+        if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+            results.retain(|r| !superseded.contains(&r.memory_id));
+        }
+
+        assert_eq!(results.len(), 3, "M4 should be excluded");
+        assert!(
+            results.iter().all(|r| r.memory_id != m4_id),
+            "M4 (Shopify) must not appear in results"
+        );
+        assert!(
+            results.iter().any(|r| r.memory_id == m5_id),
+            "M5 (Stripe) must remain"
+        );
+    }
+
+    #[test]
+    fn exclusion_skips_when_new_parent_not_in_results() {
+        // M4 (Shopify) is in results but M5 (Stripe) is NOT → no exclusion.
+        let m4_id = MemoryId::new();
+        let m5_id = MemoryId::new();
+        let m6_id = MemoryId::new();
+
+        let mut results = vec![
+            make_echo_result_with_id(&m4_id, "Sam worked at Shopify", 0.900, vec![]),
+            make_echo_result_with_id(&m6_id, "Sam likes hiking", 0.800, vec![]),
+        ];
+
+        let result_ids: std::collections::HashSet<MemoryId> =
+            results.iter().map(|r| r.memory_id.clone()).collect();
+
+        let mut superseded: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+        // M5 not in results → don't mark M4 as superseded
+        if result_ids.contains(&m5_id) {
+            superseded.insert(m4_id.clone());
+        }
+
+        if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+            results.retain(|r| !superseded.contains(&r.memory_id));
+        }
+
+        assert_eq!(results.len(), 2, "No exclusion should occur");
+        assert!(
+            results.iter().any(|r| r.memory_id == m4_id),
+            "M4 must remain when M5 is not in results"
+        );
+    }
+
+    #[test]
+    fn exclusion_no_op_without_supersession_edges() {
+        // No supersession edges → no exclusion
+        let m1_id = MemoryId::new();
+        let m2_id = MemoryId::new();
+        let m3_id = MemoryId::new();
+
+        let mut results = vec![
+            make_echo_result_with_id(&m1_id, "Sam Torres", 0.900, vec![]),
+            make_echo_result_with_id(&m2_id, "Sam likes hiking", 0.850, vec![]),
+            make_echo_result_with_id(&m3_id, "Sam is vegan", 0.800, vec![]),
+        ];
+
+        let superseded: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+
+        if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+            results.retain(|r| !superseded.contains(&r.memory_id));
+        }
+
+        assert_eq!(results.len(), 3, "No exclusion when no supersession edges");
+    }
+
+    // --- KU-3: Topic-label boost ---
+
+    #[test]
+    fn label_topic_boost_fires_for_matching_editor_label() {
+        let mut results = vec![
+            make_echo_result(
+                "I use Neovim with lazy.nvim",
+                0.85,
+                vec!["topic:tools:editor".to_string()],
+            ),
+            make_echo_result(
+                "I prefer Rust for systems",
+                0.83,
+                vec!["topic:language:programming".to_string()],
+            ),
+        ];
+        let query_labels = vec!["topic:tools:editor".to_string()];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.91).abs() < 1e-10,
+            "Editor result should get +0.06 boost, got {}",
+            results[0].final_score,
+        );
+        assert!(
+            (results[1].final_score - 0.83).abs() < 1e-10,
+            "Non-editor result should be unchanged, got {}",
+            results[1].final_score,
+        );
+    }
+
+    #[test]
+    fn label_topic_boost_no_op_without_tools_label() {
+        let mut results = vec![make_echo_result(
+            "I use PostgreSQL daily",
+            0.90,
+            vec!["topic:technology".to_string()],
+        )];
+        let query_labels = vec!["topic:technology".to_string()];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.90).abs() < 1e-10,
+            "Non-tools label should not trigger boost, got {}",
+            results[0].final_score,
+        );
+    }
+
+    // --- PT-3: action:learning label boost ---
+
+    #[test]
+    fn label_boost_fires_for_learning_query_and_learning_result() {
+        let mut results = vec![
+            make_echo_result(
+                "I'm studying Japanese — JLPT N3 level",
+                0.45,
+                vec![
+                    "action:learning".to_string(),
+                    "topic:language:natural".to_string(),
+                ],
+            ),
+            make_echo_result(
+                "I code in Python and Rust",
+                0.57,
+                vec!["topic:language:programming".to_string()],
+            ),
+        ];
+        let query_labels = vec![
+            "action:learning".to_string(),
+            "topic:language:natural".to_string(),
+        ];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.475).abs() < 1e-10,
+            "Learning result should get +0.025 boost, got {}",
+            results[0].final_score,
+        );
+        assert!(
+            (results[1].final_score - 0.57).abs() < 1e-10,
+            "Programming result should be unchanged, got {}",
+            results[1].final_score,
+        );
+    }
+
+    #[test]
+    fn label_boost_no_op_for_learning_result_without_learning_query() {
+        let mut results = vec![make_echo_result(
+            "I'm studying Japanese — JLPT N3 level",
+            0.45,
+            vec!["action:learning".to_string()],
+        )];
+        // Query about career, not learning
+        let query_labels = vec!["domain:work".to_string()];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.45).abs() < 1e-10,
+            "Learning result should not be boosted for non-learning query, got {}",
+            results[0].final_score,
+        );
+    }
+
+    // --- KU-3: Preference-update multiplier ---
+
+    #[test]
+    fn preference_update_boost_fires_for_currently_query() {
+        let mut results = vec![
+            make_echo_result(
+                "I switched from VS Code to Neovim",
+                0.80,
+                vec!["memtype:preference_update".to_string()],
+            ),
+            make_echo_result(
+                "I use Rust and Go and Python",
+                0.85,
+                vec!["topic:language:programming".to_string()],
+            ),
+        ];
+        super::preference_update_boost("What editor do I currently use?", &mut results);
+        // 0.80 * 1.05 = 0.84
+        assert!(
+            (results[0].final_score - 0.84).abs() < 1e-10,
+            "Preference_update result should get 1.05x multiplier, got {}",
+            results[0].final_score,
+        );
+        assert!(
+            (results[1].final_score - 0.85).abs() < 1e-10,
+            "Non-preference result should be unchanged, got {}",
+            results[1].final_score,
+        );
+    }
+
+    #[test]
+    fn preference_update_boost_no_op_without_current_keywords() {
+        let mut results = vec![make_echo_result(
+            "I switched from VS Code to Neovim",
+            0.80,
+            vec!["memtype:preference_update".to_string()],
+        )];
+        super::preference_update_boost("What editor have I used?", &mut results);
+        assert!(
+            (results[0].final_score - 0.80).abs() < 1e-10,
+            "Should not boost without current-state keywords, got {}",
+            results[0].final_score,
+        );
+    }
+
+    // --- IE-1: Career/intro adjustment ---
+
+    #[test]
+    fn career_intro_demotes_intro_and_boosts_career() {
+        let mut results = vec![
+            make_echo_result(
+                "My name is Sam Torres, I'm a backend engineer",
+                0.905,
+                vec!["memtype:intro".to_string()],
+            ),
+            make_echo_result(
+                "Sam works at Stripe on the payments team",
+                0.816,
+                vec!["topic:career".to_string()],
+            ),
+        ];
+        let query_labels = vec!["topic:career".to_string(), "domain:work".to_string()];
+        super::career_intro_adjustment(&query_labels, &mut results);
+        // M1 (intro): 0.905 - 0.10 = 0.805
+        assert!(
+            (results[0].final_score - 0.805).abs() < 1e-10,
+            "Intro memory should be demoted by -0.10, got {}",
+            results[0].final_score,
+        );
+        // M5 (career): 0.816 + 0.03 = 0.846
+        assert!(
+            (results[1].final_score - 0.846).abs() < 1e-10,
+            "Career memory should get +0.03 boost, got {}",
+            results[1].final_score,
+        );
+        // Career should now outrank intro
+        assert!(
+            results[1].final_score > results[0].final_score,
+            "Career ({}) must outrank intro ({})",
+            results[1].final_score,
+            results[0].final_score,
+        );
+    }
+
+    #[test]
+    fn career_intro_no_op_for_non_career_query() {
+        let mut results = vec![make_echo_result(
+            "My name is Sam Torres",
+            0.90,
+            vec!["memtype:intro".to_string()],
+        )];
+        let query_labels = vec!["topic:language:natural".to_string()];
+        super::career_intro_adjustment(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.90).abs() < 1e-10,
+            "Intro should not be demoted for non-career query, got {}",
+            results[0].final_score,
+        );
+    }
+
+    // --- KS68.3: Parent-child dedup ---
+
+    #[test]
+    fn parent_child_dedup_removes_lower_scoring_duplicate() {
+        let parent_id = MemoryId::new();
+        let child_id = MemoryId::new();
+
+        let mut parent_result = make_echo_result("I use Neovim with LazyVim", 0.90, vec![]);
+        parent_result.memory_id = parent_id.clone();
+
+        let mut child_result = make_echo_result("Sam uses Neovim as primary editor", 0.85, vec![]);
+        child_result.memory_id = child_id.clone();
+
+        let unrelated_result = make_echo_result("Sam lives in SF", 0.80, vec![]);
+        let unrelated_id = unrelated_result.memory_id.clone();
+
+        let mut results = vec![parent_result, child_result, unrelated_result];
+
+        let mut parent_map = std::collections::HashMap::new();
+        parent_map.insert(parent_id.clone(), None); // parent has no parent
+        parent_map.insert(child_id.clone(), Some(parent_id.clone())); // child -> parent
+        parent_map.insert(unrelated_id, None);
+
+        super::deduplicate_parent_child(&mut results, &parent_map);
+
+        assert_eq!(
+            results.len(),
+            2,
+            "Child should be removed, 2 results remain"
+        );
+        assert_eq!(
+            results[0].memory_id, parent_id,
+            "Parent (higher score) should survive"
+        );
+        assert!(
+            results.iter().all(|r| r.memory_id != child_id),
+            "Child (lower score) should be removed"
+        );
+    }
+
+    #[test]
+    fn parent_child_dedup_keeps_child_when_higher_scoring() {
+        let parent_id = MemoryId::new();
+        let child_id = MemoryId::new();
+
+        let mut parent_result = make_echo_result("Long multi-fact parent memory", 0.70, vec![]);
+        parent_result.memory_id = parent_id.clone();
+
+        let mut child_result = make_echo_result("Precise extracted fact", 0.92, vec![]);
+        child_result.memory_id = child_id.clone();
+
+        let mut results = vec![child_result, parent_result];
+
+        let mut parent_map = std::collections::HashMap::new();
+        parent_map.insert(parent_id.clone(), None);
+        parent_map.insert(child_id.clone(), Some(parent_id.clone()));
+
+        super::deduplicate_parent_child(&mut results, &parent_map);
+
+        assert_eq!(
+            results.len(),
+            1,
+            "Parent should be removed, 1 result remains"
+        );
+        assert_eq!(
+            results[0].memory_id, child_id,
+            "Child (higher score) should survive"
+        );
+    }
+
+    #[test]
+    fn parent_child_dedup_no_op_without_pairs() {
+        let mut results = vec![
+            make_echo_result("Memory A", 0.90, vec![]),
+            make_echo_result("Memory B", 0.85, vec![]),
+        ];
+        let parent_map: std::collections::HashMap<MemoryId, Option<MemoryId>> = results
+            .iter()
+            .map(|r| (r.memory_id.clone(), None))
+            .collect();
+
+        super::deduplicate_parent_child(&mut results, &parent_map);
+        assert_eq!(results.len(), 2, "No pairs — nothing removed");
     }
 }

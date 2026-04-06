@@ -135,8 +135,18 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
             "career, employment, job, work position, company, hiring, promotion, salary, interview, resume, professional development",
         ),
         (
-            "topic:language",
-            "language, languages, learning a language, studying a language, vocabulary, grammar, fluency, bilingual, translation, duolingo, rosetta stone",
+            "topic:language:natural",
+            "language learning, studying a language, vocabulary, grammar, fluency, bilingual, \
+             native speaker, accent, JLPT, Japanese, Spanish, French, German, Chinese, Korean, \
+             Mandarin, Hindi, Arabic, Portuguese, Italian, Russian, Dutch, Swedish, Turkish, \
+             Duolingo, Rosetta Stone, language exchange, speaking practice, translation",
+        ),
+        (
+            "topic:language:programming",
+            "programming language, coding language, software language, Rust, Python, Go, \
+             JavaScript, TypeScript, Java, C++, C#, Ruby, Scala, Kotlin, Swift, Haskell, \
+             Elixir, Clojure, Erlang, compiled language, interpreted language, systems programming, \
+             scripting language, functional language, object-oriented, type system, framework",
         ),
         (
             "topic:education",
@@ -165,6 +175,12 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
         (
             "topic:technology",
             "technology, programming, software, code, developer, computer, app, framework, library, algorithm, debugging, API, database, system",
+        ),
+        (
+            "topic:tools:editor",
+            "text editor, code editor, IDE, integrated development environment, Neovim, Vim, nvim, \
+             VSCode, VS Code, Visual Studio Code, JetBrains, IntelliJ, WebStorm, PyCharm, Emacs, \
+             Sublime Text, Atom, Helix, Zed, Nano, editor configuration, dotfiles, init.lua, vimrc",
         ),
         (
             "topic:finance",
@@ -270,6 +286,11 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
             "memtype:habit",
             "habit, routine, every day, always do, regular practice, ritual, pattern, custom, tendency",
         ),
+        (
+            "memtype:intro",
+            "my name is, I am, I'm a, introduction, identity, about me, call me, \
+             this is, who I am, self introduction, personal introduction",
+        ),
         // sentiment: emotional valence
         (
             "sentiment:positive",
@@ -333,6 +354,25 @@ pub fn generate_tier1_labels(
             "back then",
             "in the past",
             "formerly",
+            "last month",
+            "last year",
+            "last week",
+            "last november",
+            "last december",
+            "last january",
+            "last february",
+            "last march",
+            "last april",
+            "last may",
+            "last june",
+            "last july",
+            "last august",
+            "last september",
+            "last october",
+            "visited",
+            "years ago",
+            "months ago",
+            "weeks ago",
         ],
     ) {
         push_unique(&mut labels, "temporal:past");
@@ -346,8 +386,31 @@ pub fn generate_tier1_labels(
             "hope to",
             "considering",
             "next year",
+            "next month",
+            "next week",
+            "upcoming",
+            "deadline",
+            "filing deadline",
+            "due date",
+            "due by",
+            "submit by",
+            "expires",
+            "scheduled for",
         ],
-    ) {
+    ) || (contains_future_date(&lower)
+        && contains_any(
+            &lower,
+            &[
+                "deadline",
+                "due",
+                "filing",
+                "expires",
+                "scheduled",
+                "upcoming",
+                "submit",
+            ],
+        ))
+    {
         push_unique(&mut labels, "temporal:future");
     }
     if contains_any(
@@ -361,6 +424,56 @@ pub fn generate_tier1_labels(
         ],
     ) {
         push_unique(&mut labels, "temporal:current");
+    }
+
+    // 2b. Rule-based action:learning detection (KS68 PT-3)
+    // Supplements prototype cosine matching with explicit JLPT/language-learning keywords.
+    if contains_any(
+        &lower,
+        &[
+            "learning",
+            "studying",
+            "practicing",
+            "jlpt",
+            "fluent",
+            "native speaker",
+            "taking lessons",
+            "course",
+            "class",
+            "hiragana",
+            "katakana",
+            "kanji",
+        ],
+    ) {
+        push_unique(&mut labels, "action:learning");
+    }
+
+    // 2c. Preference update detection (KS68 KU-3)
+    // Memories about switching tools/preferences get a distinct label so queries
+    // with "currently"/"now use" can boost them over stale preference memories.
+    if contains_any(
+        &lower,
+        &[
+            "switched to",
+            "switched from",
+            "moved to",
+            "migrated to",
+            "now use",
+            "now using",
+            "replaced with",
+            "changed to",
+            "transitioned to",
+        ],
+    ) {
+        push_unique(&mut labels, "memtype:preference_update");
+    }
+
+    // 2d. Introduction/identity memory detection (KS68 IE-1)
+    if contains_any(
+        &lower,
+        &["my name is", "i am a ", "i'm a ", "call me ", "i go by"],
+    ) {
+        push_unique(&mut labels, "memtype:intro");
     }
 
     // 3. Simple entity extraction — capitalized multi-char words not at sentence start
@@ -415,9 +528,64 @@ pub fn classify_query(
     // Tier A: keyword-based query classification
     let lower = query.to_lowercase();
     if contains_any(&lower, &["language", "languages", "lingu"]) {
+        let natural_signals = contains_any(
+            &lower,
+            &[
+                "learning",
+                "studying",
+                "jlpt",
+                "fluent",
+                "native",
+                "speak",
+                "vocabulary",
+                "grammar",
+                "duolingo",
+                "rosetta",
+                "accent",
+            ],
+        );
+        let programming_signals = contains_any(
+            &lower,
+            &[
+                "prefer",
+                "code",
+                "program",
+                "framework",
+                "library",
+                "develop",
+                "compile",
+                "script",
+                "software",
+                "typed",
+            ],
+        );
+        match (natural_signals, programming_signals) {
+            (true, false) => push_unique(&mut labels, "topic:language:natural"),
+            (false, true) => push_unique(&mut labels, "topic:language:programming"),
+            _ => {
+                // Ambiguous or both — emit both, let scoring decide
+                push_unique(&mut labels, "topic:language:natural");
+                push_unique(&mut labels, "topic:language:programming");
+            }
+        }
+        // Backward compat: also emit the legacy label so query_labels OR-union
+        // picks up old memories that were stored before the split.
         push_unique(&mut labels, "topic:language");
     }
-    if contains_any(&lower, &["learn", "study", "class", "course", "school"]) {
+    if contains_any(
+        &lower,
+        &[
+            "learn",
+            "study",
+            "class",
+            "course",
+            "school",
+            "jlpt",
+            "fluent",
+            "practicing",
+            "lessons",
+        ],
+    ) {
         push_unique(&mut labels, "action:learning");
     }
     if contains_any(
@@ -425,6 +593,21 @@ pub fn classify_query(
         &["work", "job", "career", "project", "office", "company"],
     ) {
         push_unique(&mut labels, "domain:work");
+    }
+    if contains_any(
+        &lower,
+        &[
+            "job",
+            "career",
+            "employer",
+            "work at",
+            "work for",
+            "where do you work",
+            "what do you do",
+            "position",
+        ],
+    ) {
+        push_unique(&mut labels, "topic:career");
     }
     if contains_any(&lower, &["exercise", "run", "workout", "gym", "fitness"]) {
         push_unique(&mut labels, "topic:fitness");
@@ -453,6 +636,25 @@ pub fn classify_query(
     ) {
         push_unique(&mut labels, "topic:technology");
     }
+    if contains_any(
+        &lower,
+        &[
+            "editor",
+            "ide",
+            "coding tool",
+            "neovim",
+            "vim",
+            "vscode",
+            "text editor",
+            "jetbrains",
+            "emacs",
+            "sublime",
+            "helix",
+            "zed",
+        ],
+    ) {
+        push_unique(&mut labels, "topic:tools:editor");
+    }
     if contains_any(&lower, &["read", "book", "reading"]) {
         push_unique(&mut labels, "topic:entertainment");
     }
@@ -474,6 +676,62 @@ pub fn classify_query(
 
 fn contains_any(text: &str, patterns: &[&str]) -> bool {
     patterns.iter().any(|p| text.contains(p))
+}
+
+/// Detect explicit date patterns that imply future time reference.
+///
+/// Matches:
+/// - "Month YYYY" (e.g., "april 2026") where month is a full name
+/// - "YYYY-MM-DD" ISO dates (e.g., "2026-04-15")
+///
+/// We don't compare against the current date — any explicit date reference
+/// is detected here. The caller gates this behind context keywords (deadline,
+/// due, filing, expires, etc.) to avoid labeling past dates like
+/// "I started at Google in January 2020" as temporal:future.
+fn contains_future_date(text: &str) -> bool {
+    // Pattern 1: "month yyyy" where yyyy is a 4-digit year
+    let months = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
+    for month in months {
+        if let Some(pos) = text.find(month) {
+            let after = &text[pos + month.len()..];
+            // Check for " YYYY" immediately after month name
+            let after = after.trim_start();
+            if after.len() >= 4 && after[..4].chars().all(|c| c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    // Pattern 2: "YYYY-MM-DD" ISO date
+    let bytes = text.as_bytes();
+    for i in 0..text.len().saturating_sub(9) {
+        if bytes[i].is_ascii_digit()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && bytes[i + 3].is_ascii_digit()
+            && bytes[i + 4] == b'-'
+            && bytes[i + 5].is_ascii_digit()
+            && bytes[i + 6].is_ascii_digit()
+            && bytes[i + 7] == b'-'
+            && bytes[i + 8].is_ascii_digit()
+            && bytes[i + 9].is_ascii_digit()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn push_unique(labels: &mut Vec<String>, label: &str) {
@@ -651,6 +909,110 @@ mod tests {
     }
 
     #[test]
+    fn tier1_temporal_past_extended_signals() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I visited Paris last month and it was great",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:past"),
+            "Should detect 'visited' + 'last month' as temporal:past, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_past_years_ago() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels("I moved to the US years ago", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "temporal:past"),
+            "Should detect 'years ago' as temporal:past, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_deadline() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "Patent filing deadline is April 2026",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect 'deadline' as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_next_month() {
+        let protos = mock_prototypes();
+        let labels =
+            generate_tier1_labels("I have a conference next month", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect 'next month' as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_month_year_pattern() {
+        let protos = mock_prototypes();
+        let labels =
+            generate_tier1_labels("ROSCon submission due april 2026", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect 'april 2026' date pattern as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_iso_date() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "Patent provisional filing 2026-04-15",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect ISO date '2026-04-15' as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn past_date_without_context_keywords_not_temporal_future() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I started at Google in January 2020",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            !labels.iter().any(|l| l == "temporal:future"),
+            "Past date without deadline context should NOT get temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn contains_future_date_month_year() {
+        assert!(contains_future_date("april 2026"));
+        assert!(contains_future_date("submit by november 2025"));
+        assert!(!contains_future_date("april is a nice month"));
+        assert!(!contains_future_date("no dates here"));
+    }
+
+    #[test]
+    fn contains_future_date_iso() {
+        assert!(contains_future_date("due 2026-04-15 sharp"));
+        assert!(contains_future_date("2025-12-31"));
+        assert!(!contains_future_date("2026-4-15")); // not zero-padded, no match
+        assert!(!contains_future_date("no dates"));
+    }
+
+    #[test]
     fn tier1_entity_extraction_capitalized() {
         let protos = mock_prototypes();
         let labels = generate_tier1_labels(
@@ -696,12 +1058,85 @@ mod tests {
         let protos = mock_prototypes();
         let labels = classify_query("what languages am I learning?", &vec![0.0; 384], &protos);
         assert!(
-            labels.iter().any(|l| l == "topic:language"),
-            "Should match 'languages' keyword, got: {labels:?}"
+            labels.iter().any(|l| l == "topic:language:natural"),
+            "Should match 'languages' + 'learning' → natural, got: {labels:?}"
         );
         assert!(
             labels.iter().any(|l| l == "action:learning"),
             "Should match 'learning' keyword, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_natural_signals() {
+        let protos = mock_prototypes();
+        let labels = classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language:natural"),
+            "Should route 'learning' to natural, got: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l == "topic:language:programming"),
+            "Should NOT emit programming when 'learning' present, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_programming_signals() {
+        let protos = mock_prototypes();
+        let labels = classify_query(
+            "What programming language does Sam prefer?",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "topic:language:programming"),
+            "Should route 'programming'+'prefer' to programming, got: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l == "topic:language:natural"),
+            "Should NOT emit natural when 'programming'+'prefer' present, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_ambiguous_emits_both() {
+        let protos = mock_prototypes();
+        let labels = classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language:natural"),
+            "Ambiguous should emit natural, got: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|l| l == "topic:language:programming"),
+            "Ambiguous should emit programming, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_always_emits_legacy_label() {
+        let protos = mock_prototypes();
+        // Natural-only query
+        let labels = classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language"),
+            "Natural query should also emit legacy topic:language, got: {labels:?}"
+        );
+        // Programming-only query
+        let labels = classify_query(
+            "What programming language does Sam prefer?",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "topic:language"),
+            "Programming query should also emit legacy topic:language, got: {labels:?}"
+        );
+        // Ambiguous query
+        let labels = classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language"),
+            "Ambiguous query should also emit legacy topic:language, got: {labels:?}"
         );
     }
 
@@ -740,5 +1175,60 @@ mod tests {
                 "Prototype description too sparse (need >= 5 terms): '{desc}'"
             );
         }
+    }
+
+    #[test]
+    fn classify_query_editor_keywords_fire_tools_label() {
+        let protos = mock_prototypes();
+        for kw in &["neovim", "vscode", "text editor", "ide"] {
+            let q = format!("what is my {kw} setup");
+            let labels = classify_query(&q, &vec![0.0; 384], &protos);
+            assert!(
+                labels.contains(&"topic:tools:editor".to_string()),
+                "Query '{q}' should produce topic:tools:editor, got {labels:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn classify_query_editor_also_emits_technology() {
+        let protos = mock_prototypes();
+        let labels = classify_query("what editor do I use", &vec![0.0; 384], &protos);
+        assert!(
+            labels.contains(&"topic:tools:editor".to_string()),
+            "Should have topic:tools:editor, got {labels:?}",
+        );
+        assert!(
+            labels.contains(&"topic:technology".to_string()),
+            "Editor query should also trigger topic:technology, got {labels:?}",
+        );
+    }
+
+    #[test]
+    fn tier1_preference_update_switched_to() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I switched from VS Code to Neovim last month",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.contains(&"memtype:preference_update".to_string()),
+            "Should detect preference_update for 'switched from', got {labels:?}",
+        );
+    }
+
+    #[test]
+    fn tier1_preference_update_now_using() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I'm now using Helix instead of Vim",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.contains(&"memtype:preference_update".to_string()),
+            "Should detect preference_update for 'now using', got {labels:?}",
+        );
     }
 }
