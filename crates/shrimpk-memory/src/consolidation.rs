@@ -1991,7 +1991,10 @@ mod tests {
         // Near-duplicate embedding (cosine > 0.95 with [1.0, 0.0, 0.0])
         let near_dup_emb = vec![0.99, 0.01, 0.0];
         let sim = similarity::cosine_similarity(&[1.0, 0.0, 0.0], &near_dup_emb);
-        assert!(sim > 0.95, "Test precondition: vectors must be near-dups, got {sim}");
+        assert!(
+            sim > 0.95,
+            "Test precondition: vectors must be near-dups, got {sim}"
+        );
 
         assert!(
             is_near_dup_child(&store, &parent_id, &near_dup_emb),
@@ -2058,7 +2061,10 @@ mod tests {
         let mut bloom_dirty = false;
 
         // Create an entry that has been enriched (Step 5 done) but only has Tier 1 labels
-        let mut entry = make_entry("I got promoted to senior engineer at Anthropic", vec![1.0, 0.0, 0.0]);
+        let mut entry = make_entry(
+            "I got promoted to senior engineer at Anthropic",
+            vec![1.0, 0.0, 0.0],
+        );
         entry.enriched = true;
         entry.label_version = 1;
         entry.labels = vec!["topic:career".to_string()]; // existing Tier 1 label
@@ -2078,7 +2084,10 @@ mod tests {
         assert_eq!(result.labels_enriched, 1, "Should enrich 1 entry");
 
         let updated = store.entry_at(0).expect("Entry should exist");
-        assert_eq!(updated.label_version, 2, "label_version should be upgraded to 2");
+        assert_eq!(
+            updated.label_version, 2,
+            "label_version should be upgraded to 2"
+        );
 
         // Existing Tier 1 label should be preserved
         assert!(

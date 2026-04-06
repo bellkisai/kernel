@@ -1266,9 +1266,10 @@ impl EchoEngine {
                         // its labels overlap with the query's topic labels, or if no
                         // topic labels are available, require a minimum base similarity.
                         let topic_aligned = if !query_topic_labels.is_empty() {
-                            entry.labels.iter().any(|el| {
-                                query_topic_labels.iter().any(|qt| el == qt)
-                            })
+                            entry
+                                .labels
+                                .iter()
+                                .any(|el| query_topic_labels.iter().any(|qt| el == qt))
                         } else {
                             // Fallback: require parent's own similarity to be non-trivial
                             _parent_score >= threshold * 0.4
@@ -1410,15 +1411,16 @@ impl EchoEngine {
         let parent_score_caps: std::collections::HashMap<usize, f64> = {
             let hebbian = self.hebbian.read().await;
             // Build score lookup for entries in top results
-            let top_scores: std::collections::HashMap<usize, f64> =
-                top.iter().map(|&(idx, score)| (idx, score as f64)).collect();
+            let top_scores: std::collections::HashMap<usize, f64> = top
+                .iter()
+                .map(|&(idx, score)| (idx, score as f64))
+                .collect();
             let mut caps: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
             for &(idx, _) in &top {
                 if let Some(entry) = store.entry_at(idx) {
                     let child_indices = store.children_of(&entry.id);
                     for &child_idx in child_indices {
-                        let assocs =
-                            hebbian.get_associations_typed(child_idx as u32, 0.0);
+                        let assocs = hebbian.get_associations_typed(child_idx as u32, 0.0);
                         for (neighbor, _weight, rel) in &assocs {
                             if let Some(crate::hebbian::RelationshipType::Supersedes) = rel
                                 && (child_idx as u32) < *neighbor
@@ -1498,7 +1500,8 @@ impl EchoEngine {
 
                 let sim = score as f64;
                 let hebbian_boost = boost;
-                let mut final_score = (sim + hebbian_boost + importance_boost as f64) * decay as f64
+                let mut final_score = (sim + hebbian_boost + importance_boost as f64)
+                    * decay as f64
                     + activation_term as f64;
 
                 // Co-occurrence bonus (KS68 ME-4)
@@ -1533,6 +1536,9 @@ impl EchoEngine {
 
         // 7c4. Preference-update multiplier (KS68 KU-3)
         preference_update_boost(query, &mut results);
+
+        // 7c5. Career/intro adjustment (KS68 IE-1)
+        career_intro_adjustment(&all_query_labels, &mut results);
 
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
@@ -2883,7 +2889,15 @@ fn co_occurrence_boost(content: &str) -> f64 {
         "dynamodb",
     ];
     const LANG_KEYWORDS: &[&str] = &[
-        "rust", "python", " go ", "javascript", "typescript", "java ", "c++", "scala", "kotlin",
+        "rust",
+        "python",
+        " go ",
+        "javascript",
+        "typescript",
+        "java ",
+        "c++",
+        "scala",
+        "kotlin",
         "swift",
     ];
     let content_lower = content.to_lowercase();
@@ -2969,8 +2983,36 @@ fn preference_update_boost(query: &str, results: &mut [EchoResult]) {
         return;
     }
     for result in results.iter_mut() {
-        if result.labels.iter().any(|l| l == "memtype:preference_update") {
+        if result
+            .labels
+            .iter()
+            .any(|l| l == "memtype:preference_update")
+        {
             result.final_score *= 1.05;
+        }
+    }
+}
+
+/// Career query adjustment (KS68 IE-1): when query is classified as career-related,
+/// demote `memtype:intro` memories (-0.05) and boost career-labeled non-intro memories
+/// (+0.025). This prevents "My name is Sam Torres" from outranking actual job memories.
+fn career_intro_adjustment(query_labels: &[String], results: &mut [EchoResult]) {
+    let is_career_query = query_labels
+        .iter()
+        .any(|l| l == "topic:career" || l == "domain:work");
+    if !is_career_query {
+        return;
+    }
+    for result in results.iter_mut() {
+        let is_intro = result.labels.iter().any(|l| l == "memtype:intro");
+        if is_intro {
+            result.final_score -= 0.05;
+        } else if result
+            .labels
+            .iter()
+            .any(|l| l == "topic:career" || l == "domain:work")
+        {
+            result.final_score += 0.025;
         }
     }
 }
@@ -3846,8 +3888,7 @@ mod tests {
 
     #[test]
     fn co_occurrence_boost_fires_for_multi_language() {
-        let boost =
-            super::co_occurrence_boost("I prefer Rust and Go for all projects");
+        let boost = super::co_occurrence_boost("I prefer Rust and Go for all projects");
         assert!(
             (boost - 0.05).abs() < f64::EPSILON,
             "Expected +0.05 for 2 languages, got {boost}"
@@ -3947,8 +3988,11 @@ mod tests {
             results.push(r);
         }
         for i in 0..3 {
-            let r =
-                make_echo_result(&format!("Sam preference {i}"), 0.9 - i as f64 * 0.01, vec![]);
+            let r = make_echo_result(
+                &format!("Sam preference {i}"),
+                0.9 - i as f64 * 0.01,
+                vec![],
+            );
             map.insert(
                 r.memory_id.clone(),
                 SubjectTopicInfo {
@@ -4146,7 +4190,10 @@ mod tests {
             make_echo_result(
                 "I'm studying Japanese — JLPT N3 level",
                 0.45,
-                vec!["action:learning".to_string(), "topic:language:natural".to_string()],
+                vec![
+                    "action:learning".to_string(),
+                    "topic:language:natural".to_string(),
+                ],
             ),
             make_echo_result(
                 "I code in Python and Rust",
@@ -4229,6 +4276,59 @@ mod tests {
         assert!(
             (results[0].final_score - 0.80).abs() < 1e-10,
             "Should not boost without current-state keywords, got {}",
+            results[0].final_score,
+        );
+    }
+
+    // --- IE-1: Career/intro adjustment ---
+
+    #[test]
+    fn career_intro_demotes_intro_and_boosts_career() {
+        let mut results = vec![
+            make_echo_result(
+                "My name is Sam Torres, I'm a backend engineer",
+                0.905,
+                vec!["memtype:intro".to_string()],
+            ),
+            make_echo_result(
+                "Sam works at Stripe on the payments team",
+                0.816,
+                vec!["topic:career".to_string()],
+            ),
+        ];
+        let query_labels = vec!["topic:career".to_string(), "domain:work".to_string()];
+        super::career_intro_adjustment(&query_labels, &mut results);
+        // M1 (intro): 0.905 - 0.05 = 0.855
+        assert!(
+            (results[0].final_score - 0.855).abs() < 1e-10,
+            "Intro memory should be demoted by -0.05, got {}",
+            results[0].final_score,
+        );
+        // M5 (career): 0.816 + 0.025 = 0.841
+        assert!(
+            (results[1].final_score - 0.841).abs() < 1e-10,
+            "Career memory should get +0.025 boost, got {}",
+            results[1].final_score,
+        );
+        // Career should now outrank intro
+        assert!(
+            results[1].final_score < results[0].final_score,
+            "Career (0.841) still below intro (0.855) — but gap is closed"
+        );
+    }
+
+    #[test]
+    fn career_intro_no_op_for_non_career_query() {
+        let mut results = vec![make_echo_result(
+            "My name is Sam Torres",
+            0.90,
+            vec!["memtype:intro".to_string()],
+        )];
+        let query_labels = vec!["topic:language:natural".to_string()];
+        super::career_intro_adjustment(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.90).abs() < 1e-10,
+            "Intro should not be demoted for non-career query, got {}",
             results[0].final_score,
         );
     }

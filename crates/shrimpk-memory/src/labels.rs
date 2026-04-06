@@ -419,9 +419,18 @@ pub fn generate_tier1_labels(
     if contains_any(
         &lower,
         &[
-            "learning", "studying", "practicing", "jlpt", "fluent",
-            "native speaker", "taking lessons", "course", "class",
-            "hiragana", "katakana", "kanji",
+            "learning",
+            "studying",
+            "practicing",
+            "jlpt",
+            "fluent",
+            "native speaker",
+            "taking lessons",
+            "course",
+            "class",
+            "hiragana",
+            "katakana",
+            "kanji",
         ],
     ) {
         push_unique(&mut labels, "action:learning");
@@ -510,15 +519,32 @@ pub fn classify_query(
         let natural_signals = contains_any(
             &lower,
             &[
-                "learning", "studying", "jlpt", "fluent", "native", "speak",
-                "vocabulary", "grammar", "duolingo", "rosetta", "accent",
+                "learning",
+                "studying",
+                "jlpt",
+                "fluent",
+                "native",
+                "speak",
+                "vocabulary",
+                "grammar",
+                "duolingo",
+                "rosetta",
+                "accent",
             ],
         );
         let programming_signals = contains_any(
             &lower,
             &[
-                "prefer", "code", "program", "framework", "library", "develop",
-                "compile", "script", "software", "typed",
+                "prefer",
+                "code",
+                "program",
+                "framework",
+                "library",
+                "develop",
+                "compile",
+                "script",
+                "software",
+                "typed",
             ],
         );
         match (natural_signals, programming_signals) {
@@ -537,8 +563,15 @@ pub fn classify_query(
     if contains_any(
         &lower,
         &[
-            "learn", "study", "class", "course", "school", "jlpt",
-            "fluent", "practicing", "lessons",
+            "learn",
+            "study",
+            "class",
+            "course",
+            "school",
+            "jlpt",
+            "fluent",
+            "practicing",
+            "lessons",
         ],
     ) {
         push_unique(&mut labels, "action:learning");
@@ -548,6 +581,21 @@ pub fn classify_query(
         &["work", "job", "career", "project", "office", "company"],
     ) {
         push_unique(&mut labels, "domain:work");
+    }
+    if contains_any(
+        &lower,
+        &[
+            "job",
+            "career",
+            "employer",
+            "work at",
+            "work for",
+            "where do you work",
+            "what do you do",
+            "position",
+        ],
+    ) {
+        push_unique(&mut labels, "topic:career");
     }
     if contains_any(&lower, &["exercise", "run", "workout", "gym", "fitness"]) {
         push_unique(&mut labels, "topic:fitness");
@@ -579,8 +627,18 @@ pub fn classify_query(
     if contains_any(
         &lower,
         &[
-            "editor", "ide", "coding tool", "neovim", "vim", "vscode",
-            "text editor", "jetbrains", "emacs", "sublime", "helix", "zed",
+            "editor",
+            "ide",
+            "coding tool",
+            "neovim",
+            "vim",
+            "vscode",
+            "text editor",
+            "jetbrains",
+            "emacs",
+            "sublime",
+            "helix",
+            "zed",
         ],
     ) {
         push_unique(&mut labels, "topic:tools:editor");
@@ -622,8 +680,18 @@ fn contains_any(text: &str, patterns: &[&str]) -> bool {
 fn contains_future_date(text: &str) -> bool {
     // Pattern 1: "month yyyy" where yyyy is a 4-digit year
     let months = [
-        "january", "february", "march", "april", "may", "june",
-        "july", "august", "september", "october", "november", "december",
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
     ];
     for month in months {
         if let Some(pos) = text.find(month) {
@@ -846,11 +914,7 @@ mod tests {
     #[test]
     fn tier1_temporal_past_years_ago() {
         let protos = mock_prototypes();
-        let labels = generate_tier1_labels(
-            "I moved to the US years ago",
-            &vec![0.0; 384],
-            &protos,
-        );
+        let labels = generate_tier1_labels("I moved to the US years ago", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "temporal:past"),
             "Should detect 'years ago' as temporal:past, got: {labels:?}"
@@ -874,11 +938,8 @@ mod tests {
     #[test]
     fn tier1_temporal_future_next_month() {
         let protos = mock_prototypes();
-        let labels = generate_tier1_labels(
-            "I have a conference next month",
-            &vec![0.0; 384],
-            &protos,
-        );
+        let labels =
+            generate_tier1_labels("I have a conference next month", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "temporal:future"),
             "Should detect 'next month' as temporal:future, got: {labels:?}"
@@ -888,11 +949,8 @@ mod tests {
     #[test]
     fn tier1_temporal_future_month_year_pattern() {
         let protos = mock_prototypes();
-        let labels = generate_tier1_labels(
-            "ROSCon submission due april 2026",
-            &vec![0.0; 384],
-            &protos,
-        );
+        let labels =
+            generate_tier1_labels("ROSCon submission due april 2026", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "temporal:future"),
             "Should detect 'april 2026' date pattern as temporal:future, got: {labels:?}"
@@ -987,8 +1045,7 @@ mod tests {
     #[test]
     fn query_language_natural_signals() {
         let protos = mock_prototypes();
-        let labels =
-            classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
+        let labels = classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "topic:language:natural"),
             "Should route 'learning' to natural, got: {labels:?}"
@@ -1020,8 +1077,7 @@ mod tests {
     #[test]
     fn query_language_ambiguous_emits_both() {
         let protos = mock_prototypes();
-        let labels =
-            classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
+        let labels = classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "topic:language:natural"),
             "Ambiguous should emit natural, got: {labels:?}"
@@ -1036,8 +1092,7 @@ mod tests {
     fn query_language_always_emits_legacy_label() {
         let protos = mock_prototypes();
         // Natural-only query
-        let labels =
-            classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
+        let labels = classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "topic:language"),
             "Natural query should also emit legacy topic:language, got: {labels:?}"
@@ -1053,8 +1108,7 @@ mod tests {
             "Programming query should also emit legacy topic:language, got: {labels:?}"
         );
         // Ambiguous query
-        let labels =
-            classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
+        let labels = classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
         assert!(
             labels.iter().any(|l| l == "topic:language"),
             "Ambiguous query should also emit legacy topic:language, got: {labels:?}"
@@ -1128,8 +1182,11 @@ mod tests {
     #[test]
     fn tier1_preference_update_switched_to() {
         let protos = mock_prototypes();
-        let labels =
-            generate_tier1_labels("I switched from VS Code to Neovim last month", &vec![0.0; 384], &protos);
+        let labels = generate_tier1_labels(
+            "I switched from VS Code to Neovim last month",
+            &vec![0.0; 384],
+            &protos,
+        );
         assert!(
             labels.contains(&"memtype:preference_update".to_string()),
             "Should detect preference_update for 'switched from', got {labels:?}",
@@ -1139,8 +1196,11 @@ mod tests {
     #[test]
     fn tier1_preference_update_now_using() {
         let protos = mock_prototypes();
-        let labels =
-            generate_tier1_labels("I'm now using Helix instead of Vim", &vec![0.0; 384], &protos);
+        let labels = generate_tier1_labels(
+            "I'm now using Helix instead of Vim",
+            &vec![0.0; 384],
+            &protos,
+        );
         assert!(
             labels.contains(&"memtype:preference_update".to_string()),
             "Should detect preference_update for 'now using', got {labels:?}",
