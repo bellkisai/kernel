@@ -1288,7 +1288,9 @@ impl EchoEngine {
                             child_score = best_child_score,
                             "Pipe B: child rescued parent memory"
                         );
-                        promotions.push((idx, best_child_score));
+                        // Apply child memory penalty at promotion (KS69)
+                        let penalized_score = best_child_score + self.config.child_memory_penalty;
+                        promotions.push((idx, penalized_score));
                     }
                 }
             }
@@ -1497,6 +1499,11 @@ impl EchoEngine {
                     final_score += demotion;
                 }
 
+                // Child memory penalty (KS69): demote children to prevent hallucination inflation
+                if entry.parent_id.is_some() {
+                    final_score += self.config.child_memory_penalty as f64;
+                }
+
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
                     content: truncate_content(entry.display_content(), 200),
@@ -1521,6 +1528,14 @@ impl EchoEngine {
 
         // 7c5. Career/intro adjustment (KS68 IE-1)
         career_intro_adjustment(&all_query_labels, &mut results);
+
+        // 7c6. Score inflation cap (KS69): prevent unbounded boost stacking
+        for result in &mut results {
+            let max_allowed = result.similarity as f64 + 0.35;
+            if result.final_score > max_allowed {
+                result.final_score = max_allowed;
+            }
+        }
 
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
@@ -2788,6 +2803,62 @@ impl EchoEngine {
             stats.query_count += 1;
             stats.total_latency_us += latency_us;
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test-only helpers (KS69 — deterministic benchmark fixtures)
+    // -----------------------------------------------------------------------
+
+    /// Test-only: inject a pre-built entry into the store, LSH index, and Bloom filter.
+    ///
+    /// Bypasses PII filtering, reformulation, novelty scoring, and consolidation triggers.
+    /// Used for deterministic benchmark fixtures where children need exact control over
+    /// content and embedding without LLM nondeterminism.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub async fn inject_entry(&self, entry: MemoryEntry) {
+        let embedding = entry.embedding.clone();
+        let content = entry.content.clone();
+        let parent_id = entry.parent_id.clone();
+
+        // 1. Add to store (handles id_to_index, parent_children, label_index)
+        let index = {
+            let mut store = self.store.write().await;
+            store.add(entry)
+        };
+
+        // 2. Insert into text LSH index (always index test entries, regardless of child_rescue_only)
+        if let Ok(mut lsh) = self.text_lsh.lock() {
+            lsh.insert(index as u32, &embedding);
+        }
+
+        // 3. Insert into Bloom filter
+        {
+            let mut bloom = self.bloom.write().await;
+            bloom.insert_memory(&content);
+        }
+
+        // 4. If this is a child, mark the parent as enriched
+        if let Some(ref pid) = parent_id {
+            let mut store = self.store.write().await;
+            if let Some(parent_idx) = store.index_of(pid)
+                && let Some(parent) = store.entry_at_mut(parent_idx)
+            {
+                parent.enriched = true;
+            }
+        }
+    }
+
+    /// Test-only: generate an embedding for text using the engine's embedder.
+    ///
+    /// Provides access to the same embedding model used by `store()` so that
+    /// test children have embeddings from the same vector space.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn embed_text_for_test(&self, text: &str) -> Result<Vec<f32>> {
+        let mut embedder = self
+            .embedder
+            .lock()
+            .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+        embedder.embed_text(text)
     }
 }
 
