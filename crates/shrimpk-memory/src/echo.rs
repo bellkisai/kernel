@@ -1401,53 +1401,38 @@ impl EchoEngine {
                 .collect()
         };
 
-        // 7b2. Parent supersession hard cap (KS68 KU-1): if a parent entry has
-        // children superseded by another child (via Supersedes edge), clamp the
-        // old parent's score below the superseding parent's score. This guarantees
-        // that the newer knowledge always outranks the outdated parent.
-        //
-        // Approach: trace old_child → Supersedes → new_child → new_child.parent_id
-        // → new_parent's score in `top`. Cap old_parent to new_parent_score - 0.05.
-        let parent_score_caps: std::collections::HashMap<usize, f64> = {
+        // 7b2. Parent supersession demotion (KS68 KU-1): if a parent entry has
+        // children with Supersedes edges (child is the older/superseded side),
+        // apply a flat demotion to the parent. This propagates child-level
+        // supersession to parent ranking in Pipe A.
+        let parent_demotions: std::collections::HashMap<usize, f64> = {
             let hebbian = self.hebbian.read().await;
-            // Build score lookup for entries in top results
-            let top_scores: std::collections::HashMap<usize, f64> = top
-                .iter()
-                .map(|&(idx, score)| (idx, score as f64))
-                .collect();
-            let mut caps: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+            let demotion = self.config.supersedes_demotion as f64;
+            let mut demotions = std::collections::HashMap::new();
             for &(idx, _) in &top {
                 if let Some(entry) = store.entry_at(idx) {
                     let child_indices = store.children_of(&entry.id);
+                    let mut has_superseded_child = false;
                     for &child_idx in child_indices {
                         let assocs = hebbian.get_associations_typed(child_idx as u32, 0.0);
                         for (neighbor, _weight, rel) in &assocs {
                             if let Some(crate::hebbian::RelationshipType::Supersedes) = rel
                                 && (child_idx as u32) < *neighbor
                             {
-                                // child_idx is the old/superseded child, neighbor is the new child.
-                                // Find new child's parent and its score in top.
-                                if let Some(new_child) = store.entry_at(*neighbor as usize)
-                                    && let Some(ref new_parent_id) = new_child.parent_id
-                                    && let Some(new_parent_idx) = store.index_of(new_parent_id)
-                                    && let Some(&new_parent_score) = top_scores.get(&new_parent_idx)
-                                {
-                                    let cap = new_parent_score - 0.05;
-                                    // Keep the tightest (lowest) cap if multiple supersessions
-                                    caps.entry(idx)
-                                        .and_modify(|c| {
-                                            if cap < *c {
-                                                *c = cap;
-                                            }
-                                        })
-                                        .or_insert(cap);
-                                }
+                                has_superseded_child = true;
+                                break;
                             }
                         }
+                        if has_superseded_child {
+                            break;
+                        }
+                    }
+                    if has_superseded_child {
+                        demotions.insert(idx, -demotion);
                     }
                 }
             }
-            caps
+            demotions
         };
 
         // 7c. Build EchoResult vec with final_score = similarity + hebbian + recency, scaled by decay
@@ -1507,12 +1492,9 @@ impl EchoEngine {
                 // Co-occurrence bonus (KS68 ME-4)
                 final_score += co_occurrence_boost(&entry.content);
 
-                // Parent supersession hard cap (KS68 KU-1): clamp score below
-                // the superseding parent so outdated knowledge never outranks updates.
-                if let Some(&cap) = parent_score_caps.get(&idx)
-                    && final_score > cap
-                {
-                    final_score = cap;
+                // Parent supersession demotion (KS68 KU-1)
+                if let Some(&demotion) = parent_demotions.get(&idx) {
+                    final_score += demotion;
                 }
 
                 Some(EchoResult {
@@ -4060,79 +4042,43 @@ mod tests {
         );
     }
 
-    // --- KU-1: Parent supersession hard cap ---
+    // --- KU-1: Parent supersession flat demotion ---
 
     #[test]
-    fn supersession_hard_cap_clamps_old_parent_below_new() {
+    fn supersession_flat_demotion_closes_gap() {
         // Simulate: M4 (Shopify, old job) final_score = 1.027
         //           M5 (Stripe, new job) final_score = 1.001
-        // parent_score_caps should cap M4 at M5_score - 0.05 = 0.951
+        // With full demotion of 0.15: M4 drops to 0.877, well below M5.
+        let demotion: f64 = 0.15;
         let mut old_parent_score: f64 = 1.027;
         let new_parent_score: f64 = 1.001;
-        let cap = new_parent_score - 0.05; // 0.951
 
-        // Apply the same logic as 7c
-        if old_parent_score > cap {
-            old_parent_score = cap;
-        }
+        old_parent_score += -demotion;
 
         assert!(
             old_parent_score < new_parent_score,
             "Old parent ({old_parent_score}) must rank below new parent ({new_parent_score})"
         );
         assert!(
-            (old_parent_score - 0.951).abs() < 1e-10,
-            "Old parent should be clamped to 0.951, got {old_parent_score}"
+            (old_parent_score - 0.877).abs() < 1e-10,
+            "Old parent should be demoted to 0.877, got {old_parent_score}"
         );
     }
 
     #[test]
-    fn supersession_hard_cap_no_op_when_already_below() {
-        // If old parent already scores below the cap, no clamping occurs
-        let mut old_parent_score: f64 = 0.8;
-        let new_parent_score: f64 = 1.001;
-        let cap = new_parent_score - 0.05; // 0.951
+    fn supersession_flat_demotion_no_op_without_superseded_child() {
+        // If parent has no superseded children, no demotion is applied
+        let original: f64 = 1.027;
+        let demotions: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+        let mut score = original;
 
-        let original = old_parent_score;
-        if old_parent_score > cap {
-            old_parent_score = cap;
+        if let Some(&d) = demotions.get(&0) {
+            score += d;
         }
 
         assert!(
-            (old_parent_score - original).abs() < f64::EPSILON,
-            "Score should be unchanged when already below cap"
-        );
-    }
-
-    #[test]
-    fn supersession_hard_cap_tightest_cap_wins() {
-        // If multiple supersessions create different caps, the tightest (lowest) wins
-        let mut caps: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
-
-        // First supersession: cap at 0.95
-        let cap1 = 0.95;
-        caps.entry(0)
-            .and_modify(|c| {
-                if cap1 < *c {
-                    *c = cap1;
-                }
-            })
-            .or_insert(cap1);
-
-        // Second supersession: tighter cap at 0.90
-        let cap2 = 0.90;
-        caps.entry(0)
-            .and_modify(|c| {
-                if cap2 < *c {
-                    *c = cap2;
-                }
-            })
-            .or_insert(cap2);
-
-        assert!(
-            (*caps.get(&0).unwrap() - 0.90).abs() < f64::EPSILON,
-            "Tightest cap (0.90) should win, got {}",
-            caps.get(&0).unwrap()
+            (score - original).abs() < f64::EPSILON,
+            "Score should be unchanged without superseded children"
         );
     }
 
