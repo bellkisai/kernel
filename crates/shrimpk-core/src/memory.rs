@@ -224,6 +224,9 @@ pub struct MemoryEntry {
     /// Enriched memories have child memories (linked via `parent_id`) with extracted facts.
     #[serde(default)]
     pub enriched: bool,
+    /// Number of LLM extraction attempts (KS69). Capped at 3 to avoid infinite retries.
+    #[serde(default)]
+    pub enrichment_attempts: u8,
     /// Link to parent memory. Child memories are LLM-extracted facts created during
     /// consolidation. When a child matches during echo, the parent's content is returned.
     #[serde(default)]
@@ -280,6 +283,7 @@ impl MemoryEntry {
             last_echoed: None,
             echo_count: 0,
             enriched: false,
+            enrichment_attempts: 0,
             parent_id: None,
             labels: Vec::new(),
             label_version: 0,

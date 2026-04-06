@@ -188,13 +188,15 @@ pub fn consolidate(
     // Note: child memory creation with embeddings requires the MultiEmbedder,
     // which is not available here. Facts are extracted and logged; child
     // creation happens in EchoEngine::consolidate_now() which has embedder access.
-    const MAX_ENRICHMENTS_PER_CYCLE: usize = 10;
+    const MAX_ENRICHMENTS_PER_CYCLE: usize = 25;
 
     if consolidator.name() != "noop" {
         let mut unenriched: Vec<usize> = (0..store.len())
             .filter(|&i| {
                 store.entry_at(i).is_some_and(|e| {
+                    // KS69: retry extraction up to 3 times if 0 facts were extracted
                     !e.enriched
+                        && e.enrichment_attempts < 3
                         && e.parent_id.is_none()
                         // Only consolidate text entries — vision/speech need VLM/transcription (KS38+)
                         && e.modality == shrimpk_core::Modality::Text
@@ -439,9 +441,13 @@ pub fn consolidate(
                 }
             }
 
-            // Mark parent as enriched regardless (even if 0 facts — avoids retrying)
+            // KS69: only mark enriched=true when facts were actually extracted.
+            // Increment attempt counter so we retry up to 3 times for 0-fact results.
             if let Some(entry) = store.entry_at_mut(idx) {
-                entry.enriched = true;
+                entry.enrichment_attempts = entry.enrichment_attempts.saturating_add(1);
+                if !facts.is_empty() {
+                    entry.enriched = true;
+                }
             }
         }
     }

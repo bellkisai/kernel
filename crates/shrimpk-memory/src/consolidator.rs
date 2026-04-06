@@ -132,12 +132,63 @@ fn combined_enrichment_prompt(max_facts: usize) -> String {
     )
 }
 
+/// Try to repair truncated JSON by closing unmatched brackets and braces.
+/// Used when LLM output is cut off mid-response (KS69 truncation guard).
+fn try_repair_truncated_json(content: &str) -> Option<serde_json::Value> {
+    let trimmed = content.trim();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    // Count unmatched braces/brackets
+    let mut brace_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+    let mut in_string = false;
+    let mut prev_backslash = false;
+    for ch in trimmed.chars() {
+        if in_string {
+            if ch == '"' && !prev_backslash {
+                in_string = false;
+            }
+            prev_backslash = ch == '\\' && !prev_backslash;
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => brace_depth += 1,
+            '}' => brace_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            _ => {}
+        }
+        prev_backslash = false;
+    }
+    if brace_depth <= 0 && bracket_depth <= 0 {
+        return None; // Not truncated, just malformed
+    }
+    // Close open strings, brackets, and braces
+    let mut repaired = trimmed.to_string();
+    if in_string {
+        repaired.push('"');
+    }
+    for _ in 0..bracket_depth {
+        repaired.push(']');
+    }
+    for _ in 0..brace_depth {
+        repaired.push('}');
+    }
+    tracing::debug!(
+        original_len = trimmed.len(),
+        repaired_len = repaired.len(),
+        "KS69: attempting truncated JSON repair"
+    );
+    serde_json::from_str::<serde_json::Value>(&repaired).ok()
+}
+
 /// Parse the combined JSON response from the LLM.
 ///
-/// Handles two fact formats:
-/// - v2 (KS67): facts as array of objects with text/subject/type/confidence
-/// - v1 (legacy): facts as array of strings
-///   Falls back to plain-text parsing for non-JSON responses.
+/// Handles two fact formats: v2 (KS67) structured objects and v1 (legacy) string arrays.
+/// Falls back to plain-text parsing for non-JSON responses. When JSON parse fails on
+/// truncated output, attempts repair via `try_repair_truncated_json` (KS69).
 fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutput {
     // Try to parse as JSON first
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
@@ -209,6 +260,65 @@ fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutp
         ConsolidationOutput {
             facts,
             labels,
+            structured_facts,
+        }
+    } else if let Some(repaired_json) = try_repair_truncated_json(content) {
+        // KS69: JSON truncation guard — repair incomplete JSON and retry with halved max_facts
+        let halved = (max_facts / 2).max(1);
+        tracing::debug!(
+            original_max_facts = max_facts,
+            halved_max_facts = halved,
+            "KS69: truncated JSON repaired, retrying with reduced max_facts"
+        );
+        let mut facts: Vec<String> = Vec::new();
+        let mut structured_facts: Vec<ExtractedFact> = Vec::new();
+
+        if let Some(arr) = repaired_json["facts"].as_array() {
+            for item in arr.iter().take(halved) {
+                if let Some(obj) = item.as_object() {
+                    let text = obj
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if text.len() <= 5 {
+                        continue;
+                    }
+                    let subject = obj
+                        .get("subject")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
+                    let fact_type = obj.get("type").and_then(|v| v.as_str()).and_then(|s| {
+                        serde_json::from_value::<FactType>(serde_json::Value::String(
+                            s.to_lowercase(),
+                        ))
+                        .ok()
+                    });
+                    let confidence = obj
+                        .get("confidence")
+                        .and_then(|v| v.as_f64())
+                        .map(|c| c as f32);
+                    facts.push(text.clone());
+                    structured_facts.push(ExtractedFact {
+                        text,
+                        subject,
+                        fact_type,
+                        confidence,
+                    });
+                } else if let Some(s) = item.as_str() {
+                    let trimmed = s.trim().to_string();
+                    if trimmed.len() > 5 {
+                        facts.push(trimmed);
+                    }
+                }
+            }
+        }
+
+        ConsolidationOutput {
+            facts,
+            labels: None, // Labels likely truncated — don't trust them
             structured_facts,
         }
     } else {
