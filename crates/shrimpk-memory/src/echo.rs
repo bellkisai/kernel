@@ -1424,8 +1424,11 @@ impl EchoEngine {
 
                 let sim = score as f64;
                 let hebbian_boost = boost;
-                let final_score = (sim + hebbian_boost + importance_boost as f64) * decay as f64
+                let mut final_score = (sim + hebbian_boost + importance_boost as f64) * decay as f64
                     + activation_term as f64;
+
+                // Co-occurrence bonus (KS68 ME-4)
+                final_score += co_occurrence_boost(&entry.content);
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
@@ -1440,6 +1443,9 @@ impl EchoEngine {
             })
             .collect();
 
+        // 7c2. Temporal query boost (KS68 TR-3)
+        apply_temporal_boost(query, &mut results);
+
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
             b.final_score
@@ -1447,10 +1453,12 @@ impl EchoEngine {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // 7d2. Subject diversity cap (KS67): prevent identity gravity well
+        // 7d2. Subject diversity cap (KS67/KS68): prevent identity gravity well
+        // Uses (subject, topic) tuples so different facets of the same entity
+        // (e.g., Sam:identity vs Sam:preference) count independently.
         {
-            let subject_map = build_subject_map(&store, &top);
-            enforce_subject_diversity(&mut results, &store, &subject_map, 3);
+            let subject_topic_map = build_subject_topic_map(&store, &top);
+            enforce_subject_diversity(&mut results, &store, &subject_topic_map, 3);
         }
 
         // 7e. Optional reranker: reorder top-N by true relevance (KS23 LLM / KS24 cross-encoder)
@@ -2706,11 +2714,17 @@ fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
 
 /// Build a map from parent memory IDs to subject strings from their children.
 /// Used for subject diversity enforcement in echo results (KS67).
-fn build_subject_map(
+/// Per-memory subject and topic info for diversity enforcement.
+struct SubjectTopicInfo {
+    subjects: Vec<String>,
+    primary_topic: String,
+}
+
+fn build_subject_topic_map(
     store: &EchoStore,
     results: &[(usize, f32)],
-) -> std::collections::HashMap<MemoryId, Vec<String>> {
-    let mut subject_map: std::collections::HashMap<MemoryId, Vec<String>> =
+) -> std::collections::HashMap<MemoryId, SubjectTopicInfo> {
+    let mut map: std::collections::HashMap<MemoryId, SubjectTopicInfo> =
         std::collections::HashMap::new();
 
     for &(idx, _score) in results {
@@ -2742,47 +2756,132 @@ fn build_subject_map(
             subjects.sort();
             subjects.dedup();
 
+            // Extract primary topic label (first "topic:*" label, or "topic:unknown")
+            let primary_topic = entry
+                .labels
+                .iter()
+                .find(|l| l.starts_with("topic:"))
+                .cloned()
+                .unwrap_or_else(|| "topic:unknown".to_string());
+
             if !subjects.is_empty() {
-                subject_map.insert(entry.id.clone(), subjects);
+                map.insert(
+                    entry.id.clone(),
+                    SubjectTopicInfo {
+                        subjects,
+                        primary_topic,
+                    },
+                );
             }
         }
     }
 
-    subject_map
+    map
 }
 
-/// Cap results so no single subject entity dominates the result set (KS67).
+/// Co-occurrence boost (KS68 ME-4): returns +0.05 if the content mentions 2+ entities
+/// from the same category (databases or programming languages), else 0.0.
+fn co_occurrence_boost(content: &str) -> f64 {
+    const DB_KEYWORDS: &[&str] = &[
+        "postgresql",
+        "mysql",
+        "clickhouse",
+        "mongodb",
+        "postgres",
+        "redis",
+        "sqlite",
+        "oracle",
+        "cassandra",
+        "dynamodb",
+    ];
+    const LANG_KEYWORDS: &[&str] = &[
+        "rust", "python", " go ", "javascript", "typescript", "java ", "c++", "scala", "kotlin",
+        "swift",
+    ];
+    let content_lower = content.to_lowercase();
+    let db_count = DB_KEYWORDS
+        .iter()
+        .filter(|kw| content_lower.contains(*kw))
+        .count();
+    let lang_count = LANG_KEYWORDS
+        .iter()
+        .filter(|kw| content_lower.contains(*kw))
+        .count();
+    if db_count >= 2 || lang_count >= 2 {
+        0.05
+    } else {
+        0.0
+    }
+}
+
+/// Temporal query boost (KS68 TR-3): if the query contains temporal keywords,
+/// boost results that have `temporal:*` labels by +0.015.
+fn apply_temporal_boost(query: &str, results: &mut [EchoResult]) {
+    const TEMPORAL_KEYWORDS: &[&str] = &[
+        "deadline",
+        "upcoming",
+        "when",
+        "scheduled",
+        "date",
+        "due",
+        "plan",
+        "next week",
+        "next month",
+    ];
+    let query_lower = query.to_lowercase();
+    let is_temporal_query = TEMPORAL_KEYWORDS.iter().any(|kw| query_lower.contains(kw));
+    if is_temporal_query {
+        for result in results.iter_mut() {
+            let has_temporal_label = result.labels.iter().any(|l| l.starts_with("temporal:"));
+            if has_temporal_label {
+                result.final_score += 0.015;
+            }
+        }
+    }
+}
+
+/// Cap results so no single (subject, topic) pair dominates the result set (KS67/KS68).
+/// Tracks occurrences per (subject, topic_label) tuple so that different facets of the
+/// same entity (e.g., "Sam:identity" vs "Sam:preference") count independently.
 /// Unknown subjects (no triple data) go into an "_unknown" bucket with a more generous cap.
 fn enforce_subject_diversity(
     results: &mut Vec<EchoResult>,
     _store: &EchoStore,
-    subject_map: &std::collections::HashMap<MemoryId, Vec<String>>,
+    subject_topic_map: &std::collections::HashMap<MemoryId, SubjectTopicInfo>,
     max_per_subject: usize,
 ) {
-    let mut subject_counts: std::collections::HashMap<String, usize> =
+    let mut subject_topic_counts: std::collections::HashMap<(String, String), usize> =
         std::collections::HashMap::new();
     results.retain(|r| {
-        let subjects = subject_map.get(&r.memory_id).cloned().unwrap_or_default();
+        let info = subject_topic_map.get(&r.memory_id);
 
-        if subjects.is_empty() {
-            // Unknown bucket -- cap at max_per_subject * 2
-            let count = subject_counts.entry("_unknown".to_string()).or_insert(0);
-            if *count >= max_per_subject * 2 {
-                return false;
+        let (subjects, topic) = match info {
+            Some(info) if !info.subjects.is_empty() => {
+                (&info.subjects, info.primary_topic.as_str())
             }
-            *count += 1;
-            return true;
-        }
+            _ => {
+                // Unknown bucket -- cap at max_per_subject * 2
+                let key = ("_unknown".to_string(), "topic:unknown".to_string());
+                let count = subject_topic_counts.entry(key).or_insert(0);
+                if *count >= max_per_subject * 2 {
+                    return false;
+                }
+                *count += 1;
+                return true;
+            }
+        };
 
-        // Check if any subject is already at cap
-        let dominated = subjects
-            .iter()
-            .any(|s| *subject_counts.get(s).unwrap_or(&0) >= max_per_subject);
+        // Check if any (subject, topic) pair is already at cap
+        let dominated = subjects.iter().any(|s| {
+            let key = (s.clone(), topic.to_string());
+            *subject_topic_counts.get(&key).unwrap_or(&0) >= max_per_subject
+        });
         if dominated {
             return false;
         }
-        for s in &subjects {
-            *subject_counts.entry(s.clone()).or_insert(0) += 1;
+        for s in subjects {
+            let key = (s.clone(), topic.to_string());
+            *subject_topic_counts.entry(key).or_insert(0) += 1;
         }
         true
     });
