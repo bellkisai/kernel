@@ -1236,9 +1236,15 @@ impl EchoEngine {
                 if child_rescue_only {
                     store.entry_at(idx).is_none_or(|e| e.parent_id.is_none())
                 } else {
-                    // KS69 T1: children can enter Pipe A only if subject matches query
+                    // KS69 T1: children can enter Pipe A only if topic matches query
                     store.entry_at(idx).is_none_or(|e| {
-                        e.parent_id.is_none() || child_subject_matches_query(&e.subject, query)
+                        e.parent_id.is_none()
+                            || child_topic_matches_query(
+                                &e.labels,
+                                &query_topic_labels,
+                                &e.subject,
+                                query,
+                            )
                     })
                 }
             });
@@ -1263,13 +1269,19 @@ impl EchoEngine {
                     let mut best_child_idx: Option<usize> = None;
                     for &child_idx in child_indices {
                         if let Some(child_entry) = store.entry_at(child_idx) {
-                            // Subject-entity gate (KS69 T1): skip children whose subject
-                            // doesn't match the query text.
-                            if !child_subject_matches_query(&child_entry.subject, query) {
+                            // Topic gate (KS69 T1): skip children whose topic/subject
+                            // doesn't match the query.
+                            if !child_topic_matches_query(
+                                &child_entry.labels,
+                                &query_topic_labels,
+                                &child_entry.subject,
+                                query,
+                            ) {
                                 tracing::debug!(
                                     child_idx,
+                                    child_labels = ?child_entry.labels,
                                     child_subject = ?child_entry.subject,
-                                    "Pipe B: child excluded by subject gate"
+                                    "Pipe B: child excluded by topic gate"
                                 );
                                 continue;
                             }
@@ -2982,22 +2994,34 @@ fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
 }
 
 /// Check if any entity in the query matches the child's subject.
-/// Prevents children from contaminating unrelated queries (KS69 Tier 1).
+/// Topic-based gate for child memories (KS69 Tier 1).
 ///
-/// Returns `true` if no subject is set (backward compat for pre-KS69 children)
-/// or if the subject matches the query text via substring or word-level overlap.
-fn child_subject_matches_query(child_subject: &Option<String>, query: &str) -> bool {
-    match child_subject {
-        None => true,
-        Some(subj) => {
-            let subj_lower = subj.to_lowercase();
-            let query_lower = query.to_lowercase();
-            query_lower.contains(&subj_lower)
-                || query_lower
-                    .split_whitespace()
-                    .any(|w| subj_lower.contains(w) && w.len() > 2)
-        }
+/// Uses label overlap (primary) or subject substring match (fallback) to decide
+/// whether a child memory is topically relevant to the current query.
+/// Prevents children from contaminating unrelated queries.
+fn child_topic_matches_query(
+    child_labels: &[String],
+    query_topic_labels: &[&str],
+    child_subject: &Option<String>,
+    query: &str,
+) -> bool {
+    // 1. Label overlap (primary) — same logic as Pipe B topic alignment gate
+    if !query_topic_labels.is_empty() && !child_labels.is_empty() {
+        return child_labels
+            .iter()
+            .any(|cl| query_topic_labels.iter().any(|qt| cl == qt));
     }
+    // 2. Subject match (fallback) — for children without labels
+    if let Some(subj) = child_subject {
+        let subj_lower = subj.to_lowercase();
+        let query_lower = query.to_lowercase();
+        return query_lower.contains(&subj_lower)
+            || query_lower
+                .split_whitespace()
+                .any(|w| subj_lower.contains(w) && w.len() > 2);
+    }
+    // 3. No labels, no subject — allow (backward compat)
+    true
 }
 
 /// Build a map from parent memory IDs to subject strings from their children.
