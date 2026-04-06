@@ -1163,6 +1163,35 @@ mod tests {
         MemoryEntry::new(content.to_string(), embedding, "test".to_string())
     }
 
+    /// Mock consolidator that returns a fixed label set (for Tier 2 label tests).
+    struct LabelMockConsolidator;
+
+    impl shrimpk_core::Consolidator for LabelMockConsolidator {
+        fn extract_facts(&self, _text: &str, _max_facts: usize) -> Vec<String> {
+            Vec::new()
+        }
+        fn name(&self) -> &str {
+            "label-mock"
+        }
+        fn extract_facts_and_labels(
+            &self,
+            _text: &str,
+            _max_facts: usize,
+        ) -> shrimpk_core::ConsolidationOutput {
+            shrimpk_core::ConsolidationOutput {
+                facts: Vec::new(),
+                labels: Some(shrimpk_core::LabelSet {
+                    topic: vec!["career".to_string(), "technology".to_string()],
+                    domain: vec!["work".to_string()],
+                    action: Vec::new(),
+                    memtype: Some("fact".to_string()),
+                    sentiment: Some("positive".to_string()),
+                }),
+                structured_facts: Vec::new(),
+            }
+        }
+    }
+
     #[test]
     fn consolidate_empty_store_returns_zeroed_result() {
         let config = test_config();
@@ -2025,6 +2054,140 @@ mod tests {
         assert!(
             !is_near_dup_child(&store, &parent_id, &[]),
             "Empty embedding should return false"
+        );
+    }
+
+    // ---- G3: Tier 2 label enrichment tests ----
+
+    #[test]
+    fn tier2_label_enrichment_upgrades_label_version() {
+        let mut config = test_config();
+        config.use_labels = true;
+        let mut store = EchoStore::new();
+        let mut hebbian = HebbianGraph::new(604_800.0, 0.01);
+        let mut bloom = TopicFilter::new(1000, 0.01);
+        let mut bloom_dirty = false;
+
+        // Create an entry that has been enriched (Step 5 done) but only has Tier 1 labels
+        let mut entry = make_entry("I got promoted to senior engineer at Anthropic", vec![1.0, 0.0, 0.0]);
+        entry.enriched = true;
+        entry.label_version = 1;
+        entry.labels = vec!["topic:career".to_string()]; // existing Tier 1 label
+        store.add(entry);
+
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+            &LabelMockConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
+        );
+
+        assert_eq!(result.labels_enriched, 1, "Should enrich 1 entry");
+
+        let updated = store.entry_at(0).expect("Entry should exist");
+        assert_eq!(updated.label_version, 2, "label_version should be upgraded to 2");
+
+        // Existing Tier 1 label should be preserved
+        assert!(
+            updated.labels.contains(&"topic:career".to_string()),
+            "Existing label should be preserved, got: {:?}",
+            updated.labels
+        );
+        // New Tier 2 labels should be merged in
+        assert!(
+            updated.labels.contains(&"topic:technology".to_string()),
+            "topic:technology should be added, got: {:?}",
+            updated.labels
+        );
+        assert!(
+            updated.labels.contains(&"domain:work".to_string()),
+            "domain:work should be added, got: {:?}",
+            updated.labels
+        );
+        assert!(
+            updated.labels.contains(&"memtype:fact".to_string()),
+            "memtype:fact should be added, got: {:?}",
+            updated.labels
+        );
+        assert!(
+            updated.labels.contains(&"sentiment:positive".to_string()),
+            "sentiment:positive should be added, got: {:?}",
+            updated.labels
+        );
+    }
+
+    #[test]
+    fn tier2_label_enrichment_skips_already_upgraded() {
+        let mut config = test_config();
+        config.use_labels = true;
+        let mut store = EchoStore::new();
+        let mut hebbian = HebbianGraph::new(604_800.0, 0.01);
+        let mut bloom = TopicFilter::new(1000, 0.01);
+        let mut bloom_dirty = false;
+
+        // Entry already at label_version 2 — should NOT be re-enriched
+        let mut entry = make_entry("Already enriched", vec![1.0, 0.0, 0.0]);
+        entry.enriched = true;
+        entry.label_version = 2;
+        store.add(entry);
+
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+            &LabelMockConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
+        );
+
+        assert_eq!(
+            result.labels_enriched, 0,
+            "Should NOT re-enrich label_version 2 entries"
+        );
+    }
+
+    #[test]
+    fn tier2_label_enrichment_respects_max_labels() {
+        let mut config = test_config();
+        config.use_labels = true;
+        let mut store = EchoStore::new();
+        let mut hebbian = HebbianGraph::new(604_800.0, 0.01);
+        let mut bloom = TopicFilter::new(1000, 0.01);
+        let mut bloom_dirty = false;
+
+        // Entry already at MAX_LABELS - 1, adding 5 more should truncate
+        let mut entry = make_entry("Dense memory", vec![1.0, 0.0, 0.0]);
+        entry.enriched = true;
+        entry.label_version = 1;
+        entry.labels = (0..crate::labels::MAX_LABELS_PER_ENTRY - 1)
+            .map(|i| format!("existing:label{i}"))
+            .collect();
+        store.add(entry);
+
+        let result = consolidate(
+            &mut store,
+            &mut hebbian,
+            &mut bloom,
+            &mut bloom_dirty,
+            &config,
+            &LabelMockConsolidator,
+            None,
+            &mut crate::lsh::CosineHash::new(384, 16, 10),
+        );
+
+        assert_eq!(result.labels_enriched, 1);
+        let updated = store.entry_at(0).unwrap();
+        assert!(
+            updated.labels.len() <= crate::labels::MAX_LABELS_PER_ENTRY,
+            "Labels should be truncated at MAX ({}), got {}",
+            crate::labels::MAX_LABELS_PER_ENTRY,
+            updated.labels.len()
         );
     }
 }
