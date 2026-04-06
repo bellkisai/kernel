@@ -448,6 +448,9 @@ pub fn classify_query(
                 push_unique(&mut labels, "topic:language:programming");
             }
         }
+        // Backward compat: also emit the legacy label so query_labels OR-union
+        // picks up old memories that were stored before the split.
+        push_unique(&mut labels, "topic:language");
     }
     if contains_any(&lower, &["learn", "study", "class", "course", "school"]) {
         push_unique(&mut labels, "action:learning");
@@ -782,6 +785,35 @@ mod tests {
         assert!(
             labels.iter().any(|l| l == "topic:language:programming"),
             "Ambiguous should emit programming, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_always_emits_legacy_label() {
+        let protos = mock_prototypes();
+        // Natural-only query
+        let labels =
+            classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language"),
+            "Natural query should also emit legacy topic:language, got: {labels:?}"
+        );
+        // Programming-only query
+        let labels = classify_query(
+            "What programming language does Sam prefer?",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "topic:language"),
+            "Programming query should also emit legacy topic:language, got: {labels:?}"
+        );
+        // Ambiguous query
+        let labels =
+            classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language"),
+            "Ambiguous query should also emit legacy topic:language, got: {labels:?}"
         );
     }
 
