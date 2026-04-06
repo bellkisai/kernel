@@ -972,12 +972,18 @@ fn apply_tier2_labels(
     };
 
     if applied {
+        let surviving: std::collections::HashSet<String> = store
+            .entry_at(idx)
+            .map(|e| e.labels.iter().cloned().collect())
+            .unwrap_or_default();
         for label in &new_labels {
-            store
-                .label_index_mut()
-                .entry(label.clone())
-                .or_default()
-                .push(idx as u32);
+            if surviving.contains(label) {
+                store
+                    .label_index_mut()
+                    .entry(label.clone())
+                    .or_default()
+                    .push(idx as u32);
+            }
         }
     }
 
@@ -2147,6 +2153,66 @@ mod tests {
         assert_eq!(
             result.labels_enriched, 0,
             "Should NOT re-enrich label_version 2 entries"
+        );
+    }
+
+    #[test]
+    fn tier2_label_index_only_contains_surviving_labels() {
+        let mut store = EchoStore::new();
+
+        // Entry with MAX_LABELS - 1 existing labels (leaves room for exactly 1 new one)
+        let mut entry = make_entry("Dense memory with many labels", vec![1.0, 0.0, 0.0]);
+        entry.enriched = true;
+        entry.label_version = 1;
+        entry.labels = (0..crate::labels::MAX_LABELS_PER_ENTRY - 1)
+            .map(|i| format!("existing:label{i}"))
+            .collect();
+        store.add(entry);
+
+        // Apply 3 new labels — only 1 should survive truncation
+        let label_set = shrimpk_core::LabelSet {
+            topic: vec!["alpha".to_string(), "beta".to_string()],
+            domain: vec!["gamma".to_string()],
+            action: Vec::new(),
+            memtype: None,
+            sentiment: None,
+        };
+
+        let applied = apply_tier2_labels(&mut store, 0, &label_set);
+        assert!(applied);
+
+        let entry = store.entry_at(0).unwrap();
+        assert_eq!(
+            entry.labels.len(),
+            crate::labels::MAX_LABELS_PER_ENTRY,
+            "Labels should be truncated to MAX"
+        );
+
+        // Only "topic:alpha" should have survived (first new label added)
+        let surviving: std::collections::HashSet<&str> =
+            entry.labels.iter().map(String::as_str).collect();
+        assert!(
+            surviving.contains("topic:alpha"),
+            "First new label should survive truncation"
+        );
+
+        // Verify label index only contains surviving labels
+        let alpha_hits = store.query_labels(&["topic:alpha".to_string()]);
+        assert!(
+            !alpha_hits.is_empty(),
+            "Surviving label 'topic:alpha' should be in index"
+        );
+
+        // "topic:beta" and "domain:gamma" were truncated — must NOT be in index
+        let beta_hits = store.query_labels(&["topic:beta".to_string()]);
+        let gamma_hits = store.query_labels(&["domain:gamma".to_string()]);
+        assert!(
+            beta_hits.is_empty(),
+            "Truncated label 'topic:beta' must not be in index, got {beta_hits:?}"
+        );
+        assert!(
+            gamma_hits.is_empty(),
+            "Truncated label 'domain:gamma' must not be in index, got {gamma_hits:?}"
         );
     }
 
