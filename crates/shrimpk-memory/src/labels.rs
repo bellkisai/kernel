@@ -177,6 +177,12 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
             "technology, programming, software, code, developer, computer, app, framework, library, algorithm, debugging, API, database, system",
         ),
         (
+            "topic:tools:editor",
+            "text editor, code editor, IDE, integrated development environment, Neovim, Vim, nvim, \
+             VSCode, VS Code, Visual Studio Code, JetBrains, IntelliJ, WebStorm, PyCharm, Emacs, \
+             Sublime Text, Atom, Helix, Zed, Nano, editor configuration, dotfiles, init.lua, vimrc",
+        ),
+        (
             "topic:finance",
             "finance, money, budget, savings, investment, bank, credit, debt, tax, expense, income, financial planning",
         ),
@@ -403,6 +409,19 @@ pub fn generate_tier1_labels(
         push_unique(&mut labels, "temporal:current");
     }
 
+    // 2b. Rule-based action:learning detection (KS68 PT-3)
+    // Supplements prototype cosine matching with explicit JLPT/language-learning keywords.
+    if contains_any(
+        &lower,
+        &[
+            "learning", "studying", "practicing", "jlpt", "fluent",
+            "native speaker", "taking lessons", "course", "class",
+            "hiragana", "katakana", "kanji",
+        ],
+    ) {
+        push_unique(&mut labels, "action:learning");
+    }
+
     // 3. Simple entity extraction — capitalized multi-char words not at sentence start
     // This is a lightweight heuristic; Tier 2 (GLiNER) will provide precise NER.
     let mut after_sentence_end = true; // first word is always sentence-start
@@ -482,7 +501,13 @@ pub fn classify_query(
         // picks up old memories that were stored before the split.
         push_unique(&mut labels, "topic:language");
     }
-    if contains_any(&lower, &["learn", "study", "class", "course", "school"]) {
+    if contains_any(
+        &lower,
+        &[
+            "learn", "study", "class", "course", "school", "jlpt",
+            "fluent", "practicing", "lessons",
+        ],
+    ) {
         push_unique(&mut labels, "action:learning");
     }
     if contains_any(
@@ -517,6 +542,15 @@ pub fn classify_query(
         &["code", "program", "tech", "software", "editor", "framework"],
     ) {
         push_unique(&mut labels, "topic:technology");
+    }
+    if contains_any(
+        &lower,
+        &[
+            "editor", "ide", "coding tool", "neovim", "vim", "vscode",
+            "text editor", "jetbrains", "emacs", "sublime", "helix", "zed",
+        ],
+    ) {
+        push_unique(&mut labels, "topic:tools:editor");
     }
     if contains_any(&lower, &["read", "book", "reading"]) {
         push_unique(&mut labels, "topic:entertainment");
@@ -1029,5 +1063,32 @@ mod tests {
                 "Prototype description too sparse (need >= 5 terms): '{desc}'"
             );
         }
+    }
+
+    #[test]
+    fn classify_query_editor_keywords_fire_tools_label() {
+        let protos = mock_prototypes();
+        for kw in &["neovim", "vscode", "text editor", "ide"] {
+            let q = format!("what is my {kw} setup");
+            let labels = classify_query(&q, &vec![0.0; 384], &protos);
+            assert!(
+                labels.contains(&"topic:tools:editor".to_string()),
+                "Query '{q}' should produce topic:tools:editor, got {labels:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn classify_query_editor_also_emits_technology() {
+        let protos = mock_prototypes();
+        let labels = classify_query("what editor do I use", &vec![0.0; 384], &protos);
+        assert!(
+            labels.contains(&"topic:tools:editor".to_string()),
+            "Should have topic:tools:editor, got {labels:?}",
+        );
+        assert!(
+            labels.contains(&"topic:technology".to_string()),
+            "Editor query should also trigger topic:technology, got {labels:?}",
+        );
     }
 }

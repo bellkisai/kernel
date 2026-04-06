@@ -1528,6 +1528,9 @@ impl EchoEngine {
         // 7c2. Temporal query boost (KS68 TR-3)
         apply_temporal_boost(query, &mut results);
 
+        // 7c3. Topic-label boost (KS68 KU-3)
+        label_topic_boost(&all_query_labels, &mut results);
+
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
             b.final_score
@@ -2922,6 +2925,26 @@ fn apply_temporal_boost(query: &str, results: &mut [EchoResult]) {
     }
 }
 
+/// Label-based boost (KS68): when query is classified with a specific label
+/// (e.g., `topic:tools:editor`, `action:learning`) and a result also carries that label,
+/// give it a small scoring bump so precisely-labeled memories surface above generic ones.
+fn label_topic_boost(query_labels: &[String], results: &mut [EchoResult]) {
+    // Labels eligible for boosting: topic:tools:* and action:learning
+    let boost_labels: Vec<&str> = query_labels
+        .iter()
+        .filter(|l| l.starts_with("topic:tools:") || *l == "action:learning")
+        .map(String::as_str)
+        .collect();
+    if boost_labels.is_empty() {
+        return;
+    }
+    for result in results.iter_mut() {
+        if result.labels.iter().any(|l| boost_labels.contains(&l.as_str())) {
+            result.final_score += 0.025;
+        }
+    }
+}
+
 /// Cap results so no single (subject, topic) pair dominates the result set (KS67/KS68).
 /// Tracks occurrences per (subject, topic_label) tuple so that different facets of the
 /// same entity (e.g., "Sam:identity" vs "Sam:preference") count independently.
@@ -4036,6 +4059,102 @@ mod tests {
             (*caps.get(&0).unwrap() - 0.90).abs() < f64::EPSILON,
             "Tightest cap (0.90) should win, got {}",
             caps.get(&0).unwrap()
+        );
+    }
+
+    // --- KU-3: Topic-label boost ---
+
+    #[test]
+    fn label_topic_boost_fires_for_matching_editor_label() {
+        let mut results = vec![
+            make_echo_result(
+                "I use Neovim with lazy.nvim",
+                0.85,
+                vec!["topic:tools:editor".to_string()],
+            ),
+            make_echo_result(
+                "I prefer Rust for systems",
+                0.83,
+                vec!["topic:language:programming".to_string()],
+            ),
+        ];
+        let query_labels = vec!["topic:tools:editor".to_string()];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.875).abs() < 1e-10,
+            "Editor result should get +0.025 boost, got {}",
+            results[0].final_score,
+        );
+        assert!(
+            (results[1].final_score - 0.83).abs() < 1e-10,
+            "Non-editor result should be unchanged, got {}",
+            results[1].final_score,
+        );
+    }
+
+    #[test]
+    fn label_topic_boost_no_op_without_tools_label() {
+        let mut results = vec![make_echo_result(
+            "I use PostgreSQL daily",
+            0.90,
+            vec!["topic:technology".to_string()],
+        )];
+        let query_labels = vec!["topic:technology".to_string()];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.90).abs() < 1e-10,
+            "Non-tools label should not trigger boost, got {}",
+            results[0].final_score,
+        );
+    }
+
+    // --- PT-3: action:learning label boost ---
+
+    #[test]
+    fn label_boost_fires_for_learning_query_and_learning_result() {
+        let mut results = vec![
+            make_echo_result(
+                "I'm studying Japanese — JLPT N3 level",
+                0.45,
+                vec!["action:learning".to_string(), "topic:language:natural".to_string()],
+            ),
+            make_echo_result(
+                "I code in Python and Rust",
+                0.57,
+                vec!["topic:language:programming".to_string()],
+            ),
+        ];
+        let query_labels = vec![
+            "action:learning".to_string(),
+            "topic:language:natural".to_string(),
+        ];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.475).abs() < 1e-10,
+            "Learning result should get +0.025 boost, got {}",
+            results[0].final_score,
+        );
+        assert!(
+            (results[1].final_score - 0.57).abs() < 1e-10,
+            "Programming result should be unchanged, got {}",
+            results[1].final_score,
+        );
+    }
+
+    #[test]
+    fn label_boost_no_op_for_learning_result_without_learning_query() {
+        let mut results = vec![make_echo_result(
+            "I'm studying Japanese — JLPT N3 level",
+            0.45,
+            vec!["action:learning".to_string()],
+        )];
+        // Query about career, not learning
+        let query_labels = vec!["domain:work".to_string()];
+        super::label_topic_boost(&query_labels, &mut results);
+        assert!(
+            (results[0].final_score - 0.45).abs() < 1e-10,
+            "Learning result should not be boosted for non-learning query, got {}",
+            results[0].final_score,
         );
     }
 }
