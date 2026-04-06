@@ -32,7 +32,6 @@ fn micro_config(data_dir: PathBuf) -> EchoConfig {
         max_echo_results: 10,
         ram_budget_bytes: 100_000_000,
         supersedes_demotion: 0.15,
-        child_rescue_only: false, // KS68.3: let children compete in Pipe A (dedup guard active)
         data_dir,
         embedding_dim: 384,
         ..Default::default()
