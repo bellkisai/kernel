@@ -102,6 +102,10 @@ pub struct MemoryMeta {
     #[serde(default)]
     pub enrichment_attempts: u8,
     #[serde(default)]
+    pub confidence: f32,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
     pub parent_id: Option<MemoryId>,
     /// Which sensory channel produced this memory (v2+).
     #[serde(default)]
@@ -154,6 +158,8 @@ impl MemoryMeta {
             echo_count: entry.echo_count,
             enriched: entry.enriched,
             enrichment_attempts: entry.enrichment_attempts,
+            confidence: entry.confidence,
+            subject: entry.subject.clone(),
             parent_id: entry.parent_id.clone(),
             modality: entry.modality,
             has_vision_embedding: entry.vision_embedding.is_some(),
@@ -189,6 +195,8 @@ impl MemoryMeta {
             echo_count: self.echo_count,
             enriched: self.enriched,
             enrichment_attempts: self.enrichment_attempts,
+            confidence: self.confidence,
+            subject: self.subject,
             parent_id: self.parent_id,
             labels: self.labels,
             label_version: self.label_version,

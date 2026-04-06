@@ -345,6 +345,7 @@ mod tests {
             echoed_at: Utc::now(),
             modality: shrimpk_core::Modality::Text,
             labels: Vec::new(),
+            matched_child_content: None,
         }
     }
 

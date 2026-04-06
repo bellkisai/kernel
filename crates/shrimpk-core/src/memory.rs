@@ -227,6 +227,12 @@ pub struct MemoryEntry {
     /// Number of LLM extraction attempts (KS69). Capped at 3 to avoid infinite retries.
     #[serde(default)]
     pub enrichment_attempts: u8,
+    /// LLM extraction confidence (KS69). 0.0-1.0, default 0.0 for non-extracted entries.
+    #[serde(default)]
+    pub confidence: f32,
+    /// Primary entity this memory is about (KS69). Populated during LLM extraction.
+    #[serde(default)]
+    pub subject: Option<String>,
     /// Link to parent memory. Child memories are LLM-extracted facts created during
     /// consolidation. When a child matches during echo, the parent's content is returned.
     #[serde(default)]
@@ -284,6 +290,8 @@ impl MemoryEntry {
             echo_count: 0,
             enriched: false,
             enrichment_attempts: 0,
+            confidence: 0.0,
+            subject: None,
             parent_id: None,
             labels: Vec::new(),
             label_version: 0,
@@ -345,6 +353,11 @@ pub struct EchoResult {
     /// Labels on this memory (ADR-015). Exposed for graph navigation.
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Content of the child memory that matched the query (KS69 Tier 1).
+    /// Present when a child rescued a parent (Pipe B) or appeared directly.
+    /// Gives downstream consumers the focused fact text that triggered retrieval.
+    #[serde(default)]
+    pub matched_child_content: Option<String>,
 }
 
 /// A label connection in the memory graph.

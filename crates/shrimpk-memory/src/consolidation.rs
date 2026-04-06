@@ -285,6 +285,19 @@ pub fn consolidate(
                 let mut fact_embeddings: Vec<Vec<f32>> = Vec::with_capacity(fact_entries.len());
 
                 for (fact_text, structured_fact) in &fact_entries {
+                    // KS69: confidence gate — skip low-confidence extractions
+                    if let Some(sf) = structured_fact
+                        && let Some(conf) = sf.confidence
+                        && conf < 0.5
+                    {
+                        tracing::debug!(
+                            fact = %fact_text,
+                            confidence = conf,
+                            "KS69: skipping low-confidence fact"
+                        );
+                        continue;
+                    }
+
                     let embedding = match embedder.lock() {
                         Ok(mut e) => match e.embed_text(fact_text) {
                             Ok(emb) => emb,
@@ -317,10 +330,26 @@ pub fn consolidate(
                     );
                     child.parent_id = Some(parent_id.clone());
                     child.enriched = true;
+
+                    // KS69: propagate confidence + subject from structured extraction
+                    if let Some(sf) = structured_fact {
+                        if let Some(conf) = sf.confidence {
+                            child.confidence = conf;
+                        }
+                        if let Some(ref subj) = sf.subject {
+                            child.subject = Some(subj.clone());
+                        }
+                    }
+
                     // Propagate parent's temporal era so children inherit
                     // the correct age for recency scoring (KS21).
+                    // KS69: also copy parent labels (Tier 1+2) to child.
                     if let Some(parent_entry) = store.entry_at(idx) {
                         child.created_at = parent_entry.created_at;
+                        if !parent_entry.labels.is_empty() {
+                            child.labels = parent_entry.labels.clone();
+                            child.label_version = parent_entry.label_version;
+                        }
                     }
 
                     // Extract structured triple if possible (KS61 + KS67 subject fallback)

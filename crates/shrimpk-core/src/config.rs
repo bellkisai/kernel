@@ -354,7 +354,7 @@ fn default_enrichment_model() -> String {
 }
 
 fn default_max_facts_per_memory() -> usize {
-    12
+    5
 }
 
 fn default_consolidation_provider() -> String {

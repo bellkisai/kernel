@@ -96,39 +96,54 @@ impl OllamaConsolidator {
     }
 }
 
-/// Combined prompt for fact extraction + label classification (KS67 v2 — open-domain).
+/// Combined prompt for fact extraction + label classification (KS69 v3 — self-contained few-shot).
 ///
-/// v2 changes from v1:
-/// - Removed "The user" prefix requirement and 13-verb whitelist
-/// - Facts are structured objects with subject, type, and confidence
-/// - Supports multi-entity extraction (not just "the user")
+/// v3 changes from v2:
+/// - 3 few-shot examples for consistent output quality
+/// - Confidence scores are required (gate at 0.5 downstream)
+/// - Explicit "self-contained sentence" rule with subject+verb+object
 fn combined_enrichment_prompt(max_facts: usize) -> String {
     format!(
-        "Analyze this memory and return a JSON object with two keys.\n\n\
-         1. \"facts\": Extract up to {max_facts} atomic, standalone facts as JSON objects.\n\
-         Each fact object has:\n\
-         - \"text\": a complete sentence (e.g., \"Sam works at Anthropic\")\n\
-         - \"subject\": the primary entity this fact is about (e.g., \"Sam\", \"MLTK\", \"the project\")\n\
+        "You extract structured facts from a memory snippet.\n\n\
+         Return a JSON object with two keys: \"facts\" and \"labels\".\n\n\
+         \"facts\": up to {max_facts} objects, each with:\n\
+         - \"text\": a self-contained sentence (subject + verb + object)\n\
+         - \"subject\": the primary entity (a name, project, or \"the user\")\n\
          - \"type\": one of [personal, project, preference, goal, status, event, relationship]\n\
-         - \"confidence\": your confidence in this fact (0.0 to 1.0)\n\n\
-         Rules for facts:\n\
-         - Use consistent entity names across facts (don't mix \"Sam\" and \"the user\" for the same person)\n\
-         - Include facts about ALL entities mentioned, not just the primary one\n\
-         - For temporal facts, include time references (e.g., \"since 2023\", \"last month\")\n\
-         - Each fact must be self-contained and understandable without context\n\
-         - Use simple present/past tense with these verb patterns: \"works at\", \"lives in\", \"moved to\", \"joined\", \"uses\", \"prefers\", \"switched to\"\n\n\
-         2. \"labels\": Classify based on what this memory IS ABOUT, not just the words it contains.\n\
-            A memory about attending a class implies learning/education.\n\
-            A memory about running implies exercise/health.\n\n\
-         Label categories:\n\
-         - topic: [career, language, education, health, fitness, housing, food, music, technology, finance, travel, relationships, hobby, entertainment, pets]\n\
-         - domain: [work, life, social, health, creative]\n\
-         - action: [learning, building, planning, moving, exercising, leading, deciding]\n\
-         - memtype: one of [fact, preference, goal, habit, event, opinion, plan]\n\
-         - sentiment: one of [positive, negative, neutral, mixed]\n\n\
-         Return JSON:\n\
-         {{\"facts\": [{{\"text\": \"...\", \"subject\": \"...\", \"type\": \"...\", \"confidence\": 0.9}}], \
-         \"labels\": {{\"topic\": [...], \"domain\": [...], \"action\": [...], \"memtype\": \"...\", \"sentiment\": \"...\"}}}}"
+         - \"confidence\": 0.0-1.0 (how certain you are this fact is stated, not implied)\n\n\
+         \"labels\": classify the memory:\n\
+         - \"topic\": list from [career, language, education, health, fitness, housing, food, music, technology, finance, travel, relationships, hobby, entertainment, pets]\n\
+         - \"domain\": list from [work, life, social, health, creative]\n\
+         - \"action\": list from [learning, building, planning, moving, exercising, leading, deciding]\n\
+         - \"memtype\": one of [fact, preference, goal, habit, event, opinion, plan]\n\
+         - \"sentiment\": one of [positive, negative, neutral, mixed]\n\n\
+         Rules:\n\
+         1. Every fact \"text\" must be understandable WITHOUT the original memory.\n\
+         2. Use the SAME entity name across facts (don't alternate \"Sam\" / \"the user\").\n\
+         3. Set confidence < 0.5 for anything implied or uncertain.\n\
+         4. If no facts can be extracted, return {{\"facts\": [], \"labels\": {{}}}}.\n\n\
+         === Example 1 ===\n\
+         Memory: \"I switched from VS Code to Neovim last month. Lua config is way better for my workflow.\"\n\
+         Output:\n\
+         {{\"facts\": [\n\
+           {{\"text\": \"The user switched from VS Code to Neovim\", \"subject\": \"the user\", \"type\": \"preference\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"The user prefers Lua-based editor configuration\", \"subject\": \"the user\", \"type\": \"preference\", \"confidence\": 0.8}}\n\
+         ], \"labels\": {{\"topic\": [\"technology\"], \"domain\": [\"work\"], \"action\": [\"deciding\"], \"memtype\": \"preference\", \"sentiment\": \"positive\"}}}}\n\n\
+         === Example 2 ===\n\
+         Memory: \"Sam joined Anthropic in 2023. He's leading the alignment team now.\"\n\
+         Output:\n\
+         {{\"facts\": [\n\
+           {{\"text\": \"Sam joined Anthropic in 2023\", \"subject\": \"Sam\", \"type\": \"event\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"Sam leads the alignment team at Anthropic\", \"subject\": \"Sam\", \"type\": \"status\", \"confidence\": 0.9}}\n\
+         ], \"labels\": {{\"topic\": [\"career\"], \"domain\": [\"work\"], \"action\": [\"leading\"], \"memtype\": \"fact\", \"sentiment\": \"neutral\"}}}}\n\n\
+         === Example 3 ===\n\
+         Memory: \"Starting a 5K training plan. Goal is to run the city marathon by October.\"\n\
+         Output:\n\
+         {{\"facts\": [\n\
+           {{\"text\": \"The user is training for a 5K run\", \"subject\": \"the user\", \"type\": \"goal\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"The user plans to run the city marathon by October\", \"subject\": \"the user\", \"type\": \"goal\", \"confidence\": 0.9}}\n\
+         ], \"labels\": {{\"topic\": [\"fitness\", \"health\"], \"domain\": [\"health\", \"life\"], \"action\": [\"exercising\", \"planning\"], \"memtype\": \"goal\", \"sentiment\": \"positive\"}}}}\n\n\
+         Now extract from the memory below. Return ONLY the JSON object."
     )
 }
 
@@ -385,6 +400,37 @@ impl Consolidator for OllamaConsolidator {
 
     fn extract_facts_and_labels(&self, text: &str, max_facts: usize) -> ConsolidationOutput {
         let prompt = combined_enrichment_prompt(max_facts);
+        // KS69: structured JSON schema for Ollama (replaces plain "json" string).
+        // Forces the model to produce conformant output, reducing parse failures.
+        let format_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "facts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "subject": {"type": "string"},
+                            "type": {"type": "string", "enum": ["personal", "project", "preference", "goal", "status", "event", "relationship"]},
+                            "confidence": {"type": "number"}
+                        },
+                        "required": ["text", "subject", "type", "confidence"]
+                    }
+                },
+                "labels": {
+                    "type": "object",
+                    "properties": {
+                        "topic": {"type": "array", "items": {"type": "string"}},
+                        "domain": {"type": "array", "items": {"type": "string"}},
+                        "action": {"type": "array", "items": {"type": "string"}},
+                        "memtype": {"type": "string"},
+                        "sentiment": {"type": "string"}
+                    }
+                }
+            },
+            "required": ["facts", "labels"]
+        });
         let body = serde_json::json!({
             "model": self.model,
             "messages": [
@@ -392,7 +438,7 @@ impl Consolidator for OllamaConsolidator {
                 {"role": "user", "content": text}
             ],
             "stream": false,
-            "format": "json",
+            "format": format_schema,
             "options": {"temperature": 0.0, "num_predict": 768}
         });
 
@@ -798,15 +844,21 @@ mod tests {
     #[test]
     fn combined_prompt_contains_label_categories() {
         let prompt = combined_enrichment_prompt(5);
-        assert!(prompt.contains("topic:"), "Prompt should mention topic");
-        assert!(prompt.contains("memtype:"), "Prompt should mention memtype");
         assert!(
-            prompt.contains("sentiment:"),
-            "Prompt should mention sentiment"
+            prompt.contains("\"topic\""),
+            "Prompt should mention topic label"
         );
         assert!(
-            prompt.contains("IS ABOUT"),
-            "Prompt should emphasize implicit inference"
+            prompt.contains("\"memtype\""),
+            "Prompt should mention memtype label"
+        );
+        assert!(
+            prompt.contains("\"sentiment\""),
+            "Prompt should mention sentiment label"
+        );
+        assert!(
+            prompt.contains("Example 1"),
+            "v3 prompt should contain few-shot examples"
         );
     }
 
@@ -923,7 +975,7 @@ mod tests {
     }
 
     #[test]
-    fn combined_prompt_v2_contains_structured_instructions() {
+    fn combined_prompt_v3_contains_structured_instructions() {
         let prompt = combined_enrichment_prompt(5);
         assert!(
             prompt.contains("\"subject\""),
@@ -938,20 +990,20 @@ mod tests {
             "Prompt should mention confidence field"
         );
         assert!(
-            prompt.contains("consistent entity names"),
+            prompt.contains("SAME entity name"),
             "Prompt should mention entity consistency"
         );
         assert!(
-            prompt.contains("ALL entities"),
-            "Prompt should mention multi-entity extraction"
+            prompt.contains("confidence < 0.5"),
+            "Prompt should mention confidence threshold"
         );
         assert!(
-            prompt.contains("temporal facts"),
-            "Prompt should mention temporal references"
+            prompt.contains("Example 3"),
+            "v3 prompt should have 3 few-shot examples"
         );
         assert!(
-            !prompt.contains("The user"),
-            "v2 prompt should not require 'The user' prefix"
+            prompt.contains("up to 5"),
+            "Prompt should reflect max_facts parameter"
         );
     }
 }

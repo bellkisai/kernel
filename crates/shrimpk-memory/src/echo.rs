@@ -1158,15 +1158,17 @@ impl EchoEngine {
         let cosine_ranked =
             similarity::rank_candidates(&query_embedding, &candidates, near_miss_threshold);
 
-        // 5c. Entity-anchored graph traversal + RRF merge (KS62).
+        // 5c. Detect query entities (lifted for Pipe B entity gate + graph traversal)
+        let query_entities = detect_query_entities(query, store.entity_index_ref());
+
+        // 5d. Entity-anchored graph traversal + RRF merge (KS62).
         //     If query mentions known entities, BFS from entity-anchored memories
         //     via Hebbian edges, then merge with cosine results via RRF.
         let all_ranked = if self.config.graph_traversal_enabled {
-            let entities = detect_query_entities(query, store.entity_index_ref());
-            if !entities.is_empty() {
+            if !query_entities.is_empty() {
                 // Collect anchor indices from entity index
                 let mut anchors: Vec<u32> = Vec::new();
-                for entity in &entities {
+                for entity in &query_entities {
                     anchors.extend(store.query_entities(entity));
                 }
                 anchors.sort_unstable();
@@ -1197,7 +1199,7 @@ impl EchoEngine {
 
                     if !graph_with_cosine.is_empty() {
                         tracing::debug!(
-                            entities = ?entities,
+                            entities = ?query_entities,
                             anchors = anchors.len(),
                             graph_new = graph_with_cosine.len(),
                             cosine_total = cosine_ranked.len(),
@@ -1238,7 +1240,10 @@ impl EchoEngine {
                 }
             });
 
-        // 6. Pipe B: check if near-miss parents have enriched children that score better
+        // 6. Pipe B: check if near-miss parents have enriched children that score better.
+        //    Enhanced with entity gate, confidence weighting, and child content tracking (KS69 T1).
+        let mut pipe_b_child_content: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
         let promoted: Vec<(usize, f32)> = if store.has_enriched_memories() && !pipe_b.is_empty() {
             let mut promotions: Vec<(usize, f32)> = Vec::new();
             for &(idx, _parent_score) in &pipe_b {
@@ -1252,12 +1257,40 @@ impl EchoEngine {
                     }
                     let embeddings = store.all_embeddings();
                     let mut best_child_score: f32 = 0.0;
+                    let mut best_child_idx: Option<usize> = None;
                     for &child_idx in child_indices {
+                        // Entity gate (KS69 T1): if query mentions entities and child has
+                        // a subject, require overlap. Prevents off-topic child rescue.
+                        if !query_entities.is_empty()
+                            && let Some(child_entry) = store.entry_at(child_idx)
+                            && let Some(ref child_subject) = child_entry.subject
+                        {
+                            let child_subj_lc = child_subject.to_lowercase();
+                            let entity_match =
+                                query_entities.iter().any(|qe| child_subj_lc.contains(qe));
+                            if !entity_match {
+                                tracing::debug!(
+                                    child_idx,
+                                    child_subject = %child_subject,
+                                    query_entities = ?query_entities,
+                                    "Pipe B: child excluded by entity gate"
+                                );
+                                continue;
+                            }
+                        }
+
                         if let Some(child_emb) = embeddings.get(child_idx) {
                             let child_sim =
                                 similarity::cosine_similarity(&query_embedding, child_emb);
-                            if child_sim > best_child_score {
-                                best_child_score = child_sim;
+                            // Confidence weighting (KS69 T1): scale by LLM confidence
+                            let confidence = store
+                                .entry_at(child_idx)
+                                .map(|e| e.confidence.max(0.01))
+                                .unwrap_or(1.0);
+                            let weighted_sim = child_sim * confidence;
+                            if weighted_sim > best_child_score {
+                                best_child_score = weighted_sim;
+                                best_child_idx = Some(child_idx);
                             }
                         }
                     }
@@ -1291,6 +1324,12 @@ impl EchoEngine {
                         // Apply child memory penalty at promotion (KS69)
                         let penalized_score = best_child_score + self.config.child_memory_penalty;
                         promotions.push((idx, penalized_score));
+                        // Track child content for matched_child_content (KS69 T1)
+                        if let Some(ci) = best_child_idx
+                            && let Some(child_entry) = store.entry_at(ci)
+                        {
+                            pipe_b_child_content.insert(idx, child_entry.content.clone());
+                        }
                     }
                 }
             }
@@ -1499,10 +1538,26 @@ impl EchoEngine {
                     final_score += demotion;
                 }
 
-                // Child memory penalty (KS69): demote children to prevent hallucination inflation
+                // Child memory penalty + confidence weighting (KS69):
+                // Demote children and scale by LLM extraction confidence.
                 if entry.parent_id.is_some() {
                     final_score += self.config.child_memory_penalty as f64;
+                    // Confidence weighting: scale final_score by confidence (0.01 floor)
+                    let confidence = entry.confidence.max(0.01) as f64;
+                    final_score *= confidence;
                 }
+
+                // Resolve matched child content (KS69 T1):
+                // - Pipe B rescue: use the child text that triggered rescue
+                // - Direct child in Pipe A: use the child's own content
+                let matched_child_content = if let Some(child_text) = pipe_b_child_content.get(&idx)
+                {
+                    Some(child_text.clone())
+                } else if entry.parent_id.is_some() {
+                    Some(entry.content.clone())
+                } else {
+                    None
+                };
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
@@ -1513,6 +1568,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: entry.modality,
                     labels: entry.labels.clone(),
+                    matched_child_content,
                 })
             })
             .collect();
@@ -1604,6 +1660,7 @@ impl EchoEngine {
                             echoed_at: Utc::now(),
                             modality: Modality::Text,
                             labels: vec![label.to_string()],
+                            matched_child_content: None,
                         });
                         results.sort_by(|a, b| {
                             b.final_score
@@ -1831,6 +1888,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: Modality::Vision,
                     labels: entry.labels.clone(),
+                    matched_child_content: None,
                 })
             })
             .collect();
@@ -2155,6 +2213,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: entry.modality,
                     labels: entry.labels.clone(),
+                    matched_child_content: None,
                 })
             })
             .collect();
@@ -2228,6 +2287,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: entry.modality,
                     labels: entry.labels.clone(),
+                    matched_child_content: None,
                 })
             })
             .collect();
@@ -3990,6 +4050,7 @@ mod tests {
             echoed_at: Utc::now(),
             modality: Modality::Text,
             labels,
+            matched_child_content: None,
         }
     }
 
@@ -4008,6 +4069,7 @@ mod tests {
             echoed_at: Utc::now(),
             modality: Modality::Text,
             labels,
+            matched_child_content: None,
         }
     }
 
