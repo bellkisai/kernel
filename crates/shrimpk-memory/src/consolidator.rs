@@ -180,15 +180,21 @@ fn try_repair_truncated_json(content: &str) -> Option<serde_json::Value> {
     if brace_depth <= 0 && bracket_depth <= 0 {
         return None; // Not truncated, just malformed
     }
-    // Close open strings, brackets, and braces
+    // Close open strings, then inner braces, brackets, outer braces.
+    // When cut mid-object inside an array (e.g. {"facts":[{"text":"trunc ),
+    // inner object braces must close BEFORE the array bracket.
     let mut repaired = trimmed.to_string();
     if in_string {
         repaired.push('"');
     }
+    let inner_braces = (brace_depth - 1).max(0) as usize;
+    for _ in 0..inner_braces {
+        repaired.push('}');
+    }
     for _ in 0..bracket_depth {
         repaired.push(']');
     }
-    for _ in 0..brace_depth {
+    for _ in 0..(brace_depth as usize).saturating_sub(inner_braces) {
         repaired.push('}');
     }
     tracing::debug!(
