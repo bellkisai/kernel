@@ -268,44 +268,9 @@ pub fn consolidate(
             // Apply Tier 2 labels from the same response when available (KS67)
             if let Some(label_set) = &output.labels
                 && config.use_labels
+                && apply_tier2_labels(store, idx, label_set)
             {
-                let mut new_labels: Vec<String> = Vec::new();
-                for topic in &label_set.topic {
-                    new_labels.push(format!("topic:{}", topic.to_lowercase()));
-                }
-                for domain in &label_set.domain {
-                    new_labels.push(format!("domain:{}", domain.to_lowercase()));
-                }
-                for action in &label_set.action {
-                    new_labels.push(format!("action:{}", action.to_lowercase()));
-                }
-                if let Some(ref mt) = label_set.memtype {
-                    new_labels.push(format!("memtype:{}", mt.to_lowercase()));
-                }
-                if let Some(ref sent) = label_set.sentiment {
-                    new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
-                }
-
-                if !new_labels.is_empty() {
-                    if let Some(entry) = store.entry_at_mut(idx) {
-                        for label in &new_labels {
-                            if !entry.labels.contains(label) {
-                                entry.labels.push(label.clone());
-                            }
-                        }
-                        entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
-                        entry.label_version = 2;
-                        result.labels_enriched += 1;
-                    }
-
-                    for label in &new_labels {
-                        store
-                            .label_index_mut()
-                            .entry(label.clone())
-                            .or_default()
-                            .push(idx as u32);
-                    }
-                }
+                result.labels_enriched += 1;
             }
 
             // Create child memories if embedder is available
@@ -512,45 +477,10 @@ pub fn consolidate(
 
             let output = consolidator.extract_facts_and_labels(&content, 5);
 
-            if let Some(label_set) = output.labels {
-                let mut new_labels: Vec<String> = Vec::new();
-
-                for topic in &label_set.topic {
-                    new_labels.push(format!("topic:{}", topic.to_lowercase()));
-                }
-                for domain in &label_set.domain {
-                    new_labels.push(format!("domain:{}", domain.to_lowercase()));
-                }
-                for action in &label_set.action {
-                    new_labels.push(format!("action:{}", action.to_lowercase()));
-                }
-                if let Some(ref mt) = label_set.memtype {
-                    new_labels.push(format!("memtype:{}", mt.to_lowercase()));
-                }
-                if let Some(ref sent) = label_set.sentiment {
-                    new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
-                }
-
-                if let Some(entry) = store.entry_at_mut(idx) {
-                    // Merge: add new labels that aren't already present
-                    for label in &new_labels {
-                        if !entry.labels.contains(label) {
-                            entry.labels.push(label.clone());
-                        }
-                    }
-                    entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
-                    entry.label_version = 2;
-                    result.labels_enriched += 1;
-                }
-
-                // Update label index for new labels
-                for label in &new_labels {
-                    store
-                        .label_index_mut()
-                        .entry(label.clone())
-                        .or_default()
-                        .push(idx as u32);
-                }
+            if let Some(label_set) = output.labels
+                && apply_tier2_labels(store, idx, &label_set)
+            {
+                result.labels_enriched += 1;
             }
         }
     }
@@ -993,6 +923,65 @@ pub(crate) fn extract_subject(fact: &str) -> String {
         .unwrap_or("")
         .trim_end_matches(|c: char| !c.is_alphanumeric())
         .to_string()
+}
+
+/// Apply Tier 2 labels from a `LabelSet` onto a store entry.
+///
+/// Converts the label set fields into prefixed label strings, merges them
+/// with existing labels (dedup), truncates at `MAX_LABELS_PER_ENTRY`, sets
+/// `label_version = 2`, and updates the store's label index.
+///
+/// Returns `true` if labels were applied (for counting in `ConsolidationResult`).
+fn apply_tier2_labels(
+    store: &mut EchoStore,
+    idx: usize,
+    label_set: &shrimpk_core::LabelSet,
+) -> bool {
+    let mut new_labels: Vec<String> = Vec::new();
+    for topic in &label_set.topic {
+        new_labels.push(format!("topic:{}", topic.to_lowercase()));
+    }
+    for domain in &label_set.domain {
+        new_labels.push(format!("domain:{}", domain.to_lowercase()));
+    }
+    for action in &label_set.action {
+        new_labels.push(format!("action:{}", action.to_lowercase()));
+    }
+    if let Some(ref mt) = label_set.memtype {
+        new_labels.push(format!("memtype:{}", mt.to_lowercase()));
+    }
+    if let Some(ref sent) = label_set.sentiment {
+        new_labels.push(format!("sentiment:{}", sent.to_lowercase()));
+    }
+
+    if new_labels.is_empty() {
+        return false;
+    }
+
+    let applied = if let Some(entry) = store.entry_at_mut(idx) {
+        for label in &new_labels {
+            if !entry.labels.contains(label) {
+                entry.labels.push(label.clone());
+            }
+        }
+        entry.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
+        entry.label_version = 2;
+        true
+    } else {
+        false
+    };
+
+    if applied {
+        for label in &new_labels {
+            store
+                .label_index_mut()
+                .entry(label.clone())
+                .or_default()
+                .push(idx as u32);
+        }
+    }
+
+    applied
 }
 
 /// Check if a new child embedding is a near-duplicate of any existing child
