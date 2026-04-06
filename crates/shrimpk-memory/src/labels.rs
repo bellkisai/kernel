@@ -397,7 +397,19 @@ pub fn generate_tier1_labels(
             "expires",
             "scheduled for",
         ],
-    ) || contains_future_date(&lower)
+    ) || (contains_future_date(&lower)
+        && contains_any(
+            &lower,
+            &[
+                "deadline",
+                "due",
+                "filing",
+                "expires",
+                "scheduled",
+                "upcoming",
+                "submit",
+            ],
+        ))
     {
         push_unique(&mut labels, "temporal:future");
     }
@@ -673,10 +685,9 @@ fn contains_any(text: &str, patterns: &[&str]) -> bool {
 /// - "YYYY-MM-DD" ISO dates (e.g., "2026-04-15")
 ///
 /// We don't compare against the current date — any explicit date reference
-/// paired with future-signalling context (deadline, filing, due) is enough.
-/// This function is called only when the text already contains "deadline" or
-/// similar keywords haven't matched, so it provides incremental coverage for
-/// content like "patent filing April 2026".
+/// is detected here. The caller gates this behind context keywords (deadline,
+/// due, filing, expires, etc.) to avoid labeling past dates like
+/// "I started at Google in January 2020" as temporal:future.
 fn contains_future_date(text: &str) -> bool {
     // Pattern 1: "month yyyy" where yyyy is a 4-digit year
     let months = [
@@ -968,6 +979,20 @@ mod tests {
         assert!(
             labels.iter().any(|l| l == "temporal:future"),
             "Should detect ISO date '2026-04-15' as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn past_date_without_context_keywords_not_temporal_future() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I started at Google in January 2020",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            !labels.iter().any(|l| l == "temporal:future"),
+            "Past date without deadline context should NOT get temporal:future, got: {labels:?}"
         );
     }
 
