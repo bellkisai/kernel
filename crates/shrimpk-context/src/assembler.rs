@@ -273,6 +273,7 @@ mod tests {
             echoed_at: Utc::now(),
             modality: Default::default(),
             labels: Vec::new(),
+            matched_child_content: None,
         }
     }
 
