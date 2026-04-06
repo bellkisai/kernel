@@ -334,14 +334,7 @@ pub fn consolidate(
                     };
 
                     // KS67: Skip near-duplicate children (cosine > 0.95 with existing child of same parent)
-                    let is_dup = (0..store.len()).any(|i| {
-                        store
-                            .entry_at(i)
-                            .is_some_and(|e| e.parent_id.as_ref() == Some(&parent_id))
-                            && store.embedding_at(i).is_some_and(|existing| {
-                                crate::similarity::cosine_similarity(&embedding, existing) > 0.95
-                            })
-                    });
+                    let is_dup = is_near_dup_child(store, &parent_id, &embedding);
                     if is_dup {
                         tracing::debug!(fact = %fact_text, "KS67: skipping near-duplicate child");
                         fact_embeddings.push(embedding);
@@ -1000,6 +993,30 @@ pub(crate) fn extract_subject(fact: &str) -> String {
         .unwrap_or("")
         .trim_end_matches(|c: char| !c.is_alphanumeric())
         .to_string()
+}
+
+/// Check if a new child embedding is a near-duplicate of any existing child
+/// of the same parent (cosine > 0.95).
+///
+/// Used during fact extraction to prevent storing semantically identical
+/// child facts when the LLM produces overlapping extractions.
+pub(crate) fn is_near_dup_child(
+    store: &EchoStore,
+    parent_id: &shrimpk_core::MemoryId,
+    new_embedding: &[f32],
+) -> bool {
+    if new_embedding.is_empty() {
+        return false;
+    }
+    (0..store.len()).any(|i| {
+        store
+            .entry_at(i)
+            .is_some_and(|e| e.parent_id.as_ref() == Some(parent_id))
+            && store.embedding_at(i).is_some_and(|existing| {
+                crate::similarity::cosine_similarity(new_embedding, existing)
+                    > DUPLICATE_SIMILARITY_THRESHOLD
+            })
+    })
 }
 
 /// Detect and merge near-duplicate memory pairs.
@@ -1938,5 +1955,76 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert_eq!(dynamic_max_facts(&content), 12);
+    }
+
+    // ---- G1: Child near-dup dedup tests ----
+
+    #[test]
+    fn is_near_dup_child_detects_duplicate() {
+        let mut store = EchoStore::new();
+        let parent_id = shrimpk_core::MemoryId::new();
+
+        // Existing child of parent with a known embedding
+        let mut existing_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        existing_child.parent_id = Some(parent_id.clone());
+        existing_child.source = "enrichment".to_string();
+        store.add(existing_child);
+
+        // Near-duplicate embedding (cosine > 0.95 with [1.0, 0.0, 0.0])
+        let near_dup_emb = vec![0.99, 0.01, 0.0];
+        let sim = similarity::cosine_similarity(&[1.0, 0.0, 0.0], &near_dup_emb);
+        assert!(sim > 0.95, "Test precondition: vectors must be near-dups, got {sim}");
+
+        assert!(
+            is_near_dup_child(&store, &parent_id, &near_dup_emb),
+            "Should detect near-duplicate child of same parent"
+        );
+    }
+
+    #[test]
+    fn is_near_dup_child_different_parent_not_detected() {
+        let mut store = EchoStore::new();
+        let parent_1 = shrimpk_core::MemoryId::new();
+        let parent_2 = shrimpk_core::MemoryId::new();
+
+        // Existing child of parent_1
+        let mut existing_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        existing_child.parent_id = Some(parent_1);
+        existing_child.source = "enrichment".to_string();
+        store.add(existing_child);
+
+        // Same embedding but checking against a different parent
+        let near_dup_emb = vec![0.99, 0.01, 0.0];
+        assert!(
+            !is_near_dup_child(&store, &parent_2, &near_dup_emb),
+            "Should NOT detect dup when parent_id differs"
+        );
+    }
+
+    #[test]
+    fn is_near_dup_child_dissimilar_not_detected() {
+        let mut store = EchoStore::new();
+        let parent_id = shrimpk_core::MemoryId::new();
+
+        let mut existing_child = make_entry("Alex works at Google", vec![1.0, 0.0, 0.0]);
+        existing_child.parent_id = Some(parent_id.clone());
+        store.add(existing_child);
+
+        // Orthogonal embedding (cosine = 0.0)
+        let dissimilar_emb = vec![0.0, 1.0, 0.0];
+        assert!(
+            !is_near_dup_child(&store, &parent_id, &dissimilar_emb),
+            "Should NOT detect dup for dissimilar embedding"
+        );
+    }
+
+    #[test]
+    fn is_near_dup_child_empty_embedding_returns_false() {
+        let store = EchoStore::new();
+        let parent_id = shrimpk_core::MemoryId::new();
+        assert!(
+            !is_near_dup_child(&store, &parent_id, &[]),
+            "Empty embedding should return false"
+        );
     }
 }
