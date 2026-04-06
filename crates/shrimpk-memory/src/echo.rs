@@ -3661,4 +3661,185 @@ mod tests {
         assert_eq!(result.neighbors.len(), 2);
         assert!(result.neighbors[0].weight > result.neighbors[1].weight);
     }
+
+    // -----------------------------------------------------------------------
+    // KS68 unit tests: co-occurrence boost, temporal boost, subject diversity
+    // -----------------------------------------------------------------------
+
+    fn make_echo_result(content: &str, score: f64, labels: Vec<String>) -> EchoResult {
+        EchoResult {
+            memory_id: MemoryId::new(),
+            content: content.to_string(),
+            similarity: score as f32,
+            final_score: score,
+            source: "test".to_string(),
+            echoed_at: Utc::now(),
+            modality: Modality::Text,
+            labels,
+        }
+    }
+
+    // --- ME-4: Co-occurrence boost ---
+
+    #[test]
+    fn co_occurrence_boost_fires_for_multi_database_content() {
+        let boost =
+            super::co_occurrence_boost("I use PostgreSQL for OLTP and ClickHouse for analytics");
+        assert!(
+            (boost - 0.05).abs() < f64::EPSILON,
+            "Expected +0.05 for 2 databases, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_fires_for_mongo_and_postgres() {
+        let boost = super::co_occurrence_boost("I tried MongoDB but prefer Postgres");
+        assert!(
+            (boost - 0.05).abs() < f64::EPSILON,
+            "Expected +0.05 for 2 databases, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_zero_for_single_database() {
+        let boost = super::co_occurrence_boost("I use Redis for caching");
+        assert!(
+            boost.abs() < f64::EPSILON,
+            "Expected 0.0 for 1 database, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_fires_for_multi_language() {
+        let boost =
+            super::co_occurrence_boost("I prefer Rust and Go for all projects");
+        assert!(
+            (boost - 0.05).abs() < f64::EPSILON,
+            "Expected +0.05 for 2 languages, got {boost}"
+        );
+    }
+
+    #[test]
+    fn co_occurrence_boost_zero_for_unrelated_content() {
+        let boost = super::co_occurrence_boost("I enjoy hiking in the mountains");
+        assert!(
+            boost.abs() < f64::EPSILON,
+            "Expected 0.0 for unrelated content, got {boost}"
+        );
+    }
+
+    // --- TR-3: Temporal query boost ---
+
+    #[test]
+    fn temporal_boost_fires_for_deadline_query() {
+        let mut results = vec![
+            make_echo_result("Patent filing", 0.5, vec!["temporal:future".into()]),
+            make_echo_result("Sam's job", 0.5, vec!["topic:identity".into()]),
+        ];
+        super::apply_temporal_boost("What upcoming deadlines does Sam have?", &mut results);
+        assert!(
+            (results[0].final_score - 0.515).abs() < f64::EPSILON,
+            "Temporal result should be boosted to 0.515, got {}",
+            results[0].final_score
+        );
+        assert!(
+            (results[1].final_score - 0.5).abs() < f64::EPSILON,
+            "Non-temporal result should be unchanged at 0.5, got {}",
+            results[1].final_score
+        );
+    }
+
+    #[test]
+    fn temporal_boost_does_not_fire_for_non_temporal_query() {
+        let mut results = vec![
+            make_echo_result("Patent filing", 0.5, vec!["temporal:future".into()]),
+            make_echo_result("Sam's job", 0.5, vec!["topic:identity".into()]),
+        ];
+        super::apply_temporal_boost("What is Sam's job?", &mut results);
+        assert!(
+            (results[0].final_score - 0.5).abs() < f64::EPSILON,
+            "No boost expected for non-temporal query, got {}",
+            results[0].final_score
+        );
+        assert!(
+            (results[1].final_score - 0.5).abs() < f64::EPSILON,
+            "No boost expected, got {}",
+            results[1].final_score
+        );
+    }
+
+    // --- KU-3: Subject diversity with (subject, topic) tuples ---
+
+    #[test]
+    fn subject_diversity_caps_per_subject_topic() {
+        let store = EchoStore::new();
+        let mut results: Vec<EchoResult> = (0..5)
+            .map(|i| make_echo_result(&format!("Sam identity {i}"), 1.0 - i as f64 * 0.01, vec![]))
+            .collect();
+        let mut map = std::collections::HashMap::new();
+        for r in &results {
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:identity".to_string(),
+                },
+            );
+        }
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(
+            results.len(),
+            3,
+            "Should cap at 3 per (subject, topic) pair"
+        );
+    }
+
+    #[test]
+    fn subject_diversity_allows_different_topics_for_same_subject() {
+        let store = EchoStore::new();
+        // 3 identity + 3 preference entries for "Sam" — all should survive with cap=3
+        let mut results: Vec<EchoResult> = Vec::new();
+        let mut map = std::collections::HashMap::new();
+        for i in 0..3 {
+            let r = make_echo_result(&format!("Sam identity {i}"), 1.0 - i as f64 * 0.01, vec![]);
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:identity".to_string(),
+                },
+            );
+            results.push(r);
+        }
+        for i in 0..3 {
+            let r =
+                make_echo_result(&format!("Sam preference {i}"), 0.9 - i as f64 * 0.01, vec![]);
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:preference".to_string(),
+                },
+            );
+            results.push(r);
+        }
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(
+            results.len(),
+            6,
+            "Different topics for same subject should each get their own cap"
+        );
+    }
+
+    #[test]
+    fn subject_diversity_unknown_bucket_has_generous_cap() {
+        let store = EchoStore::new();
+        // 7 results with no subject info — unknown bucket caps at max_per_subject * 2 = 6
+        let mut results: Vec<EchoResult> = (0..7)
+            .map(|i| make_echo_result(&format!("unknown {i}"), 1.0 - i as f64 * 0.01, vec![]))
+            .collect();
+        let map = std::collections::HashMap::new();
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(results.len(), 6, "Unknown bucket should cap at 2 * 3 = 6");
+    }
 }
