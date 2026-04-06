@@ -1600,6 +1600,20 @@ impl EchoEngine {
             }
         }
 
+        // 7g. Parent-child dedup (KS68.3 prep): if a parent and its child both
+        // appear in results, keep only the higher-scoring one to avoid slot waste.
+        {
+            let parent_map: std::collections::HashMap<MemoryId, Option<MemoryId>> = results
+                .iter()
+                .filter_map(|r| {
+                    store
+                        .get(&r.memory_id)
+                        .map(|e| (r.memory_id.clone(), e.parent_id.clone()))
+                })
+                .collect();
+            deduplicate_parent_child(&mut results, &parent_map);
+        }
+
         // Release read lock before acquiring write lock
         let matched_ids: Vec<(MemoryId, usize)> = top
             .iter()
@@ -2999,6 +3013,41 @@ fn career_intro_adjustment(query_labels: &[String], results: &mut [EchoResult]) 
     }
 }
 
+/// Parent-child dedup (KS68.3 prep): if a parent and one of its children both appear
+/// in the result set, remove the lower-scoring one to prevent slot waste.
+///
+/// `parent_map` maps each result's memory_id to its `parent_id` (None for root entries).
+/// O(n^2) for small N (typically 5-10) — acceptable.
+fn deduplicate_parent_child(
+    results: &mut Vec<EchoResult>,
+    parent_map: &std::collections::HashMap<MemoryId, Option<MemoryId>>,
+) {
+    let mut to_remove: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+    let len = results.len();
+    for i in 0..len {
+        for j in (i + 1)..len {
+            let id_i = &results[i].memory_id;
+            let id_j = &results[j].memory_id;
+            let parent_i = parent_map.get(id_i).and_then(|p| p.as_ref());
+            let parent_j = parent_map.get(id_j).and_then(|p| p.as_ref());
+
+            let is_pair = (parent_i == Some(id_j)) || (parent_j == Some(id_i));
+            if !is_pair {
+                continue;
+            }
+            // Remove the lower-scoring one (results are sorted, so j > i means j scores lower)
+            if results[i].final_score >= results[j].final_score {
+                to_remove.insert(id_j.clone());
+            } else {
+                to_remove.insert(id_i.clone());
+            }
+        }
+    }
+    if !to_remove.is_empty() {
+        results.retain(|r| !to_remove.contains(&r.memory_id));
+    }
+}
+
 /// Cap results so no single (subject, topic) pair dominates the result set (KS67/KS68).
 /// Tracks occurrences per (subject, topic_label) tuple so that different facets of the
 /// same entity (e.g., "Sam:identity" vs "Sam:preference") count independently.
@@ -4277,5 +4326,90 @@ mod tests {
             "Intro should not be demoted for non-career query, got {}",
             results[0].final_score,
         );
+    }
+
+    // --- KS68.3: Parent-child dedup ---
+
+    #[test]
+    fn parent_child_dedup_removes_lower_scoring_duplicate() {
+        let parent_id = MemoryId::new();
+        let child_id = MemoryId::new();
+
+        let mut parent_result = make_echo_result("I use Neovim with LazyVim", 0.90, vec![]);
+        parent_result.memory_id = parent_id.clone();
+
+        let mut child_result = make_echo_result("Sam uses Neovim as primary editor", 0.85, vec![]);
+        child_result.memory_id = child_id.clone();
+
+        let unrelated_result = make_echo_result("Sam lives in SF", 0.80, vec![]);
+        let unrelated_id = unrelated_result.memory_id.clone();
+
+        let mut results = vec![parent_result, child_result, unrelated_result];
+
+        let mut parent_map = std::collections::HashMap::new();
+        parent_map.insert(parent_id.clone(), None); // parent has no parent
+        parent_map.insert(child_id.clone(), Some(parent_id.clone())); // child -> parent
+        parent_map.insert(unrelated_id, None);
+
+        super::deduplicate_parent_child(&mut results, &parent_map);
+
+        assert_eq!(
+            results.len(),
+            2,
+            "Child should be removed, 2 results remain"
+        );
+        assert_eq!(
+            results[0].memory_id, parent_id,
+            "Parent (higher score) should survive"
+        );
+        assert!(
+            results.iter().all(|r| r.memory_id != child_id),
+            "Child (lower score) should be removed"
+        );
+    }
+
+    #[test]
+    fn parent_child_dedup_keeps_child_when_higher_scoring() {
+        let parent_id = MemoryId::new();
+        let child_id = MemoryId::new();
+
+        let mut parent_result = make_echo_result("Long multi-fact parent memory", 0.70, vec![]);
+        parent_result.memory_id = parent_id.clone();
+
+        let mut child_result = make_echo_result("Precise extracted fact", 0.92, vec![]);
+        child_result.memory_id = child_id.clone();
+
+        let mut results = vec![child_result, parent_result];
+
+        let mut parent_map = std::collections::HashMap::new();
+        parent_map.insert(parent_id.clone(), None);
+        parent_map.insert(child_id.clone(), Some(parent_id.clone()));
+
+        super::deduplicate_parent_child(&mut results, &parent_map);
+
+        assert_eq!(
+            results.len(),
+            1,
+            "Parent should be removed, 1 result remains"
+        );
+        assert_eq!(
+            results[0].memory_id, child_id,
+            "Child (higher score) should survive"
+        );
+    }
+
+    #[test]
+    fn parent_child_dedup_no_op_without_pairs() {
+        let mut results = vec![
+            make_echo_result("Memory A", 0.90, vec![]),
+            make_echo_result("Memory B", 0.85, vec![]),
+        ];
+        let parent_map: std::collections::HashMap<MemoryId, Option<MemoryId>> = results
+            .iter()
+            .map(|r| (r.memory_id.clone(), None))
+            .collect();
+
+        super::deduplicate_parent_child(&mut results, &parent_map);
+        assert_eq!(results.len(), 2, "No pairs — nothing removed");
     }
 }
