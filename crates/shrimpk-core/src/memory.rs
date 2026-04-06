@@ -227,8 +227,9 @@ pub struct MemoryEntry {
     /// Number of LLM extraction attempts (KS69). Capped at 3 to avoid infinite retries.
     #[serde(default)]
     pub enrichment_attempts: u8,
-    /// LLM extraction confidence (KS69). 0.0-1.0, default 0.0 for non-extracted entries.
-    #[serde(default)]
+    /// Extraction confidence (0.0-1.0). Default 1.0 for manually stored memories.
+    /// LLM-extracted children get their confidence set explicitly during consolidation.
+    #[serde(default = "default_confidence")]
     pub confidence: f32,
     /// Primary entity this memory is about (KS69). Populated during LLM extraction.
     #[serde(default)]
@@ -270,6 +271,10 @@ pub struct MemoryEntry {
     pub retrieval_history_secs: Vec<u32>,
 }
 
+fn default_confidence() -> f32 {
+    1.0
+}
+
 impl MemoryEntry {
     /// Create a new memory entry with the given content and embedding.
     pub fn new(content: String, embedding: Vec<f32>, source: String) -> Self {
@@ -290,7 +295,7 @@ impl MemoryEntry {
             echo_count: 0,
             enriched: false,
             enrichment_attempts: 0,
-            confidence: 0.0,
+            confidence: 1.0,
             subject: None,
             parent_id: None,
             labels: Vec::new(),
