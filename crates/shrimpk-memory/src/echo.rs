@@ -1066,20 +1066,26 @@ impl EchoEngine {
         // 5a. Label-based candidates (ADR-015 D6)
         //     If caller provided an explicit label filter, use it directly.
         //     Otherwise, classify the query via prototypes.
+        //     query_topic_labels is lifted to outer scope for Pipe B topic alignment (KS68).
+        let all_query_labels: Vec<String> =
+            if self.config.use_labels && self.prototypes.is_initialized() {
+                crate::labels::classify_query(&effective_query, &query_embedding, &self.prototypes)
+            } else {
+                Vec::new()
+            };
+        let query_topic_labels: Vec<&str> = all_query_labels
+            .iter()
+            .filter(|l| l.starts_with("topic:"))
+            .map(String::as_str)
+            .collect();
         let label_candidates: Vec<u32> = if let Some(filter) = label_filter {
             if !filter.is_empty() {
                 store.query_labels(filter)
             } else {
                 Vec::new()
             }
-        } else if self.config.use_labels && self.prototypes.is_initialized() {
-            let query_labels =
-                crate::labels::classify_query(&effective_query, &query_embedding, &self.prototypes);
-            if !query_labels.is_empty() {
-                store.query_labels(&query_labels)
-            } else {
-                Vec::new()
-            }
+        } else if !all_query_labels.is_empty() {
+            store.query_labels(&all_query_labels)
         } else {
             Vec::new()
         };
@@ -1256,6 +1262,26 @@ impl EchoEngine {
                         }
                     }
                     if best_child_score >= threshold {
+                        // Topic alignment gate (KS68 IE-3): only rescue a parent if
+                        // its labels overlap with the query's topic labels, or if no
+                        // topic labels are available, require a minimum base similarity.
+                        let topic_aligned = if !query_topic_labels.is_empty() {
+                            entry.labels.iter().any(|el| {
+                                query_topic_labels.iter().any(|qt| el == qt)
+                            })
+                        } else {
+                            // Fallback: require parent's own similarity to be non-trivial
+                            _parent_score >= threshold * 0.4
+                        };
+                        if !topic_aligned {
+                            tracing::debug!(
+                                parent_idx = idx,
+                                child_score = best_child_score,
+                                parent_labels = ?entry.labels,
+                                "Pipe B: child rescue blocked — topic mismatch"
+                            );
+                            continue;
+                        }
                         tracing::debug!(
                             parent_idx = idx,
                             child_score = best_child_score,
