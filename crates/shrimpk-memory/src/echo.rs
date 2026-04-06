@@ -1236,7 +1236,10 @@ impl EchoEngine {
                 if child_rescue_only {
                     store.entry_at(idx).is_none_or(|e| e.parent_id.is_none())
                 } else {
-                    true
+                    // KS69 T1: children can enter Pipe A only if subject matches query
+                    store.entry_at(idx).is_none_or(|e| {
+                        e.parent_id.is_none() || child_subject_matches_query(&e.subject, query)
+                    })
                 }
             });
 
@@ -1259,38 +1262,26 @@ impl EchoEngine {
                     let mut best_child_score: f32 = 0.0;
                     let mut best_child_idx: Option<usize> = None;
                     for &child_idx in child_indices {
-                        // Entity gate (KS69 T1): if query mentions entities and child has
-                        // a subject, require overlap. Prevents off-topic child rescue.
-                        if !query_entities.is_empty()
-                            && let Some(child_entry) = store.entry_at(child_idx)
-                            && let Some(ref child_subject) = child_entry.subject
-                        {
-                            let child_subj_lc = child_subject.to_lowercase();
-                            let entity_match =
-                                query_entities.iter().any(|qe| child_subj_lc.contains(qe));
-                            if !entity_match {
+                        if let Some(child_entry) = store.entry_at(child_idx) {
+                            // Subject-entity gate (KS69 T1): skip children whose subject
+                            // doesn't match the query text.
+                            if !child_subject_matches_query(&child_entry.subject, query) {
                                 tracing::debug!(
                                     child_idx,
-                                    child_subject = %child_subject,
-                                    query_entities = ?query_entities,
-                                    "Pipe B: child excluded by entity gate"
+                                    child_subject = ?child_entry.subject,
+                                    "Pipe B: child excluded by subject gate"
                                 );
                                 continue;
                             }
-                        }
-
-                        if let Some(child_emb) = embeddings.get(child_idx) {
-                            let child_sim =
-                                similarity::cosine_similarity(&query_embedding, child_emb);
-                            // Confidence weighting (KS69 T1): scale by LLM confidence
-                            let confidence = store
-                                .entry_at(child_idx)
-                                .map(|e| e.confidence.max(0.01))
-                                .unwrap_or(1.0);
-                            let weighted_sim = child_sim * confidence;
-                            if weighted_sim > best_child_score {
-                                best_child_score = weighted_sim;
-                                best_child_idx = Some(child_idx);
+                            if let Some(child_emb) = embeddings.get(child_idx) {
+                                let child_sim =
+                                    similarity::cosine_similarity(&query_embedding, child_emb);
+                                // Confidence weighting (KS69 T1): scale by LLM confidence
+                                let weighted_sim = child_sim * child_entry.confidence.max(0.01);
+                                if weighted_sim > best_child_score {
+                                    best_child_score = weighted_sim;
+                                    best_child_idx = Some(child_idx);
+                                }
                             }
                         }
                     }
@@ -1538,13 +1529,14 @@ impl EchoEngine {
                     final_score += demotion;
                 }
 
-                // Child memory penalty + confidence weighting (KS69):
-                // Demote children and scale by LLM extraction confidence.
+                // Child memory penalty (KS69): demote children to prevent hallucination inflation
                 if entry.parent_id.is_some() {
                     final_score += self.config.child_memory_penalty as f64;
-                    // Confidence weighting: scale final_score by confidence (0.01 floor)
-                    let confidence = entry.confidence.max(0.01) as f64;
-                    final_score *= confidence;
+                }
+
+                // Confidence-weighted child scoring (KS69 T1)
+                if entry.parent_id.is_some() && entry.confidence < 1.0 {
+                    final_score *= entry.confidence as f64;
                 }
 
                 // Resolve matched child content (KS69 T1):
@@ -2965,6 +2957,25 @@ fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
         Some(format!("{} {}", query, content))
     } else {
         None
+    }
+}
+
+/// Check if any entity in the query matches the child's subject.
+/// Prevents children from contaminating unrelated queries (KS69 Tier 1).
+///
+/// Returns `true` if no subject is set (backward compat for pre-KS69 children)
+/// or if the subject matches the query text via substring or word-level overlap.
+fn child_subject_matches_query(child_subject: &Option<String>, query: &str) -> bool {
+    match child_subject {
+        None => true,
+        Some(subj) => {
+            let subj_lower = subj.to_lowercase();
+            let query_lower = query.to_lowercase();
+            query_lower.contains(&subj_lower)
+                || query_lower
+                    .split_whitespace()
+                    .any(|w| subj_lower.contains(w) && w.len() > 2)
+        }
     }
 }
 
