@@ -126,22 +126,22 @@ fn combined_enrichment_prompt(max_facts: usize) -> String {
          Memory: \"I switched from VS Code to Neovim last month. Lua config is way better for my workflow.\"\n\
          Output:\n\
          {{\"facts\": [\n\
-           {{\"text\": \"The user switched from VS Code to Neovim\", \"subject\": \"the user\", \"type\": \"preference\", \"confidence\": 1.0}},\n\
-           {{\"text\": \"The user prefers Lua-based editor configuration\", \"subject\": \"the user\", \"type\": \"preference\", \"confidence\": 0.8}}\n\
+           {{\"text\": \"The user switched from VS Code to Neovim\", \"subject\": \"Neovim\", \"type\": \"preference\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"The user prefers Lua-based editor configuration\", \"subject\": \"Lua\", \"type\": \"preference\", \"confidence\": 0.8}}\n\
          ], \"labels\": {{\"topic\": [\"technology\"], \"domain\": [\"work\"], \"action\": [\"deciding\"], \"memtype\": \"preference\", \"sentiment\": \"positive\"}}}}\n\n\
          === Example 2 ===\n\
          Memory: \"Sam joined Anthropic in 2023. He's leading the alignment team now.\"\n\
          Output:\n\
          {{\"facts\": [\n\
-           {{\"text\": \"Sam joined Anthropic in 2023\", \"subject\": \"Sam\", \"type\": \"event\", \"confidence\": 1.0}},\n\
-           {{\"text\": \"Sam leads the alignment team at Anthropic\", \"subject\": \"Sam\", \"type\": \"status\", \"confidence\": 0.9}}\n\
+           {{\"text\": \"Sam joined Anthropic in 2023\", \"subject\": \"Anthropic\", \"type\": \"event\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"Sam leads the alignment team at Anthropic\", \"subject\": \"Anthropic\", \"type\": \"status\", \"confidence\": 0.9}}\n\
          ], \"labels\": {{\"topic\": [\"career\"], \"domain\": [\"work\"], \"action\": [\"leading\"], \"memtype\": \"fact\", \"sentiment\": \"neutral\"}}}}\n\n\
          === Example 3 ===\n\
          Memory: \"Starting a 5K training plan. Goal is to run the city marathon by October.\"\n\
          Output:\n\
          {{\"facts\": [\n\
-           {{\"text\": \"The user is training for a 5K run\", \"subject\": \"the user\", \"type\": \"goal\", \"confidence\": 1.0}},\n\
-           {{\"text\": \"The user plans to run the city marathon by October\", \"subject\": \"the user\", \"type\": \"goal\", \"confidence\": 0.9}}\n\
+           {{\"text\": \"The user is training for a 5K run\", \"subject\": \"5K\", \"type\": \"goal\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"The user plans to run the city marathon by October\", \"subject\": \"marathon\", \"type\": \"goal\", \"confidence\": 0.9}}\n\
          ], \"labels\": {{\"topic\": [\"fitness\", \"health\"], \"domain\": [\"health\", \"life\"], \"action\": [\"exercising\", \"planning\"], \"memtype\": \"goal\", \"sentiment\": \"positive\"}}}}\n\n\
          Now extract from the memory below. Return ONLY the JSON object."
     )

@@ -295,6 +295,7 @@ pub fn consolidate(
                             confidence = conf,
                             "KS69: skipping low-confidence fact"
                         );
+                        fact_embeddings.push(Vec::new()); // maintain index alignment
                         continue;
                     }
 
