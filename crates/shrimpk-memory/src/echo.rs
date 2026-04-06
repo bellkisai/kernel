@@ -1374,6 +1374,42 @@ impl EchoEngine {
                 .collect()
         };
 
+        // 7b2. Parent supersession demotion (KS68 KU-1): if a parent entry has
+        // children with Supersedes edges (child is the older/superseded side),
+        // apply a partial demotion to the parent. This propagates child-level
+        // supersession to parent ranking in Pipe A.
+        let parent_demotions: std::collections::HashMap<usize, f64> = {
+            let hebbian = self.hebbian.read().await;
+            let half_demotion = self.config.supersedes_demotion as f64 * 0.5;
+            let mut demotions = std::collections::HashMap::new();
+            for &(idx, _) in &top {
+                if let Some(entry) = store.entry_at(idx) {
+                    let child_indices = store.children_of(&entry.id);
+                    let mut has_superseded_child = false;
+                    for &child_idx in child_indices {
+                        let assocs =
+                            hebbian.get_associations_typed(child_idx as u32, 0.0);
+                        for (neighbor, _weight, rel) in &assocs {
+                            if let Some(crate::hebbian::RelationshipType::Supersedes) = rel {
+                                // Child is superseded if it is the older side (lower index)
+                                if (child_idx as u32) < *neighbor {
+                                    has_superseded_child = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if has_superseded_child {
+                            break;
+                        }
+                    }
+                    if has_superseded_child {
+                        demotions.insert(idx, -half_demotion);
+                    }
+                }
+            }
+            demotions
+        };
+
         // 7c. Build EchoResult vec with final_score = similarity + hebbian + recency, scaled by decay
         let now = Utc::now();
         let recency_weight = self.config.recency_weight as f64;
@@ -1429,6 +1465,11 @@ impl EchoEngine {
 
                 // Co-occurrence bonus (KS68 ME-4)
                 final_score += co_occurrence_boost(&entry.content);
+
+                // Parent supersession demotion (KS68 KU-1)
+                if let Some(&demotion) = parent_demotions.get(&idx) {
+                    final_score += demotion;
+                }
 
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
@@ -3841,5 +3882,43 @@ mod tests {
         let map = std::collections::HashMap::new();
         super::enforce_subject_diversity(&mut results, &store, &map, 3);
         assert_eq!(results.len(), 6, "Unknown bucket should cap at 2 * 3 = 6");
+    }
+
+    #[test]
+    fn subject_diversity_overflow_preserves_different_topic() {
+        let store = EchoStore::new();
+        // 4 Sam:identity + 1 Sam:preference, cap=3 → identity capped at 3, preference survives
+        let mut results: Vec<EchoResult> = Vec::new();
+        let mut map = std::collections::HashMap::new();
+        for i in 0..4 {
+            let r = make_echo_result(&format!("Sam identity {i}"), 1.0 - i as f64 * 0.01, vec![]);
+            map.insert(
+                r.memory_id.clone(),
+                SubjectTopicInfo {
+                    subjects: vec!["Sam".to_string()],
+                    primary_topic: "topic:identity".to_string(),
+                },
+            );
+            results.push(r);
+        }
+        let pref = make_echo_result("Sam prefers Rust", 0.8, vec![]);
+        map.insert(
+            pref.memory_id.clone(),
+            SubjectTopicInfo {
+                subjects: vec!["Sam".to_string()],
+                primary_topic: "memtype:preference".to_string(),
+            },
+        );
+        results.push(pref);
+        super::enforce_subject_diversity(&mut results, &store, &map, 3);
+        assert_eq!(
+            results.len(),
+            4,
+            "3 identity (capped) + 1 preference (different topic) = 4"
+        );
+        assert!(
+            results.iter().any(|r| r.content == "Sam prefers Rust"),
+            "Preference memory must survive identity overflow"
+        );
     }
 }
