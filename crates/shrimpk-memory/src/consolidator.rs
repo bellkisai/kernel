@@ -96,48 +96,120 @@ impl OllamaConsolidator {
     }
 }
 
-/// Combined prompt for fact extraction + label classification (KS67 v2 — open-domain).
+/// Combined prompt for fact extraction + label classification (KS69 v3 — self-contained few-shot).
 ///
-/// v2 changes from v1:
-/// - Removed "The user" prefix requirement and 13-verb whitelist
-/// - Facts are structured objects with subject, type, and confidence
-/// - Supports multi-entity extraction (not just "the user")
+/// v3 changes from v2:
+/// - 3 few-shot examples for consistent output quality
+/// - Confidence scores are required (gate at 0.5 downstream)
+/// - Explicit "self-contained sentence" rule with subject+verb+object
 fn combined_enrichment_prompt(max_facts: usize) -> String {
     format!(
-        "Analyze this memory and return a JSON object with two keys.\n\n\
-         1. \"facts\": Extract up to {max_facts} atomic, standalone facts as JSON objects.\n\
-         Each fact object has:\n\
-         - \"text\": a complete sentence (e.g., \"Sam works at Anthropic\")\n\
-         - \"subject\": the primary entity this fact is about (e.g., \"Sam\", \"MLTK\", \"the project\")\n\
+        "You extract structured facts from a memory snippet.\n\n\
+         Return a JSON object with two keys: \"facts\" and \"labels\".\n\n\
+         \"facts\": up to {max_facts} objects, each with:\n\
+         - \"text\": a self-contained sentence (subject + verb + object)\n\
+         - \"subject\": the specific topic entity this fact is about — use the object/topic, NOT the person's name (e.g., \"Neovim\", \"Stripe\", \"Tokyo\", \"JLPT N3\", not \"Sam\" or \"the user\")\n\
          - \"type\": one of [personal, project, preference, goal, status, event, relationship]\n\
-         - \"confidence\": your confidence in this fact (0.0 to 1.0)\n\n\
-         Rules for facts:\n\
-         - Use consistent entity names across facts (don't mix \"Sam\" and \"the user\" for the same person)\n\
-         - Include facts about ALL entities mentioned, not just the primary one\n\
-         - For temporal facts, include time references (e.g., \"since 2023\", \"last month\")\n\
-         - Each fact must be self-contained and understandable without context\n\
-         - Use simple present/past tense with these verb patterns: \"works at\", \"lives in\", \"moved to\", \"joined\", \"uses\", \"prefers\", \"switched to\"\n\n\
-         2. \"labels\": Classify based on what this memory IS ABOUT, not just the words it contains.\n\
-            A memory about attending a class implies learning/education.\n\
-            A memory about running implies exercise/health.\n\n\
-         Label categories:\n\
-         - topic: [career, language, education, health, fitness, housing, food, music, technology, finance, travel, relationships, hobby, entertainment, pets]\n\
-         - domain: [work, life, social, health, creative]\n\
-         - action: [learning, building, planning, moving, exercising, leading, deciding]\n\
-         - memtype: one of [fact, preference, goal, habit, event, opinion, plan]\n\
-         - sentiment: one of [positive, negative, neutral, mixed]\n\n\
-         Return JSON:\n\
-         {{\"facts\": [{{\"text\": \"...\", \"subject\": \"...\", \"type\": \"...\", \"confidence\": 0.9}}], \
-         \"labels\": {{\"topic\": [...], \"domain\": [...], \"action\": [...], \"memtype\": \"...\", \"sentiment\": \"...\"}}}}"
+         - \"confidence\": 0.0-1.0 (how certain you are this fact is stated, not implied)\n\n\
+         \"labels\": classify the memory:\n\
+         - \"topic\": list from [career, language, education, health, fitness, housing, food, music, technology, finance, travel, relationships, hobby, entertainment, pets]\n\
+         - \"domain\": list from [work, life, social, health, creative]\n\
+         - \"action\": list from [learning, building, planning, moving, exercising, leading, deciding]\n\
+         - \"memtype\": one of [fact, preference, goal, habit, event, opinion, plan]\n\
+         - \"sentiment\": one of [positive, negative, neutral, mixed]\n\n\
+         Rules:\n\
+         1. Every fact \"text\" must be understandable WITHOUT the original memory.\n\
+         2. Use the SAME entity name across facts (don't alternate \"Sam\" / \"the user\").\n\
+         3. Set confidence < 0.5 for anything implied or uncertain.\n\
+         4. If no facts can be extracted, return {{\"facts\": [], \"labels\": {{}}}}.\n\n\
+         === Example 1 ===\n\
+         Memory: \"I switched from VS Code to Neovim last month. Lua config is way better for my workflow.\"\n\
+         Output:\n\
+         {{\"facts\": [\n\
+           {{\"text\": \"The user switched from VS Code to Neovim\", \"subject\": \"Neovim\", \"type\": \"preference\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"The user prefers Lua-based editor configuration\", \"subject\": \"Lua\", \"type\": \"preference\", \"confidence\": 0.8}}\n\
+         ], \"labels\": {{\"topic\": [\"technology\"], \"domain\": [\"work\"], \"action\": [\"deciding\"], \"memtype\": \"preference\", \"sentiment\": \"positive\"}}}}\n\n\
+         === Example 2 ===\n\
+         Memory: \"Sam joined Anthropic in 2023. He's leading the alignment team now.\"\n\
+         Output:\n\
+         {{\"facts\": [\n\
+           {{\"text\": \"Sam joined Anthropic in 2023\", \"subject\": \"Anthropic\", \"type\": \"event\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"Sam leads the alignment team at Anthropic\", \"subject\": \"Anthropic\", \"type\": \"status\", \"confidence\": 0.9}}\n\
+         ], \"labels\": {{\"topic\": [\"career\"], \"domain\": [\"work\"], \"action\": [\"leading\"], \"memtype\": \"fact\", \"sentiment\": \"neutral\"}}}}\n\n\
+         === Example 3 ===\n\
+         Memory: \"Starting a 5K training plan. Goal is to run the city marathon by October.\"\n\
+         Output:\n\
+         {{\"facts\": [\n\
+           {{\"text\": \"The user is training for a 5K run\", \"subject\": \"5K\", \"type\": \"goal\", \"confidence\": 1.0}},\n\
+           {{\"text\": \"The user plans to run the city marathon by October\", \"subject\": \"marathon\", \"type\": \"goal\", \"confidence\": 0.9}}\n\
+         ], \"labels\": {{\"topic\": [\"fitness\", \"health\"], \"domain\": [\"health\", \"life\"], \"action\": [\"exercising\", \"planning\"], \"memtype\": \"goal\", \"sentiment\": \"positive\"}}}}\n\n\
+         Now extract from the memory below. Return ONLY the JSON object."
     )
+}
+
+/// Try to repair truncated JSON by closing unmatched brackets and braces.
+/// Used when LLM output is cut off mid-response (KS69 truncation guard).
+fn try_repair_truncated_json(content: &str) -> Option<serde_json::Value> {
+    let trimmed = content.trim();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    // Count unmatched braces/brackets
+    let mut brace_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+    let mut in_string = false;
+    let mut prev_backslash = false;
+    for ch in trimmed.chars() {
+        if in_string {
+            if ch == '"' && !prev_backslash {
+                in_string = false;
+            }
+            prev_backslash = ch == '\\' && !prev_backslash;
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => brace_depth += 1,
+            '}' => brace_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            _ => {}
+        }
+        prev_backslash = false;
+    }
+    if brace_depth <= 0 && bracket_depth <= 0 {
+        return None; // Not truncated, just malformed
+    }
+    // Close open strings, then inner braces, brackets, outer braces.
+    // When cut mid-object inside an array (e.g. {"facts":[{"text":"trunc ),
+    // inner object braces must close BEFORE the array bracket.
+    let mut repaired = trimmed.to_string();
+    if in_string {
+        repaired.push('"');
+    }
+    let inner_braces = (brace_depth - 1).max(0) as usize;
+    for _ in 0..inner_braces {
+        repaired.push('}');
+    }
+    for _ in 0..bracket_depth {
+        repaired.push(']');
+    }
+    for _ in 0..(brace_depth as usize).saturating_sub(inner_braces) {
+        repaired.push('}');
+    }
+    tracing::debug!(
+        original_len = trimmed.len(),
+        repaired_len = repaired.len(),
+        "KS69: attempting truncated JSON repair"
+    );
+    serde_json::from_str::<serde_json::Value>(&repaired).ok()
 }
 
 /// Parse the combined JSON response from the LLM.
 ///
-/// Handles two fact formats:
-/// - v2 (KS67): facts as array of objects with text/subject/type/confidence
-/// - v1 (legacy): facts as array of strings
-///   Falls back to plain-text parsing for non-JSON responses.
+/// Handles two fact formats: v2 (KS67) structured objects and v1 (legacy) string arrays.
+/// Falls back to plain-text parsing for non-JSON responses. When JSON parse fails on
+/// truncated output, attempts repair via `try_repair_truncated_json` (KS69).
 fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutput {
     // Try to parse as JSON first
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
@@ -211,6 +283,65 @@ fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutp
             labels,
             structured_facts,
         }
+    } else if let Some(repaired_json) = try_repair_truncated_json(content) {
+        // KS69: JSON truncation guard — repair incomplete JSON and retry with halved max_facts
+        let halved = (max_facts / 2).max(1);
+        tracing::debug!(
+            original_max_facts = max_facts,
+            halved_max_facts = halved,
+            "KS69: truncated JSON repaired, retrying with reduced max_facts"
+        );
+        let mut facts: Vec<String> = Vec::new();
+        let mut structured_facts: Vec<ExtractedFact> = Vec::new();
+
+        if let Some(arr) = repaired_json["facts"].as_array() {
+            for item in arr.iter().take(halved) {
+                if let Some(obj) = item.as_object() {
+                    let text = obj
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if text.len() <= 5 {
+                        continue;
+                    }
+                    let subject = obj
+                        .get("subject")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
+                    let fact_type = obj.get("type").and_then(|v| v.as_str()).and_then(|s| {
+                        serde_json::from_value::<FactType>(serde_json::Value::String(
+                            s.to_lowercase(),
+                        ))
+                        .ok()
+                    });
+                    let confidence = obj
+                        .get("confidence")
+                        .and_then(|v| v.as_f64())
+                        .map(|c| c as f32);
+                    facts.push(text.clone());
+                    structured_facts.push(ExtractedFact {
+                        text,
+                        subject,
+                        fact_type,
+                        confidence,
+                    });
+                } else if let Some(s) = item.as_str() {
+                    let trimmed = s.trim().to_string();
+                    if trimmed.len() > 5 {
+                        facts.push(trimmed);
+                    }
+                }
+            }
+        }
+
+        ConsolidationOutput {
+            facts,
+            labels: None, // Labels likely truncated — don't trust them
+            structured_facts,
+        }
     } else {
         // Fallback: parse as plain text facts (backward compat with non-JSON responses)
         ConsolidationOutput {
@@ -275,6 +406,37 @@ impl Consolidator for OllamaConsolidator {
 
     fn extract_facts_and_labels(&self, text: &str, max_facts: usize) -> ConsolidationOutput {
         let prompt = combined_enrichment_prompt(max_facts);
+        // KS69: structured JSON schema for Ollama (replaces plain "json" string).
+        // Forces the model to produce conformant output, reducing parse failures.
+        let format_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "facts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "subject": {"type": "string"},
+                            "type": {"type": "string", "enum": ["personal", "project", "preference", "goal", "status", "event", "relationship"]},
+                            "confidence": {"type": "number"}
+                        },
+                        "required": ["text", "subject", "type", "confidence"]
+                    }
+                },
+                "labels": {
+                    "type": "object",
+                    "properties": {
+                        "topic": {"type": "array", "items": {"type": "string"}},
+                        "domain": {"type": "array", "items": {"type": "string"}},
+                        "action": {"type": "array", "items": {"type": "string"}},
+                        "memtype": {"type": "string"},
+                        "sentiment": {"type": "string"}
+                    }
+                }
+            },
+            "required": ["facts", "labels"]
+        });
         let body = serde_json::json!({
             "model": self.model,
             "messages": [
@@ -282,7 +444,7 @@ impl Consolidator for OllamaConsolidator {
                 {"role": "user", "content": text}
             ],
             "stream": false,
-            "format": "json",
+            "format": format_schema,
             "options": {"temperature": 0.0, "num_predict": 768}
         });
 
@@ -688,15 +850,21 @@ mod tests {
     #[test]
     fn combined_prompt_contains_label_categories() {
         let prompt = combined_enrichment_prompt(5);
-        assert!(prompt.contains("topic:"), "Prompt should mention topic");
-        assert!(prompt.contains("memtype:"), "Prompt should mention memtype");
         assert!(
-            prompt.contains("sentiment:"),
-            "Prompt should mention sentiment"
+            prompt.contains("\"topic\""),
+            "Prompt should mention topic label"
         );
         assert!(
-            prompt.contains("IS ABOUT"),
-            "Prompt should emphasize implicit inference"
+            prompt.contains("\"memtype\""),
+            "Prompt should mention memtype label"
+        );
+        assert!(
+            prompt.contains("\"sentiment\""),
+            "Prompt should mention sentiment label"
+        );
+        assert!(
+            prompt.contains("Example 1"),
+            "v3 prompt should contain few-shot examples"
         );
     }
 
@@ -813,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn combined_prompt_v2_contains_structured_instructions() {
+    fn combined_prompt_v3_contains_structured_instructions() {
         let prompt = combined_enrichment_prompt(5);
         assert!(
             prompt.contains("\"subject\""),
@@ -828,20 +996,20 @@ mod tests {
             "Prompt should mention confidence field"
         );
         assert!(
-            prompt.contains("consistent entity names"),
+            prompt.contains("SAME entity name"),
             "Prompt should mention entity consistency"
         );
         assert!(
-            prompt.contains("ALL entities"),
-            "Prompt should mention multi-entity extraction"
+            prompt.contains("confidence < 0.5"),
+            "Prompt should mention confidence threshold"
         );
         assert!(
-            prompt.contains("temporal facts"),
-            "Prompt should mention temporal references"
+            prompt.contains("Example 3"),
+            "v3 prompt should have 3 few-shot examples"
         );
         assert!(
-            !prompt.contains("The user"),
-            "v2 prompt should not require 'The user' prefix"
+            prompt.contains("up to 5"),
+            "Prompt should reflect max_facts parameter"
         );
     }
 }

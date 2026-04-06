@@ -1158,15 +1158,17 @@ impl EchoEngine {
         let cosine_ranked =
             similarity::rank_candidates(&query_embedding, &candidates, near_miss_threshold);
 
-        // 5c. Entity-anchored graph traversal + RRF merge (KS62).
+        // 5c. Detect query entities (lifted for Pipe B entity gate + graph traversal)
+        let query_entities = detect_query_entities(query, store.entity_index_ref());
+
+        // 5d. Entity-anchored graph traversal + RRF merge (KS62).
         //     If query mentions known entities, BFS from entity-anchored memories
         //     via Hebbian edges, then merge with cosine results via RRF.
         let all_ranked = if self.config.graph_traversal_enabled {
-            let entities = detect_query_entities(query, store.entity_index_ref());
-            if !entities.is_empty() {
+            if !query_entities.is_empty() {
                 // Collect anchor indices from entity index
                 let mut anchors: Vec<u32> = Vec::new();
-                for entity in &entities {
+                for entity in &query_entities {
                     anchors.extend(store.query_entities(entity));
                 }
                 anchors.sort_unstable();
@@ -1197,7 +1199,7 @@ impl EchoEngine {
 
                     if !graph_with_cosine.is_empty() {
                         tracing::debug!(
-                            entities = ?entities,
+                            entities = ?query_entities,
                             anchors = anchors.len(),
                             graph_new = graph_with_cosine.len(),
                             cosine_total = cosine_ranked.len(),
@@ -1234,11 +1236,23 @@ impl EchoEngine {
                 if child_rescue_only {
                     store.entry_at(idx).is_none_or(|e| e.parent_id.is_none())
                 } else {
-                    true
+                    // KS69 T1: children can enter Pipe A only if topic matches query
+                    store.entry_at(idx).is_none_or(|e| {
+                        e.parent_id.is_none()
+                            || child_topic_matches_query(
+                                &e.labels,
+                                &query_topic_labels,
+                                &e.subject,
+                                query,
+                            )
+                    })
                 }
             });
 
-        // 6. Pipe B: check if near-miss parents have enriched children that score better
+        // 6. Pipe B: check if near-miss parents have enriched children that score better.
+        //    Enhanced with entity gate, confidence weighting, and child content tracking (KS69 T1).
+        let mut pipe_b_child_content: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
         let promoted: Vec<(usize, f32)> = if store.has_enriched_memories() && !pipe_b.is_empty() {
             let mut promotions: Vec<(usize, f32)> = Vec::new();
             for &(idx, _parent_score) in &pipe_b {
@@ -1252,12 +1266,34 @@ impl EchoEngine {
                     }
                     let embeddings = store.all_embeddings();
                     let mut best_child_score: f32 = 0.0;
+                    let mut best_child_idx: Option<usize> = None;
                     for &child_idx in child_indices {
-                        if let Some(child_emb) = embeddings.get(child_idx) {
-                            let child_sim =
-                                similarity::cosine_similarity(&query_embedding, child_emb);
-                            if child_sim > best_child_score {
-                                best_child_score = child_sim;
+                        if let Some(child_entry) = store.entry_at(child_idx) {
+                            // Topic gate (KS69 T1): skip children whose topic/subject
+                            // doesn't match the query.
+                            if !child_topic_matches_query(
+                                &child_entry.labels,
+                                &query_topic_labels,
+                                &child_entry.subject,
+                                query,
+                            ) {
+                                tracing::debug!(
+                                    child_idx,
+                                    child_labels = ?child_entry.labels,
+                                    child_subject = ?child_entry.subject,
+                                    "Pipe B: child excluded by topic gate"
+                                );
+                                continue;
+                            }
+                            if let Some(child_emb) = embeddings.get(child_idx) {
+                                let child_sim =
+                                    similarity::cosine_similarity(&query_embedding, child_emb);
+                                // Confidence weighting (KS69 T1): scale by LLM confidence
+                                let weighted_sim = child_sim * child_entry.confidence.max(0.01);
+                                if weighted_sim > best_child_score {
+                                    best_child_score = weighted_sim;
+                                    best_child_idx = Some(child_idx);
+                                }
                             }
                         }
                     }
@@ -1288,7 +1324,15 @@ impl EchoEngine {
                             child_score = best_child_score,
                             "Pipe B: child rescued parent memory"
                         );
-                        promotions.push((idx, best_child_score));
+                        // Apply child memory penalty at promotion (KS69)
+                        let penalized_score = best_child_score + self.config.child_memory_penalty;
+                        promotions.push((idx, penalized_score));
+                        // Track child content for matched_child_content (KS69 T1)
+                        if let Some(ci) = best_child_idx
+                            && let Some(child_entry) = store.entry_at(ci)
+                        {
+                            pipe_b_child_content.insert(idx, child_entry.content.clone());
+                        }
                     }
                 }
             }
@@ -1497,6 +1541,28 @@ impl EchoEngine {
                     final_score += demotion;
                 }
 
+                // Child memory penalty (KS69): demote children to prevent hallucination inflation
+                if entry.parent_id.is_some() {
+                    final_score += self.config.child_memory_penalty as f64;
+                }
+
+                // Confidence-weighted child scoring (KS69 T1)
+                if entry.parent_id.is_some() && entry.confidence < 1.0 {
+                    final_score *= entry.confidence as f64;
+                }
+
+                // Resolve matched child content (KS69 T1):
+                // - Pipe B rescue: use the child text that triggered rescue
+                // - Direct child in Pipe A: use the child's own content
+                let matched_child_content = if let Some(child_text) = pipe_b_child_content.get(&idx)
+                {
+                    Some(child_text.clone())
+                } else if entry.parent_id.is_some() {
+                    Some(entry.content.clone())
+                } else {
+                    None
+                };
+
                 Some(EchoResult {
                     memory_id: entry.id.clone(),
                     content: truncate_content(entry.display_content(), 200),
@@ -1506,6 +1572,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: entry.modality,
                     labels: entry.labels.clone(),
+                    matched_child_content,
                 })
             })
             .collect();
@@ -1521,6 +1588,14 @@ impl EchoEngine {
 
         // 7c5. Career/intro adjustment (KS68 IE-1)
         career_intro_adjustment(&all_query_labels, &mut results);
+
+        // 7c6. Score inflation cap (KS69): prevent unbounded boost stacking
+        for result in &mut results {
+            let max_allowed = result.similarity as f64 + 0.35;
+            if result.final_score > max_allowed {
+                result.final_score = max_allowed;
+            }
+        }
 
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
@@ -1589,6 +1664,7 @@ impl EchoEngine {
                             echoed_at: Utc::now(),
                             modality: Modality::Text,
                             labels: vec![label.to_string()],
+                            matched_child_content: None,
                         });
                         results.sort_by(|a, b| {
                             b.final_score
@@ -1816,6 +1892,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: Modality::Vision,
                     labels: entry.labels.clone(),
+                    matched_child_content: None,
                 })
             })
             .collect();
@@ -2140,6 +2217,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: entry.modality,
                     labels: entry.labels.clone(),
+                    matched_child_content: None,
                 })
             })
             .collect();
@@ -2213,6 +2291,7 @@ impl EchoEngine {
                     echoed_at: now,
                     modality: entry.modality,
                     labels: entry.labels.clone(),
+                    matched_child_content: None,
                 })
             })
             .collect();
@@ -2789,6 +2868,83 @@ impl EchoEngine {
             stats.total_latency_us += latency_us;
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Test-only helpers (KS69 — deterministic benchmark fixtures)
+    // -----------------------------------------------------------------------
+
+    /// Test-only: inject a pre-built entry into the store, LSH index, and Bloom filter.
+    ///
+    /// Bypasses PII filtering, reformulation, novelty scoring, and consolidation triggers.
+    /// Used for deterministic benchmark fixtures where children need exact control over
+    /// content and embedding without LLM nondeterminism.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub async fn inject_entry(&self, entry: MemoryEntry) {
+        let embedding = entry.embedding.clone();
+        let content = entry.content.clone();
+        let parent_id = entry.parent_id.clone();
+
+        // 1. Add to store (handles id_to_index, parent_children, label_index)
+        let index = {
+            let mut store = self.store.write().await;
+            store.add(entry)
+        };
+
+        // 2. Insert into text LSH index (always index test entries, regardless of child_rescue_only)
+        if let Ok(mut lsh) = self.text_lsh.lock() {
+            lsh.insert(index as u32, &embedding);
+        }
+
+        // 3. Insert into Bloom filter
+        {
+            let mut bloom = self.bloom.write().await;
+            bloom.insert_memory(&content);
+        }
+
+        // 4. If this is a child, mark the parent as enriched
+        if let Some(ref pid) = parent_id {
+            let mut store = self.store.write().await;
+            if let Some(parent_idx) = store.index_of(pid)
+                && let Some(parent) = store.entry_at_mut(parent_idx)
+            {
+                parent.enriched = true;
+            }
+        }
+    }
+
+    /// Test-only: generate an embedding for text using the engine's embedder.
+    ///
+    /// Provides access to the same embedding model used by `store()` so that
+    /// test children have embeddings from the same vector space.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn embed_text_for_test(&self, text: &str) -> Result<Vec<f32>> {
+        let mut embedder = self
+            .embedder
+            .lock()
+            .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+        embedder.embed_text(text)
+    }
+
+    /// Test-only: inject a Hebbian Supersedes edge between two memories by ID.
+    ///
+    /// Looks up store indices from memory IDs, then creates a directed
+    /// Supersedes edge (old_id → new_id). Used for deterministic benchmark
+    /// fixtures where consolidation is skipped. (KS69)
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub async fn inject_supersedes_edge(&self, old_id: &MemoryId, new_id: &MemoryId) {
+        let store = self.store.read().await;
+        let old_idx = store.index_of(old_id).expect("old_id not in store");
+        let new_idx = store.index_of(new_id).expect("new_id not in store");
+        drop(store);
+
+        let mut hebbian = self.hebbian.write().await;
+        hebbian.co_activate_with_relationship(
+            old_idx as u32,
+            new_idx as u32,
+            1.0,
+            crate::hebbian::RelationshipType::Supersedes,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2835,6 +2991,37 @@ fn expand_query(config: &EchoConfig, query: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Check if any entity in the query matches the child's subject.
+/// Topic-based gate for child memories (KS69 Tier 1).
+///
+/// Uses label overlap (primary) or subject substring match (fallback) to decide
+/// whether a child memory is topically relevant to the current query.
+/// Prevents children from contaminating unrelated queries.
+fn child_topic_matches_query(
+    child_labels: &[String],
+    query_topic_labels: &[&str],
+    child_subject: &Option<String>,
+    query: &str,
+) -> bool {
+    // 1. Label overlap (primary) — same logic as Pipe B topic alignment gate
+    if !query_topic_labels.is_empty() && !child_labels.is_empty() {
+        return child_labels
+            .iter()
+            .any(|cl| query_topic_labels.iter().any(|qt| cl == qt));
+    }
+    // 2. Subject match (fallback) — for children without labels
+    if let Some(subj) = child_subject {
+        let subj_lower = subj.to_lowercase();
+        let query_lower = query.to_lowercase();
+        return query_lower.contains(&subj_lower)
+            || query_lower
+                .split_whitespace()
+                .any(|w| subj_lower.contains(w) && w.len() > 2);
+    }
+    // 3. No labels, no subject — allow (backward compat)
+    true
 }
 
 /// Build a map from parent memory IDs to subject strings from their children.
@@ -3919,6 +4106,7 @@ mod tests {
             echoed_at: Utc::now(),
             modality: Modality::Text,
             labels,
+            matched_child_content: None,
         }
     }
 
@@ -3937,6 +4125,7 @@ mod tests {
             echoed_at: Utc::now(),
             modality: Modality::Text,
             labels,
+            matched_child_content: None,
         }
     }
 

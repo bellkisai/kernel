@@ -188,13 +188,15 @@ pub fn consolidate(
     // Note: child memory creation with embeddings requires the MultiEmbedder,
     // which is not available here. Facts are extracted and logged; child
     // creation happens in EchoEngine::consolidate_now() which has embedder access.
-    const MAX_ENRICHMENTS_PER_CYCLE: usize = 10;
+    const MAX_ENRICHMENTS_PER_CYCLE: usize = 25;
 
     if consolidator.name() != "noop" {
         let mut unenriched: Vec<usize> = (0..store.len())
             .filter(|&i| {
                 store.entry_at(i).is_some_and(|e| {
+                    // KS69: retry extraction up to 3 times if 0 facts were extracted
                     !e.enriched
+                        && e.enrichment_attempts < 3
                         && e.parent_id.is_none()
                         // Only consolidate text entries — vision/speech need VLM/transcription (KS38+)
                         && e.modality == shrimpk_core::Modality::Text
@@ -283,6 +285,20 @@ pub fn consolidate(
                 let mut fact_embeddings: Vec<Vec<f32>> = Vec::with_capacity(fact_entries.len());
 
                 for (fact_text, structured_fact) in &fact_entries {
+                    // KS69: confidence gate — skip low-confidence extractions
+                    if let Some(sf) = structured_fact
+                        && let Some(conf) = sf.confidence
+                        && conf < 0.5
+                    {
+                        tracing::debug!(
+                            fact = %fact_text,
+                            confidence = conf,
+                            "KS69: skipping low-confidence fact"
+                        );
+                        fact_embeddings.push(Vec::new()); // maintain index alignment
+                        continue;
+                    }
+
                     let embedding = match embedder.lock() {
                         Ok(mut e) => match e.embed_text(fact_text) {
                             Ok(emb) => emb,
@@ -315,10 +331,26 @@ pub fn consolidate(
                     );
                     child.parent_id = Some(parent_id.clone());
                     child.enriched = true;
+
+                    // KS69: propagate confidence + subject from structured extraction
+                    if let Some(sf) = structured_fact {
+                        if let Some(conf) = sf.confidence {
+                            child.confidence = conf;
+                        }
+                        if let Some(ref subj) = sf.subject {
+                            child.subject = Some(subj.clone());
+                        }
+                    }
+
                     // Propagate parent's temporal era so children inherit
                     // the correct age for recency scoring (KS21).
+                    // KS69: also copy parent labels (Tier 1+2) to child.
                     if let Some(parent_entry) = store.entry_at(idx) {
                         child.created_at = parent_entry.created_at;
+                        if !parent_entry.labels.is_empty() {
+                            child.labels = parent_entry.labels.clone();
+                            child.label_version = parent_entry.label_version;
+                        }
                     }
 
                     // Extract structured triple if possible (KS61 + KS67 subject fallback)
@@ -439,9 +471,13 @@ pub fn consolidate(
                 }
             }
 
-            // Mark parent as enriched regardless (even if 0 facts — avoids retrying)
+            // KS69: only mark enriched=true when facts were actually extracted.
+            // Increment attempt counter so we retry up to 3 times for 0-fact results.
             if let Some(entry) = store.entry_at_mut(idx) {
-                entry.enriched = true;
+                entry.enrichment_attempts = entry.enrichment_attempts.saturating_add(1);
+                if !facts.is_empty() {
+                    entry.enriched = true;
+                }
             }
         }
     }

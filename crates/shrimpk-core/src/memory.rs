@@ -224,6 +224,16 @@ pub struct MemoryEntry {
     /// Enriched memories have child memories (linked via `parent_id`) with extracted facts.
     #[serde(default)]
     pub enriched: bool,
+    /// Number of LLM extraction attempts (KS69). Capped at 3 to avoid infinite retries.
+    #[serde(default)]
+    pub enrichment_attempts: u8,
+    /// Extraction confidence (0.0-1.0). Default 1.0 for manually stored memories.
+    /// LLM-extracted children get their confidence set explicitly during consolidation.
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
+    /// Primary entity this memory is about (KS69). Populated during LLM extraction.
+    #[serde(default)]
+    pub subject: Option<String>,
     /// Link to parent memory. Child memories are LLM-extracted facts created during
     /// consolidation. When a child matches during echo, the parent's content is returned.
     #[serde(default)]
@@ -261,6 +271,10 @@ pub struct MemoryEntry {
     pub retrieval_history_secs: Vec<u32>,
 }
 
+fn default_confidence() -> f32 {
+    1.0
+}
+
 impl MemoryEntry {
     /// Create a new memory entry with the given content and embedding.
     pub fn new(content: String, embedding: Vec<f32>, source: String) -> Self {
@@ -280,6 +294,9 @@ impl MemoryEntry {
             last_echoed: None,
             echo_count: 0,
             enriched: false,
+            enrichment_attempts: 0,
+            confidence: 1.0,
+            subject: None,
             parent_id: None,
             labels: Vec::new(),
             label_version: 0,
@@ -341,6 +358,11 @@ pub struct EchoResult {
     /// Labels on this memory (ADR-015). Exposed for graph navigation.
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Content of the child memory that matched the query (KS69 Tier 1).
+    /// Present when a child rescued a parent (Pipe B) or appeared directly.
+    /// Gives downstream consumers the focused fact text that triggered retrieval.
+    #[serde(default)]
+    pub matched_child_content: Option<String>,
 }
 
 /// A label connection in the memory graph.

@@ -7,6 +7,8 @@ description = "Echo Memory engine — push-based AI memory where memories find y
 
 [features]
 default = []
+# Expose inject_entry() and embed_text_for_test() for integration tests / benchmarks.
+test-helpers = []
 # CLIP ViT-B-32 vision channel (512-dim). Requires fastembed's image-models feature (on by default).
 # Adds ~352 MB model download on first use.
 vision = []

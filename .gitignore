@@ -78,5 +78,8 @@ docs/S*-*
 *.wixobj
 *.wixpdb
 
+# Local automation scripts (Task Scheduler, not for CI)
+scripts/nightly-benchmark.ps1
+
 # Lock files from model downloads (Cargo.lock already excluded above)
 *.lock
