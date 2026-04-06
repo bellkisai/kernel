@@ -135,8 +135,18 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
             "career, employment, job, work position, company, hiring, promotion, salary, interview, resume, professional development",
         ),
         (
-            "topic:language",
-            "language, languages, learning a language, studying a language, vocabulary, grammar, fluency, bilingual, translation, duolingo, rosetta stone",
+            "topic:language:natural",
+            "language learning, studying a language, vocabulary, grammar, fluency, bilingual, \
+             native speaker, accent, JLPT, Japanese, Spanish, French, German, Chinese, Korean, \
+             Mandarin, Hindi, Arabic, Portuguese, Italian, Russian, Dutch, Swedish, Turkish, \
+             Duolingo, Rosetta Stone, language exchange, speaking practice, translation",
+        ),
+        (
+            "topic:language:programming",
+            "programming language, coding language, software language, Rust, Python, Go, \
+             JavaScript, TypeScript, Java, C++, C#, Ruby, Scala, Kotlin, Swift, Haskell, \
+             Elixir, Clojure, Erlang, compiled language, interpreted language, systems programming, \
+             scripting language, functional language, object-oriented, type system, framework",
         ),
         (
             "topic:education",
@@ -415,7 +425,29 @@ pub fn classify_query(
     // Tier A: keyword-based query classification
     let lower = query.to_lowercase();
     if contains_any(&lower, &["language", "languages", "lingu"]) {
-        push_unique(&mut labels, "topic:language");
+        let natural_signals = contains_any(
+            &lower,
+            &[
+                "learning", "studying", "jlpt", "fluent", "native", "speak",
+                "vocabulary", "grammar", "duolingo", "rosetta", "accent",
+            ],
+        );
+        let programming_signals = contains_any(
+            &lower,
+            &[
+                "prefer", "code", "program", "framework", "library", "develop",
+                "compile", "script", "software", "typed",
+            ],
+        );
+        match (natural_signals, programming_signals) {
+            (true, false) => push_unique(&mut labels, "topic:language:natural"),
+            (false, true) => push_unique(&mut labels, "topic:language:programming"),
+            _ => {
+                // Ambiguous or both — emit both, let scoring decide
+                push_unique(&mut labels, "topic:language:natural");
+                push_unique(&mut labels, "topic:language:programming");
+            }
+        }
     }
     if contains_any(&lower, &["learn", "study", "class", "course", "school"]) {
         push_unique(&mut labels, "action:learning");
@@ -696,12 +728,60 @@ mod tests {
         let protos = mock_prototypes();
         let labels = classify_query("what languages am I learning?", &vec![0.0; 384], &protos);
         assert!(
-            labels.iter().any(|l| l == "topic:language"),
-            "Should match 'languages' keyword, got: {labels:?}"
+            labels.iter().any(|l| l == "topic:language:natural"),
+            "Should match 'languages' + 'learning' → natural, got: {labels:?}"
         );
         assert!(
             labels.iter().any(|l| l == "action:learning"),
             "Should match 'learning' keyword, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_natural_signals() {
+        let protos = mock_prototypes();
+        let labels =
+            classify_query("What language is Sam learning?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language:natural"),
+            "Should route 'learning' to natural, got: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l == "topic:language:programming"),
+            "Should NOT emit programming when 'learning' present, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_programming_signals() {
+        let protos = mock_prototypes();
+        let labels = classify_query(
+            "What programming language does Sam prefer?",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "topic:language:programming"),
+            "Should route 'programming'+'prefer' to programming, got: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l == "topic:language:natural"),
+            "Should NOT emit natural when 'programming'+'prefer' present, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn query_language_ambiguous_emits_both() {
+        let protos = mock_prototypes();
+        let labels =
+            classify_query("What language does Sam know?", &vec![0.0; 384], &protos);
+        assert!(
+            labels.iter().any(|l| l == "topic:language:natural"),
+            "Ambiguous should emit natural, got: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|l| l == "topic:language:programming"),
+            "Ambiguous should emit programming, got: {labels:?}"
         );
     }
 
