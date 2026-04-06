@@ -2912,6 +2912,27 @@ impl EchoEngine {
             .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
         embedder.embed_text(text)
     }
+
+    /// Test-only: inject a Hebbian Supersedes edge between two memories by ID.
+    ///
+    /// Looks up store indices from memory IDs, then creates a directed
+    /// Supersedes edge (old_id → new_id). Used for deterministic benchmark
+    /// fixtures where consolidation is skipped. (KS69)
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub async fn inject_supersedes_edge(&self, old_id: &MemoryId, new_id: &MemoryId) {
+        let store = self.store.read().await;
+        let old_idx = store.index_of(old_id).expect("old_id not in store");
+        let new_idx = store.index_of(new_id).expect("new_id not in store");
+        drop(store);
+
+        let mut hebbian = self.hebbian.write().await;
+        hebbian.co_activate_with_relationship(
+            old_idx as u32,
+            new_idx as u32,
+            1.0,
+            crate::hebbian::RelationshipType::Supersedes,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

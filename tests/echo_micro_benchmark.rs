@@ -501,6 +501,13 @@ fn benchmark_with_seeded_children() {
     let ids = seed_micro_dataset(&engine, &rt);
     seed_test_children(&engine, &ids, &rt);
 
+    // Inject Supersedes edges: M4 (Shopify) → M5 (Stripe), M6 (Oakland) → M7 (SF)
+    // These create the demotion signal that consolidation would normally produce. (KS69)
+    rt.block_on(async {
+        engine.inject_supersedes_edge(&ids[3], &ids[4]).await; // M4→M5: old job → new job
+        engine.inject_supersedes_edge(&ids[5], &ids[6]).await; // M6→M7: old location → new location
+    });
+
     println!("\n=== MICRO-BENCHMARK: With seeded children (deterministic) ===\n");
     let (passed, total) = run_benchmark(&engine, &rt);
     drop(rt);
