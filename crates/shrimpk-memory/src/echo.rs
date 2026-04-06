@@ -3025,8 +3025,8 @@ fn preference_update_boost(query: &str, results: &mut [EchoResult]) {
 }
 
 /// Career query adjustment (KS68 IE-1): when query is classified as career-related,
-/// demote `memtype:intro` memories (-0.05) and boost career-labeled non-intro memories
-/// (+0.025). This prevents "My name is Sam Torres" from outranking actual job memories.
+/// demote `memtype:intro` memories (-0.10) and boost career-labeled non-intro memories
+/// (+0.03). This prevents "My name is Sam Torres" from outranking actual job memories.
 fn career_intro_adjustment(query_labels: &[String], results: &mut [EchoResult]) {
     let is_career_query = query_labels
         .iter()
@@ -3037,13 +3037,13 @@ fn career_intro_adjustment(query_labels: &[String], results: &mut [EchoResult]) 
     for result in results.iter_mut() {
         let is_intro = result.labels.iter().any(|l| l == "memtype:intro");
         if is_intro {
-            result.final_score -= 0.05;
+            result.final_score -= 0.10;
         } else if result
             .labels
             .iter()
             .any(|l| l == "topic:career" || l == "domain:work")
         {
-            result.final_score += 0.025;
+            result.final_score += 0.03;
         }
     }
 }
@@ -4444,22 +4444,24 @@ mod tests {
         ];
         let query_labels = vec!["topic:career".to_string(), "domain:work".to_string()];
         super::career_intro_adjustment(&query_labels, &mut results);
-        // M1 (intro): 0.905 - 0.05 = 0.855
+        // M1 (intro): 0.905 - 0.10 = 0.805
         assert!(
-            (results[0].final_score - 0.855).abs() < 1e-10,
-            "Intro memory should be demoted by -0.05, got {}",
+            (results[0].final_score - 0.805).abs() < 1e-10,
+            "Intro memory should be demoted by -0.10, got {}",
             results[0].final_score,
         );
-        // M5 (career): 0.816 + 0.025 = 0.841
+        // M5 (career): 0.816 + 0.03 = 0.846
         assert!(
-            (results[1].final_score - 0.841).abs() < 1e-10,
-            "Career memory should get +0.025 boost, got {}",
+            (results[1].final_score - 0.846).abs() < 1e-10,
+            "Career memory should get +0.03 boost, got {}",
             results[1].final_score,
         );
         // Career should now outrank intro
         assert!(
-            results[1].final_score < results[0].final_score,
-            "Career (0.841) still below intro (0.855) — but gap is closed"
+            results[1].final_score > results[0].final_score,
+            "Career ({}) must outrank intro ({})",
+            results[1].final_score,
+            results[0].final_score,
         );
     }
 
