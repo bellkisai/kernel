@@ -108,7 +108,7 @@ fn combined_enrichment_prompt(max_facts: usize) -> String {
          Return a JSON object with two keys: \"facts\" and \"labels\".\n\n\
          \"facts\": up to {max_facts} objects, each with:\n\
          - \"text\": a self-contained sentence (subject + verb + object)\n\
-         - \"subject\": the primary entity (a name, project, or \"the user\")\n\
+         - \"subject\": the specific topic entity this fact is about — use the object/topic, NOT the person's name (e.g., \"Neovim\", \"Stripe\", \"Tokyo\", \"JLPT N3\", not \"Sam\" or \"the user\")\n\
          - \"type\": one of [personal, project, preference, goal, status, event, relationship]\n\
          - \"confidence\": 0.0-1.0 (how certain you are this fact is stated, not implied)\n\n\
          \"labels\": classify the memory:\n\

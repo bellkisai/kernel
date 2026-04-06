@@ -441,7 +441,7 @@ fn seed_test_children(engine: &EchoEngine, ids: &[MemoryId], rt: &tokio::runtime
             MemoryEntry::new(text_ku3.to_string(), emb_ku3, "enrichment".to_string());
         child_ku3.parent_id = Some(m11_id.clone());
         child_ku3.confidence = 0.90;
-        child_ku3.subject = Some("Sam".to_string());
+        child_ku3.subject = Some("Neovim".to_string());
         engine.inject_entry(child_ku3).await;
 
         // Child for M18 (Japanese language learning) → targets PT-3: "What language is Sam learning?"
@@ -453,7 +453,7 @@ fn seed_test_children(engine: &EchoEngine, ids: &[MemoryId], rt: &tokio::runtime
             MemoryEntry::new(text_pt3.to_string(), emb_pt3, "enrichment".to_string());
         child_pt3.parent_id = Some(m18_id.clone());
         child_pt3.confidence = 0.85;
-        child_pt3.subject = Some("Sam".to_string());
+        child_pt3.subject = Some("Japanese JLPT".to_string());
         engine.inject_entry(child_pt3).await;
 
         // Child for M18 (Tokyo travel) → targets TR-2: "Where has Sam traveled recently?"
@@ -465,7 +465,7 @@ fn seed_test_children(engine: &EchoEngine, ids: &[MemoryId], rt: &tokio::runtime
             MemoryEntry::new(text_tr2.to_string(), emb_tr2, "enrichment".to_string());
         child_tr2.parent_id = Some(m18_id.clone());
         child_tr2.confidence = 0.92;
-        child_tr2.subject = Some("Sam".to_string());
+        child_tr2.subject = Some("Tokyo".to_string());
         engine.inject_entry(child_tr2).await;
 
         // Child for M19 (patent deadline) → targets TR-3: "What upcoming deadlines does Sam have?"
@@ -478,7 +478,7 @@ fn seed_test_children(engine: &EchoEngine, ids: &[MemoryId], rt: &tokio::runtime
             MemoryEntry::new(text_tr3.to_string(), emb_tr3, "enrichment".to_string());
         child_tr3.parent_id = Some(m19_id.clone());
         child_tr3.confidence = 0.88;
-        child_tr3.subject = Some("Sam".to_string());
+        child_tr3.subject = Some("patent deadline".to_string());
         engine.inject_entry(child_tr3).await;
     });
 }
