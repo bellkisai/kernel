@@ -1531,6 +1531,9 @@ impl EchoEngine {
         // 7c3. Topic-label boost (KS68 KU-3)
         label_topic_boost(&all_query_labels, &mut results);
 
+        // 7c4. Preference-update multiplier (KS68 KU-3)
+        preference_update_boost(query, &mut results);
+
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
             b.final_score
@@ -2927,20 +2930,47 @@ fn apply_temporal_boost(query: &str, results: &mut [EchoResult]) {
 
 /// Label-based boost (KS68): when query is classified with a specific label
 /// (e.g., `topic:tools:editor`, `action:learning`) and a result also carries that label,
-/// give it a small scoring bump so precisely-labeled memories surface above generic ones.
+/// give it a scoring bump so precisely-labeled memories surface above generic ones.
+///
+/// Boost values tuned per QA analysis: +0.06 for topic:tools:* (KU-3 gap closure),
+/// +0.025 for action:learning.
 fn label_topic_boost(query_labels: &[String], results: &mut [EchoResult]) {
-    // Labels eligible for boosting: topic:tools:* and action:learning
-    let boost_labels: Vec<&str> = query_labels
-        .iter()
-        .filter(|l| l.starts_with("topic:tools:") || *l == "action:learning")
-        .map(String::as_str)
-        .collect();
-    if boost_labels.is_empty() {
+    for result in results.iter_mut() {
+        for ql in query_labels {
+            if ql.starts_with("topic:tools:") && result.labels.iter().any(|l| l == ql) {
+                result.final_score += 0.06;
+                break;
+            }
+            if ql == "action:learning" && result.labels.iter().any(|l| l == ql) {
+                result.final_score += 0.025;
+                break;
+            }
+        }
+    }
+}
+
+/// Preference-update multiplier (KS68 KU-3): when the query signals interest in
+/// current state ("currently", "now use", "switched to"), memories labeled
+/// `memtype:preference_update` get a 1.05x multiplier so "I switched from X to Y"
+/// memories rank above stale preference entries with higher raw similarity.
+fn preference_update_boost(query: &str, results: &mut [EchoResult]) {
+    const CURRENT_KEYWORDS: &[&str] = &[
+        "currently",
+        "now use",
+        "now using",
+        "switched to",
+        "these days",
+        "at the moment",
+        "right now",
+    ];
+    let query_lower = query.to_lowercase();
+    let is_current_query = CURRENT_KEYWORDS.iter().any(|kw| query_lower.contains(kw));
+    if !is_current_query {
         return;
     }
     for result in results.iter_mut() {
-        if result.labels.iter().any(|l| boost_labels.contains(&l.as_str())) {
-            result.final_score += 0.025;
+        if result.labels.iter().any(|l| l == "memtype:preference_update") {
+            result.final_score *= 1.05;
         }
     }
 }
@@ -4081,8 +4111,8 @@ mod tests {
         let query_labels = vec!["topic:tools:editor".to_string()];
         super::label_topic_boost(&query_labels, &mut results);
         assert!(
-            (results[0].final_score - 0.875).abs() < 1e-10,
-            "Editor result should get +0.025 boost, got {}",
+            (results[0].final_score - 0.91).abs() < 1e-10,
+            "Editor result should get +0.06 boost, got {}",
             results[0].final_score,
         );
         assert!(
@@ -4154,6 +4184,51 @@ mod tests {
         assert!(
             (results[0].final_score - 0.45).abs() < 1e-10,
             "Learning result should not be boosted for non-learning query, got {}",
+            results[0].final_score,
+        );
+    }
+
+    // --- KU-3: Preference-update multiplier ---
+
+    #[test]
+    fn preference_update_boost_fires_for_currently_query() {
+        let mut results = vec![
+            make_echo_result(
+                "I switched from VS Code to Neovim",
+                0.80,
+                vec!["memtype:preference_update".to_string()],
+            ),
+            make_echo_result(
+                "I use Rust and Go and Python",
+                0.85,
+                vec!["topic:language:programming".to_string()],
+            ),
+        ];
+        super::preference_update_boost("What editor do I currently use?", &mut results);
+        // 0.80 * 1.05 = 0.84
+        assert!(
+            (results[0].final_score - 0.84).abs() < 1e-10,
+            "Preference_update result should get 1.05x multiplier, got {}",
+            results[0].final_score,
+        );
+        assert!(
+            (results[1].final_score - 0.85).abs() < 1e-10,
+            "Non-preference result should be unchanged, got {}",
+            results[1].final_score,
+        );
+    }
+
+    #[test]
+    fn preference_update_boost_no_op_without_current_keywords() {
+        let mut results = vec![make_echo_result(
+            "I switched from VS Code to Neovim",
+            0.80,
+            vec!["memtype:preference_update".to_string()],
+        )];
+        super::preference_update_boost("What editor have I used?", &mut results);
+        assert!(
+            (results[0].final_score - 0.80).abs() < 1e-10,
+            "Should not boost without current-state keywords, got {}",
             results[0].final_score,
         );
     }

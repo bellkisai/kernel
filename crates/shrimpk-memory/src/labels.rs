@@ -286,6 +286,11 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
             "memtype:habit",
             "habit, routine, every day, always do, regular practice, ritual, pattern, custom, tendency",
         ),
+        (
+            "memtype:intro",
+            "my name is, I am, I'm a, introduction, identity, about me, call me, \
+             this is, who I am, self introduction, personal introduction",
+        ),
         // sentiment: emotional valence
         (
             "sentiment:positive",
@@ -420,6 +425,34 @@ pub fn generate_tier1_labels(
         ],
     ) {
         push_unique(&mut labels, "action:learning");
+    }
+
+    // 2c. Preference update detection (KS68 KU-3)
+    // Memories about switching tools/preferences get a distinct label so queries
+    // with "currently"/"now use" can boost them over stale preference memories.
+    if contains_any(
+        &lower,
+        &[
+            "switched to",
+            "switched from",
+            "moved to",
+            "migrated to",
+            "now use",
+            "now using",
+            "replaced with",
+            "changed to",
+            "transitioned to",
+        ],
+    ) {
+        push_unique(&mut labels, "memtype:preference_update");
+    }
+
+    // 2d. Introduction/identity memory detection (KS68 IE-1)
+    if contains_any(
+        &lower,
+        &["my name is", "i am a ", "i'm a ", "call me ", "i go by"],
+    ) {
+        push_unique(&mut labels, "memtype:intro");
     }
 
     // 3. Simple entity extraction — capitalized multi-char words not at sentence start
@@ -1089,6 +1122,28 @@ mod tests {
         assert!(
             labels.contains(&"topic:technology".to_string()),
             "Editor query should also trigger topic:technology, got {labels:?}",
+        );
+    }
+
+    #[test]
+    fn tier1_preference_update_switched_to() {
+        let protos = mock_prototypes();
+        let labels =
+            generate_tier1_labels("I switched from VS Code to Neovim last month", &vec![0.0; 384], &protos);
+        assert!(
+            labels.contains(&"memtype:preference_update".to_string()),
+            "Should detect preference_update for 'switched from', got {labels:?}",
+        );
+    }
+
+    #[test]
+    fn tier1_preference_update_now_using() {
+        let protos = mock_prototypes();
+        let labels =
+            generate_tier1_labels("I'm now using Helix instead of Vim", &vec![0.0; 384], &protos);
+        assert!(
+            labels.contains(&"memtype:preference_update".to_string()),
+            "Should detect preference_update for 'now using', got {labels:?}",
         );
     }
 }
