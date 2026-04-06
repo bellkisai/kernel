@@ -343,6 +343,25 @@ pub fn generate_tier1_labels(
             "back then",
             "in the past",
             "formerly",
+            "last month",
+            "last year",
+            "last week",
+            "last november",
+            "last december",
+            "last january",
+            "last february",
+            "last march",
+            "last april",
+            "last may",
+            "last june",
+            "last july",
+            "last august",
+            "last september",
+            "last october",
+            "visited",
+            "years ago",
+            "months ago",
+            "weeks ago",
         ],
     ) {
         push_unique(&mut labels, "temporal:past");
@@ -356,8 +375,19 @@ pub fn generate_tier1_labels(
             "hope to",
             "considering",
             "next year",
+            "next month",
+            "next week",
+            "upcoming",
+            "deadline",
+            "filing deadline",
+            "due date",
+            "due by",
+            "submit by",
+            "expires",
+            "scheduled for",
         ],
-    ) {
+    ) || contains_future_date(&lower)
+    {
         push_unique(&mut labels, "temporal:future");
     }
     if contains_any(
@@ -509,6 +539,53 @@ pub fn classify_query(
 
 fn contains_any(text: &str, patterns: &[&str]) -> bool {
     patterns.iter().any(|p| text.contains(p))
+}
+
+/// Detect explicit date patterns that imply future time reference.
+///
+/// Matches:
+/// - "Month YYYY" (e.g., "april 2026") where month is a full name
+/// - "YYYY-MM-DD" ISO dates (e.g., "2026-04-15")
+///
+/// We don't compare against the current date — any explicit date reference
+/// paired with future-signalling context (deadline, filing, due) is enough.
+/// This function is called only when the text already contains "deadline" or
+/// similar keywords haven't matched, so it provides incremental coverage for
+/// content like "patent filing April 2026".
+fn contains_future_date(text: &str) -> bool {
+    // Pattern 1: "month yyyy" where yyyy is a 4-digit year
+    let months = [
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december",
+    ];
+    for month in months {
+        if let Some(pos) = text.find(month) {
+            let after = &text[pos + month.len()..];
+            // Check for " YYYY" immediately after month name
+            let after = after.trim_start();
+            if after.len() >= 4 && after[..4].chars().all(|c| c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    // Pattern 2: "YYYY-MM-DD" ISO date
+    let bytes = text.as_bytes();
+    for i in 0..text.len().saturating_sub(9) {
+        if bytes[i].is_ascii_digit()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && bytes[i + 3].is_ascii_digit()
+            && bytes[i + 4] == b'-'
+            && bytes[i + 5].is_ascii_digit()
+            && bytes[i + 6].is_ascii_digit()
+            && bytes[i + 7] == b'-'
+            && bytes[i + 8].is_ascii_digit()
+            && bytes[i + 9].is_ascii_digit()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn push_unique(labels: &mut Vec<String>, label: &str) {
@@ -683,6 +760,106 @@ mod tests {
             labels.iter().any(|l| l == "temporal:past"),
             "Should detect 'used to' as temporal:past, got: {labels:?}"
         );
+    }
+
+    #[test]
+    fn tier1_temporal_past_extended_signals() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I visited Paris last month and it was great",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:past"),
+            "Should detect 'visited' + 'last month' as temporal:past, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_past_years_ago() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I moved to the US years ago",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:past"),
+            "Should detect 'years ago' as temporal:past, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_deadline() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "Patent filing deadline is April 2026",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect 'deadline' as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_next_month() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "I have a conference next month",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect 'next month' as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_month_year_pattern() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "ROSCon submission due april 2026",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect 'april 2026' date pattern as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn tier1_temporal_future_iso_date() {
+        let protos = mock_prototypes();
+        let labels = generate_tier1_labels(
+            "Patent provisional filing 2026-04-15",
+            &vec![0.0; 384],
+            &protos,
+        );
+        assert!(
+            labels.iter().any(|l| l == "temporal:future"),
+            "Should detect ISO date '2026-04-15' as temporal:future, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn contains_future_date_month_year() {
+        assert!(contains_future_date("april 2026"));
+        assert!(contains_future_date("submit by november 2025"));
+        assert!(!contains_future_date("april is a nice month"));
+        assert!(!contains_future_date("no dates here"));
+    }
+
+    #[test]
+    fn contains_future_date_iso() {
+        assert!(contains_future_date("due 2026-04-15 sharp"));
+        assert!(contains_future_date("2025-12-31"));
+        assert!(!contains_future_date("2026-4-15")); // not zero-padded, no match
+        assert!(!contains_future_date("no dates"));
     }
 
     #[test]
