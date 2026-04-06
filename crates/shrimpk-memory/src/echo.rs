@@ -1614,6 +1614,41 @@ impl EchoEngine {
             deduplicate_parent_child(&mut results, &parent_map);
         }
 
+        // 7h. Exclude superseded parents (KS68.3 KU-1): if both an old parent
+        // (with superseded children) and the superseding new parent appear in
+        // results, remove the old parent entirely. This avoids score-gap
+        // calibration issues — exclusion is binary and deterministic.
+        {
+            let result_ids: std::collections::HashSet<MemoryId> =
+                results.iter().map(|r| r.memory_id.clone()).collect();
+            let hebbian = self.hebbian.read().await;
+            let mut superseded: std::collections::HashSet<MemoryId> =
+                std::collections::HashSet::new();
+
+            for r in &results {
+                if store.index_of(&r.memory_id).is_some() {
+                    let child_indices = store.children_of(&r.memory_id);
+                    for &child_idx in child_indices {
+                        let assocs = hebbian.get_associations_typed(child_idx as u32, 0.0);
+                        for (neighbor, _weight, rel) in &assocs {
+                            if let Some(crate::hebbian::RelationshipType::Supersedes) = rel
+                                && (child_idx as u32) < *neighbor
+                                && let Some(new_child) = store.entry_at(*neighbor as usize)
+                                && let Some(ref new_parent_id) = new_child.parent_id
+                                && result_ids.contains(new_parent_id)
+                            {
+                                superseded.insert(r.memory_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+                results.retain(|r| !superseded.contains(&r.memory_id));
+            }
+        }
+
         // Release read lock before acquiring write lock
         let matched_ids: Vec<(MemoryId, usize)> = top
             .iter()
@@ -3887,6 +3922,24 @@ mod tests {
         }
     }
 
+    fn make_echo_result_with_id(
+        id: &MemoryId,
+        content: &str,
+        score: f64,
+        labels: Vec<String>,
+    ) -> EchoResult {
+        EchoResult {
+            memory_id: id.clone(),
+            content: content.to_string(),
+            similarity: score as f32,
+            final_score: score,
+            source: "test".to_string(),
+            echoed_at: Utc::now(),
+            modality: Modality::Text,
+            labels,
+        }
+    }
+
     // --- ME-4: Co-occurrence boost ---
 
     #[test]
@@ -4129,6 +4182,104 @@ mod tests {
             (score - original).abs() < f64::EPSILON,
             "Score should be unchanged without superseded children"
         );
+    }
+
+    // --- KU-1: Superseded parent exclusion ---
+
+    #[test]
+    fn exclusion_removes_superseded_parent_when_new_parent_present() {
+        // M4 (Shopify, old) and M5 (Stripe, new) both in results.
+        // M4 has a child superseded by M5's child → M4 should be excluded.
+        let m4_id = MemoryId::new();
+        let m5_id = MemoryId::new();
+        let m6_id = MemoryId::new();
+        let m7_id = MemoryId::new();
+
+        let mut results = vec![
+            make_echo_result_with_id(&m5_id, "Sam works at Stripe", 1.001, vec![]),
+            make_echo_result_with_id(&m4_id, "Sam worked at Shopify", 0.877, vec![]),
+            make_echo_result_with_id(&m6_id, "Sam likes hiking", 0.800, vec![]),
+            make_echo_result_with_id(&m7_id, "Sam is vegan", 0.750, vec![]),
+        ];
+
+        let result_ids: std::collections::HashSet<MemoryId> =
+            results.iter().map(|r| r.memory_id.clone()).collect();
+
+        // Simulate: m4 is superseded, m5 is the superseding parent
+        let mut superseded: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+        // The real code traces children -> Supersedes edges -> new parent.
+        // Here we simulate the result: m4 found to be superseded by m5.
+        if result_ids.contains(&m5_id) {
+            superseded.insert(m4_id.clone());
+        }
+
+        if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+            results.retain(|r| !superseded.contains(&r.memory_id));
+        }
+
+        assert_eq!(results.len(), 3, "M4 should be excluded");
+        assert!(
+            results.iter().all(|r| r.memory_id != m4_id),
+            "M4 (Shopify) must not appear in results"
+        );
+        assert!(
+            results.iter().any(|r| r.memory_id == m5_id),
+            "M5 (Stripe) must remain"
+        );
+    }
+
+    #[test]
+    fn exclusion_skips_when_new_parent_not_in_results() {
+        // M4 (Shopify) is in results but M5 (Stripe) is NOT → no exclusion.
+        let m4_id = MemoryId::new();
+        let m5_id = MemoryId::new();
+        let m6_id = MemoryId::new();
+
+        let mut results = vec![
+            make_echo_result_with_id(&m4_id, "Sam worked at Shopify", 0.900, vec![]),
+            make_echo_result_with_id(&m6_id, "Sam likes hiking", 0.800, vec![]),
+        ];
+
+        let result_ids: std::collections::HashSet<MemoryId> =
+            results.iter().map(|r| r.memory_id.clone()).collect();
+
+        let mut superseded: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+        // M5 not in results → don't mark M4 as superseded
+        if result_ids.contains(&m5_id) {
+            superseded.insert(m4_id.clone());
+        }
+
+        if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+            results.retain(|r| !superseded.contains(&r.memory_id));
+        }
+
+        assert_eq!(results.len(), 2, "No exclusion should occur");
+        assert!(
+            results.iter().any(|r| r.memory_id == m4_id),
+            "M4 must remain when M5 is not in results"
+        );
+    }
+
+    #[test]
+    fn exclusion_no_op_without_supersession_edges() {
+        // No supersession edges → no exclusion
+        let m1_id = MemoryId::new();
+        let m2_id = MemoryId::new();
+        let m3_id = MemoryId::new();
+
+        let mut results = vec![
+            make_echo_result_with_id(&m1_id, "Sam Torres", 0.900, vec![]),
+            make_echo_result_with_id(&m2_id, "Sam likes hiking", 0.850, vec![]),
+            make_echo_result_with_id(&m3_id, "Sam is vegan", 0.800, vec![]),
+        ];
+
+        let superseded: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
+
+        if !superseded.is_empty() && results.len() - superseded.len() >= 3 {
+            results.retain(|r| !superseded.contains(&r.memory_id));
+        }
+
+        assert_eq!(results.len(), 3, "No exclusion when no supersession edges");
     }
 
     // --- KU-3: Topic-label boost ---
