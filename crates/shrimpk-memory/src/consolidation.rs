@@ -285,13 +285,12 @@ pub fn consolidate(
                 let mut fact_embeddings: Vec<Vec<f32>> = Vec::with_capacity(fact_entries.len());
 
                 for (fact_text, structured_fact) in &fact_entries {
-                    // KS69: quality gate — reject low-quality extractions
-                    // (replaces confidence gate; small models return 1.0 for everything)
+                    // KS71: multi-signal quality gate (verb, length, noise patterns)
                     if let Some(reason) = fact_quality_reject(fact_text) {
                         tracing::debug!(
                             fact = %fact_text,
                             reason,
-                            "KS69: skipping low-quality fact"
+                            "KS71: skipping low-quality fact"
                         );
                         fact_embeddings.push(Vec::new()); // maintain index alignment
                         continue;
@@ -750,22 +749,50 @@ fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
 // Relationship detection (KS18 Track 4)
 // ===========================================================================
 
-/// Quality gate for extracted facts (KS69).
+/// Multi-signal quality gate for extracted facts (KS71).
 ///
 /// Returns `Some(reason)` if the fact should be rejected, `None` if it passes.
-/// Only checks structural quality (length, word count). Subject repair
-/// is handled by `fix_degenerate_subject()` (KS71) before this gate runs.
+/// Confidence alone is useless with small models (qwen2.5:1.5b returns 1.0 for everything).
+/// Subject repair is handled by `fix_degenerate_subject()` (KS71) before this gate runs.
 fn fact_quality_reject(fact_text: &str) -> Option<&'static str> {
-    // 1. Min text length — reject fragments shorter than 20 chars
-    if fact_text.len() < 20 {
-        return Some("too short (<20 chars)");
+    // 1. Minimum length — reject fragments
+    if fact_text.len() < 15 {
+        return Some("too short (<15 chars)");
     }
 
-    // 2. Fragment detection — a real sentence has at least a subject and verb.
-    //    Heuristic: must contain at least 3 whitespace-separated words.
-    let word_count = fact_text.split_whitespace().count();
-    if word_count < 3 {
-        return Some("fragment (<3 words)");
+    // 2. Must contain a verb — reject noun phrases and fragments
+    let has_verb = fact_text.contains(" is ")
+        || fact_text.contains(" are ")
+        || fact_text.contains(" was ")
+        || fact_text.contains(" were ")
+        || fact_text.contains(" has ")
+        || fact_text.contains(" have ")
+        || fact_text.contains(" works ")
+        || fact_text.contains(" lives ")
+        || fact_text.contains(" uses ")
+        || fact_text.contains(" prefers ")
+        || fact_text.contains(" started ")
+        || fact_text.contains(" joined ")
+        || fact_text.contains(" switched ")
+        || fact_text.contains(" moved ")
+        || fact_text.contains(" visited ")
+        || fact_text.contains(" learned ")
+        || fact_text.contains(" practices ")
+        || fact_text.contains(" runs ")
+        || fact_text.contains(" built ")
+        || fact_text.contains(" leads ")
+        || fact_text.ends_with("ing")
+        || fact_text.contains("'s ")
+        || fact_text.contains("'m ");
+    if !has_verb {
+        return Some("no verb detected");
+    }
+
+    // 3. Reject noise patterns — common LLM extraction artifacts
+    let lower = fact_text.to_lowercase();
+    const NOISE_PREFIXES: &[&str] = &["all my ", "closer to ", "my daily ", "development work"];
+    if NOISE_PREFIXES.iter().any(|p| lower.starts_with(p)) {
+        return Some("noise pattern");
     }
 
     None
@@ -2557,11 +2584,56 @@ mod tests {
     }
 
     #[test]
-    fn fact_quality_reject_structural_checks() {
-        assert!(fact_quality_reject("short").is_some());
-        assert!(fact_quality_reject("only two").is_some());
+    fn quality_gate_accepts_valid_facts() {
+        // Has verb, sufficient length
         assert!(
-            fact_quality_reject("The user works at a large company in San Francisco").is_none()
+            fact_quality_reject("Sam works at Stripe as a senior engineer on billing").is_none()
+        );
+        assert!(fact_quality_reject("The user practices jiu-jitsu at Gracie gym").is_none());
+        assert!(fact_quality_reject("She started at Google in 2019").is_none());
+        // Gerund ending counts as verb signal
+        assert!(fact_quality_reject("Currently rock climbing").is_none());
+    }
+
+    #[test]
+    fn quality_gate_rejects_short_fragments() {
+        assert_eq!(fact_quality_reject("Neovim"), Some("too short (<15 chars)"));
+        assert_eq!(
+            fact_quality_reject("switched"),
+            Some("too short (<15 chars)")
+        );
+        assert_eq!(
+            fact_quality_reject("daily routine"),
+            Some("too short (<15 chars)")
+        );
+    }
+
+    #[test]
+    fn quality_gate_rejects_no_verb() {
+        // Long enough but no verb pattern
+        assert_eq!(
+            fact_quality_reject("senior engineer at Stripe billing team"),
+            Some("no verb detected")
+        );
+    }
+
+    #[test]
+    fn quality_gate_rejects_noise_patterns() {
+        assert_eq!(
+            fact_quality_reject("all my development work is in Rust"),
+            Some("noise pattern")
+        );
+        assert_eq!(
+            fact_quality_reject("closer to the Stripe office is better"),
+            Some("noise pattern")
+        );
+        assert_eq!(
+            fact_quality_reject("my daily routine is wake up early"),
+            Some("noise pattern")
+        );
+        assert_eq!(
+            fact_quality_reject("Development work is mostly in Go"),
+            Some("noise pattern")
         );
     }
 }
