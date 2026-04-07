@@ -340,28 +340,22 @@ pub fn consolidate(
                         }
                     }
 
-                    // Propagate parent's temporal era so children inherit
-                    // the correct age for recency scoring (KS21).
-                    // KS69: also copy parent labels (Tier 1+2) to child.
+                    // KS72: child-specific labels first (highest priority), then parent
+                    // labels fill remaining slots. Previous code copied parent labels first,
+                    // filling all MAX_LABELS_PER_ENTRY slots, so child keywords at positions
+                    // 10+ were silently truncated (Greptile P1).
+                    let mut merged: Vec<String> = crate::labels::keyword_labels(fact_text);
                     if let Some(parent_entry) = store.entry_at(idx) {
                         child.created_at = parent_entry.created_at;
-                        if !parent_entry.labels.is_empty() {
-                            child.labels = parent_entry.labels.clone();
-                            child.label_version = parent_entry.label_version;
+                        child.label_version = parent_entry.label_version;
+                        for label in &parent_entry.labels {
+                            if !merged.contains(label) {
+                                merged.push(label.clone());
+                            }
                         }
                     }
-
-                    // KS72: Run keyword-only Tier 1 on child's OWN text and merge.
-                    // Parent labels are broad (e.g., "topic:technology"); child-specific
-                    // keywords add precise labels (e.g., "topic:tools:editor" for Neovim).
-                    // This enables label_topic_boost to fire for specific queries.
-                    let child_keywords = crate::labels::keyword_labels(fact_text);
-                    for label in child_keywords {
-                        if !child.labels.contains(&label) {
-                            child.labels.push(label);
-                        }
-                    }
-                    child.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
+                    merged.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
+                    child.labels = merged;
 
                     // Extract structured triple if possible (KS61 + KS67 subject fallback)
                     if let Some(triple) = extract_triples(fact_text) {
