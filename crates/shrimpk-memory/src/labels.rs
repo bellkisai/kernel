@@ -311,18 +311,14 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
 // Tier 1 label generation — combines all three methods
 // ---------------------------------------------------------------------------
 
-/// Generate Tier 1 labels for a memory.
-///
-/// Combines three methods:
-/// 1. Prototype cosine matching (handles implicit inference)
-/// 2. Rule-based temporal detection
-/// 3. Simple entity extraction (capitalized words)
-///
-/// Returns up to MAX_LABELS_PER_ENTRY labels.
 /// Keyword-only Tier 1 labels — no embedding or prototypes needed.
-/// Used for child memory label enrichment during consolidation (KS72).
-/// Runs the rule-based portion of Tier 1: temporal, action, memtype, entity extraction,
-/// and topic keyword matching. ~0.01ms per call.
+///
+/// Runs the rule-based portion of Tier 1: temporal detection, action/memtype
+/// classification, entity extraction (capitalized words), and topic keyword
+/// matching. Used for child memory label enrichment during consolidation (KS72)
+/// where embeddings are not recomputed for label classification.
+///
+/// Returns up to MAX_LABELS_PER_ENTRY labels. ~0.01ms per call.
 pub fn keyword_labels(content: &str) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
     keyword_labels_into(content, &mut labels);
