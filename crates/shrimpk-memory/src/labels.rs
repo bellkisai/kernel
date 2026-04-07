@@ -319,6 +319,17 @@ fn prototype_definitions() -> (Vec<String>, Vec<String>) {
 /// 3. Simple entity extraction (capitalized words)
 ///
 /// Returns up to MAX_LABELS_PER_ENTRY labels.
+/// Keyword-only Tier 1 labels — no embedding or prototypes needed.
+/// Used for child memory label enrichment during consolidation (KS72).
+/// Runs the rule-based portion of Tier 1: temporal, action, memtype, entity extraction,
+/// and topic keyword matching. ~0.01ms per call.
+pub fn keyword_labels(content: &str) -> Vec<String> {
+    let mut labels: Vec<String> = Vec::new();
+    keyword_labels_into(content, &mut labels);
+    labels.truncate(MAX_LABELS_PER_ENTRY);
+    labels
+}
+
 pub fn generate_tier1_labels(
     content: &str,
     embedding: &[f32],
@@ -329,6 +340,16 @@ pub fn generate_tier1_labels(
     // 1. Prototype cosine matching (primary — handles implicit labels)
     labels.extend(prototypes.classify(embedding));
 
+    // 2. Rule-based keyword matching (shared with keyword_labels())
+    keyword_labels_into(content, &mut labels);
+
+    // Cap at max
+    labels.truncate(MAX_LABELS_PER_ENTRY);
+    labels
+}
+
+/// Shared keyword classification logic used by both generate_tier1_labels and keyword_labels.
+fn keyword_labels_into(content: &str, labels: &mut Vec<String>) {
     // 2. Rule-based temporal detection
     let lower = content.to_lowercase();
     if contains_any(
@@ -344,7 +365,7 @@ pub fn generate_tier1_labels(
             "regularly",
         ],
     ) {
-        push_unique(&mut labels, "temporal:recurring");
+        push_unique(labels, "temporal:recurring");
     }
     if contains_any(
         &lower,
@@ -375,7 +396,7 @@ pub fn generate_tier1_labels(
             "weeks ago",
         ],
     ) {
-        push_unique(&mut labels, "temporal:past");
+        push_unique(labels, "temporal:past");
     }
     if contains_any(
         &lower,
@@ -411,7 +432,7 @@ pub fn generate_tier1_labels(
             ],
         ))
     {
-        push_unique(&mut labels, "temporal:future");
+        push_unique(labels, "temporal:future");
     }
     if contains_any(
         &lower,
@@ -423,7 +444,7 @@ pub fn generate_tier1_labels(
             "this week",
         ],
     ) {
-        push_unique(&mut labels, "temporal:current");
+        push_unique(labels, "temporal:current");
     }
 
     // 2b. Rule-based action:learning detection (KS68 PT-3)
@@ -445,7 +466,7 @@ pub fn generate_tier1_labels(
             "kanji",
         ],
     ) {
-        push_unique(&mut labels, "action:learning");
+        push_unique(labels, "action:learning");
     }
 
     // 2c. Preference update detection (KS68 KU-3)
@@ -465,7 +486,7 @@ pub fn generate_tier1_labels(
             "transitioned to",
         ],
     ) {
-        push_unique(&mut labels, "memtype:preference_update");
+        push_unique(labels, "memtype:preference_update");
     }
 
     // 2d. Introduction/identity memory detection (KS68 IE-1)
@@ -473,7 +494,7 @@ pub fn generate_tier1_labels(
         &lower,
         &["my name is", "i am a ", "i'm a ", "call me ", "i go by"],
     ) {
-        push_unique(&mut labels, "memtype:intro");
+        push_unique(labels, "memtype:intro");
     }
 
     // 3. Simple entity extraction — capitalized multi-char words not at sentence start
@@ -504,13 +525,9 @@ pub fn generate_tier1_labels(
             && !is_common_word(clean)
         {
             let entity = format!("entity:{}", clean.to_lowercase());
-            push_unique(&mut labels, &entity);
+            push_unique(labels, &entity);
         }
     }
-
-    // Cap at max
-    labels.truncate(MAX_LABELS_PER_ENTRY);
-    labels
 }
 
 /// Classify a query into label categories for the D6 merge.

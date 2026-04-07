@@ -351,6 +351,18 @@ pub fn consolidate(
                         }
                     }
 
+                    // KS72: Run keyword-only Tier 1 on child's OWN text and merge.
+                    // Parent labels are broad (e.g., "topic:technology"); child-specific
+                    // keywords add precise labels (e.g., "topic:tools:editor" for Neovim).
+                    // This enables label_topic_boost to fire for specific queries.
+                    let child_keywords = crate::labels::keyword_labels(fact_text);
+                    for label in child_keywords {
+                        if !child.labels.contains(&label) {
+                            child.labels.push(label);
+                        }
+                    }
+                    child.labels.truncate(crate::labels::MAX_LABELS_PER_ENTRY);
+
                     // Extract structured triple if possible (KS61 + KS67 subject fallback)
                     if let Some(triple) = extract_triples(fact_text) {
                         child.triples.push(triple);
