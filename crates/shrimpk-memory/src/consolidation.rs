@@ -366,6 +366,31 @@ pub fn consolidate(
                         });
                     }
 
+                    // KS71 P2: same-subject-predicate dedup — update existing child
+                    // instead of creating a duplicate (Graphiti pattern).
+                    if let Some(existing_idx) =
+                        find_duplicate_child(store, &parent_id, &child.subject, fact_text)
+                    {
+                        if let Some(existing) = store.entry_at_mut(existing_idx) {
+                            tracing::debug!(
+                                existing_idx,
+                                old_content = %existing.content,
+                                new_content = %fact_text,
+                                subject = ?child.subject,
+                                "KS71 P2: updating existing child (subject+predicate dedup)"
+                            );
+                            existing.content = fact_text.to_string();
+                            existing.embedding = embedding.clone();
+                            existing.confidence = child.confidence;
+                            existing.triples = child.triples.clone();
+                            // Update LSH index for the updated embedding
+                            if !config.child_rescue_only {
+                                lsh.insert(existing_idx as u32, &embedding);
+                            }
+                        }
+                        continue;
+                    }
+
                     let child_idx = store.add(child) as u32;
                     // Only index children in LSH/Bloom when they participate in direct ranking.
                     // When child_rescue_only is true, children are only accessed via Pipe B
@@ -748,6 +773,41 @@ fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
 // ===========================================================================
 // Relationship detection (KS18 Track 4)
 // ===========================================================================
+
+/// Find an existing child of the same parent with matching subject and relationship type.
+///
+/// Returns the store index of the existing child if found, so the caller can update
+/// it instead of creating a duplicate. Implements the Graphiti "same-subject-predicate
+/// dedup" pattern (KS71 P2).
+fn find_duplicate_child(
+    store: &crate::store::EchoStore,
+    parent_id: &shrimpk_core::MemoryId,
+    new_subject: &Option<String>,
+    new_fact_text: &str,
+) -> Option<usize> {
+    let new_subj = new_subject.as_deref()?; // no subject → can't dedup
+    let new_rel = detect_relationship(new_fact_text);
+
+    for &child_idx in store.children_of(parent_id) {
+        let child = store.entry_at(child_idx)?;
+        // Match subject (case-insensitive)
+        let child_subj = child.subject.as_deref()?;
+        if !child_subj.eq_ignore_ascii_case(new_subj) {
+            continue;
+        }
+        // Match relationship category via detect_relationship on the existing child's content
+        let child_rel = detect_relationship(&child.content);
+        let same_rel = match (&child_rel, &new_rel) {
+            (None, None) => true,
+            (Some(a), Some(b)) => std::mem::discriminant(a) == std::mem::discriminant(b),
+            _ => false,
+        };
+        if same_rel {
+            return Some(child_idx);
+        }
+    }
+    None
+}
 
 /// Multi-signal quality gate for extracted facts (KS71).
 ///
