@@ -682,7 +682,7 @@ fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
 
     if !DEGENERATE_SUBJECTS
         .iter()
-        .any(|d| subj_lower == *d || subj_lower.starts_with(d))
+        .any(|d| subj_lower == *d || (d.contains(' ') && subj_lower.starts_with(d)))
     {
         return subject.to_string(); // Already a real entity
     }
@@ -798,7 +798,10 @@ fn find_duplicate_child(
     let embeddings = store.all_embeddings();
 
     for &child_idx in store.children_of(parent_id) {
-        let child = store.entry_at(child_idx)?;
+        let child = match store.entry_at(child_idx) {
+            Some(c) => c,
+            None => continue,
+        };
         // Match subject (case-insensitive)
         let child_subj = child.subject.as_deref().unwrap_or("");
         if child_subj.is_empty() || !child_subj.eq_ignore_ascii_case(new_subj) {
