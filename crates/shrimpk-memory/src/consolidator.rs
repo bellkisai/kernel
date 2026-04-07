@@ -77,6 +77,10 @@ pub struct OllamaConsolidator {
     url: String,
     model: String,
     agent: ureq::Agent,
+    /// Separate agent for doc2query calls with a longer timeout (120s).
+    /// Doc2query generation on small models (qwen2.5:1.5b) can take 8-60s+
+    /// depending on fact complexity; the default 60s agent silently times out.
+    doc2query_agent: ureq::Agent,
     system_prompt: Option<String>,
 }
 
@@ -87,10 +91,16 @@ impl OllamaConsolidator {
                 .timeout_global(Some(std::time::Duration::from_secs(60)))
                 .build(),
         );
+        let doc2query_agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_global(Some(std::time::Duration::from_secs(120)))
+                .build(),
+        );
         Self {
             url,
             model,
             agent,
+            doc2query_agent,
             system_prompt,
         }
     }
@@ -583,7 +593,7 @@ impl Consolidator for OllamaConsolidator {
             "External data transmission (doc2query expansion)"
         );
 
-        let mut resp = match self.agent.post(&endpoint).send_json(&body) {
+        let mut resp = match self.doc2query_agent.post(&endpoint).send_json(&body) {
             Ok(r) => r,
             Err(e) => {
                 tracing::debug!(provider = "ollama", error = %e, "doc2query: Ollama unreachable");

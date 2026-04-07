@@ -40,6 +40,8 @@ pub struct ConsolidationResult {
     pub labels_enriched: usize,
     /// Number of memories whose importance score was recomputed during this pass.
     pub importance_recomputed: usize,
+    /// Number of facts that received doc2query expansion (KS72).
+    pub doc2query_expansions: usize,
     /// Wall-clock duration of the consolidation pass in milliseconds.
     pub duration_ms: u64,
 }
@@ -306,6 +308,7 @@ pub fn consolidate(
                             fact_text,
                             questions.join(" ")
                         );
+                        result.doc2query_expansions += 1;
                         tracing::debug!(
                             fact = %fact_text,
                             n_questions = questions.len(),

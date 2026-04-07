@@ -2847,6 +2847,7 @@ impl EchoEngine {
                     decayed = result.echo_counts_decayed,
                     relationships = result.relationships_created,
                     supersedes = result.supersedes_created,
+                    doc2query = result.doc2query_expansions,
                     ms = result.duration_ms,
                     "Consolidation complete"
                 );
