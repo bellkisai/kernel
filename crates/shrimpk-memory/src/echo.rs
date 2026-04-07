@@ -2655,6 +2655,9 @@ impl EchoEngine {
         // Persist community summaries sidecar (KS64)
         crate::persistence::save_community_summaries(&store, &self.config.data_dir)?;
 
+        // Persist entity store sidecar (KS73)
+        crate::persistence::save_entities(&store, &self.config.data_dir)?;
+
         Ok(())
     }
 
@@ -2687,6 +2690,11 @@ impl EchoEngine {
             crate::persistence::load_community_summaries(&mut loaded_store, &config.data_dir)
         {
             tracing::warn!(error = %e, "Failed to load community summaries, continuing without");
+        }
+
+        // Load entity store sidecar (KS73)
+        if let Err(e) = crate::persistence::load_entities(&mut loaded_store, &config.data_dir) {
+            tracing::warn!(error = %e, "Failed to load entities, continuing without");
         }
 
         // Rebuild text LSH index from loaded embeddings

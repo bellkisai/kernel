@@ -148,6 +148,12 @@ impl EchoStore {
                 }
             }
         }
+        // KS73: prune entity memory_refs on remove
+        if let Some(ref entity_id) = self.entries[index].entity_id
+            && let Some(frame) = self.entity_store.get_mut(entity_id)
+        {
+            frame.memory_refs.retain(|id| id != &self.entries[index].id);
+        }
 
         if index != last_index {
             // Swap the last entry into this slot
