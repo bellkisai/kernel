@@ -1551,6 +1551,12 @@ impl EchoEngine {
                     final_score *= entry.confidence as f64;
                 }
 
+                // KS71: soft invalidation demotion — superseded facts are preserved
+                // but heavily demoted so active facts rank higher.
+                if entry.superseded_at.is_some() {
+                    final_score *= 0.5;
+                }
+
                 // Resolve matched child content (KS69 T1):
                 // - Pipe B rescue: use the child text that triggered rescue
                 // - Direct child in Pipe A: use the child's own content

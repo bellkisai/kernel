@@ -140,6 +140,9 @@ pub struct MemoryMeta {
     /// Knowledge graph triples extracted during consolidation (KS61).
     #[serde(default)]
     pub triples: Vec<shrimpk_core::Triple>,
+    /// When this memory (or its parent) was superseded by a newer fact (KS71).
+    #[serde(default)]
+    pub superseded_at: Option<DateTime<Utc>>,
 }
 
 impl MemoryMeta {
@@ -172,6 +175,7 @@ impl MemoryMeta {
             importance_computed_at: entry.importance_computed_at,
             retrieval_history_secs: entry.retrieval_history_secs.clone(),
             triples: entry.triples.clone(),
+            superseded_at: entry.superseded_at,
         }
     }
 
@@ -206,6 +210,7 @@ impl MemoryMeta {
             importance_computed_at: self.importance_computed_at,
             retrieval_history_secs: self.retrieval_history_secs,
             triples: self.triples,
+            superseded_at: self.superseded_at,
         }
     }
 }

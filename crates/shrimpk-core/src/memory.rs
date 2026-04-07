@@ -269,6 +269,11 @@ pub struct MemoryEntry {
     /// Retrieval timestamps as seconds since UNIX epoch (ring buffer, cap 16). Future: full BLA.
     #[serde(default)]
     pub retrieval_history_secs: Vec<u32>,
+    /// When this memory (or its parent) was superseded by a newer fact.
+    /// Soft invalidation: memory is preserved but deprioritized in scoring.
+    /// None = active (not superseded).
+    #[serde(default)]
+    pub superseded_at: Option<DateTime<Utc>>,
 }
 
 fn default_confidence() -> f32 {
@@ -306,6 +311,7 @@ impl MemoryEntry {
             activation_cache: 0.0,
             importance_computed_at: None,
             retrieval_history_secs: Vec::new(),
+            superseded_at: None,
         }
     }
 
@@ -845,6 +851,42 @@ mod tests {
         assert_eq!(
             deserialized.vision_embedding,
             Some(vec![0.1, 0.2, 0.3, 0.4])
+        );
+    }
+
+    // --- Soft invalidation (KS71) ---
+
+    #[test]
+    fn superseded_at_defaults_to_none() {
+        let entry = MemoryEntry::new("test".into(), vec![], "test".into());
+        assert!(entry.superseded_at.is_none());
+    }
+
+    #[test]
+    fn superseded_at_serde_roundtrip() {
+        let mut entry = MemoryEntry::new("old job fact".into(), vec![1.0], "test".into());
+        let ts = Utc::now();
+        entry.superseded_at = Some(ts);
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: MemoryEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.superseded_at, Some(ts));
+    }
+
+    #[test]
+    fn superseded_at_defaults_on_legacy_json() {
+        let json = r#"{
+            "id":"00000000-0000-0000-0000-000000000000",
+            "content":"legacy","masked_content":null,
+            "embedding":[],"source":"test",
+            "sensitivity":"Public",
+            "created_at":"2025-01-01T00:00:00Z",
+            "last_echoed":null,"echo_count":0
+        }"#;
+        let entry: MemoryEntry = serde_json::from_str(json).unwrap();
+        assert!(
+            entry.superseded_at.is_none(),
+            "Legacy JSON without superseded_at should deserialize to None"
         );
     }
 }
