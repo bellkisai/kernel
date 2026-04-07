@@ -33,7 +33,7 @@ fn micro_config(data_dir: PathBuf) -> EchoConfig {
         ram_budget_bytes: 100_000_000,
         supersedes_demotion: 0.15,
         enrichment_model: std::env::var("SHRIMPK_ENRICHMENT_MODEL")
-            .unwrap_or_else(|_| "llama3.2:3b".to_string()),
+            .unwrap_or_else(|_| "qwen2.5:1.5b".to_string()),
         data_dir,
         embedding_dim: 384,
         ..Default::default()
