@@ -1099,4 +1099,47 @@ mod tests {
             "Prompt should reflect max_facts parameter"
         );
     }
+
+    #[test]
+    fn parse_doc2query_valid_json() {
+        let input = r#"{"questions": ["What editor does the user use?", "What IDE did they switch to?", "Did they stop using VS Code?"]}"#;
+        let result = parse_doc2query_response(input);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "What editor does the user use?");
+    }
+
+    #[test]
+    fn parse_doc2query_empty_questions() {
+        let input = r#"{"questions": []}"#;
+        let result = parse_doc2query_response(input);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_doc2query_malformed_json() {
+        let result = parse_doc2query_response("not json at all");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_doc2query_caps_at_three() {
+        let input = r#"{"questions": ["q1", "q2", "q3", "q4", "q5"]}"#;
+        let result = parse_doc2query_response(input);
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn parse_doc2query_filters_empty_strings() {
+        let input = r#"{"questions": ["valid question", "", "  ", "another valid"]}"#;
+        let result = parse_doc2query_response(input);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "valid question");
+        assert_eq!(result[1], "another valid");
+    }
+
+    #[test]
+    fn noop_expand_with_questions_returns_empty() {
+        let noop = NoopConsolidator;
+        assert!(noop.expand_with_questions("any fact").is_empty());
+    }
 }
