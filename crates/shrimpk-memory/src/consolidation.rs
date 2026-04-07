@@ -285,15 +285,12 @@ pub fn consolidate(
                 let mut fact_embeddings: Vec<Vec<f32>> = Vec::with_capacity(fact_entries.len());
 
                 for (fact_text, structured_fact) in &fact_entries {
-                    // KS69: confidence gate — skip low-confidence extractions
-                    if let Some(sf) = structured_fact
-                        && let Some(conf) = sf.confidence
-                        && conf < 0.5
-                    {
+                    // KS71: multi-signal quality gate (verb, length, noise patterns)
+                    if let Some(reason) = fact_quality_reject(fact_text) {
                         tracing::debug!(
                             fact = %fact_text,
-                            confidence = conf,
-                            "KS69: skipping low-confidence fact"
+                            reason,
+                            "KS71: skipping low-quality fact"
                         );
                         fact_embeddings.push(Vec::new()); // maintain index alignment
                         continue;
@@ -333,12 +330,13 @@ pub fn consolidate(
                     child.enriched = true;
 
                     // KS69: propagate confidence + subject from structured extraction
+                    // KS71: fix degenerate subjects before storing on child
                     if let Some(sf) = structured_fact {
                         if let Some(conf) = sf.confidence {
                             child.confidence = conf;
                         }
                         if let Some(ref subj) = sf.subject {
-                            child.subject = Some(subj.clone());
+                            child.subject = Some(fix_degenerate_subject(subj, fact_text));
                         }
                     }
 
@@ -359,11 +357,43 @@ pub fn consolidate(
                     } else if let Some(sf) = structured_fact
                         && let Some(ref subj) = sf.subject
                     {
+                        // KS71: use fixed subject in triple too
+                        let fixed = fix_degenerate_subject(subj, fact_text);
                         child.triples.push(shrimpk_core::Triple {
-                            subject: subj.clone(),
+                            subject: fixed,
                             predicate: shrimpk_core::TriplePredicate::Custom(fact_text.to_string()),
                             object: fact_text.to_string(),
                         });
+                    }
+
+                    // KS71 P2: same-subject-predicate dedup — update existing child
+                    // instead of creating a duplicate (Graphiti pattern).
+                    if let Some(existing_idx) =
+                        find_duplicate_child(store, &parent_id, &child.subject, &embedding)
+                    {
+                        if let Some(existing) = store.entry_at_mut(existing_idx) {
+                            tracing::debug!(
+                                existing_idx,
+                                old_content = %existing.content,
+                                new_content = %fact_text,
+                                subject = ?child.subject,
+                                "KS71 P2: updating existing child (subject+similarity dedup)"
+                            );
+                            // Keep the longer/more detailed fact text
+                            if fact_text.len() > existing.content.len() {
+                                existing.content = fact_text.to_string();
+                                existing.embedding = embedding.clone();
+                                existing.triples = child.triples.clone();
+                                // Update LSH index for the new embedding
+                                if !config.child_rescue_only {
+                                    lsh.insert(existing_idx as u32, &embedding);
+                                }
+                            }
+                            // Always refresh confidence from newer extraction
+                            existing.confidence = child.confidence;
+                        }
+                        fact_embeddings.push(embedding);
+                        continue;
                     }
 
                     let child_idx = store.add(child) as u32;
@@ -461,6 +491,28 @@ pub fn consolidate(
                             }
                         }
                     }
+                    // KS71: soft-invalidate children of the old parent.
+                    // old_idx is the superseded child; its parent_id points to the
+                    // old parent whose children should be deprioritized.
+                    if let Some(old_parent_id) =
+                        store.entry_at(*old_idx).and_then(|e| e.parent_id.clone())
+                    {
+                        let child_indices = store.children_of(&old_parent_id).to_vec();
+                        let now_utc = Utc::now();
+                        for child_idx in child_indices {
+                            if let Some(child) = store.entry_at_mut(child_idx)
+                                && child.superseded_at.is_none()
+                            {
+                                child.superseded_at = Some(now_utc);
+                                tracing::debug!(
+                                    child_idx,
+                                    parent = %old_parent_id,
+                                    "KS71: soft-invalidated child of superseded parent"
+                                );
+                            }
+                        }
+                    }
+
                     result.supersedes_created += 1;
                     tracing::debug!(
                         old_idx,
@@ -588,12 +640,234 @@ pub fn consolidate(
 }
 
 // ===========================================================================
+// Degenerate subject post-processing (KS71)
+// ===========================================================================
+
+/// Degenerate subjects that small LLMs return instead of real entities.
+const DEGENERATE_SUBJECTS: &[&str] = &[
+    "the user",
+    "i",
+    "me",
+    "my",
+    "us",
+    "we",
+    "the person",
+    "daily routine",
+    "my daily routine",
+    "personal machine",
+    "development work",
+    "all my",
+    "user",
+    "someone",
+    "this",
+    "he",
+    "she",
+    "they",
+    "it",
+    "you",
+    "him",
+    "her",
+    "them",
+    "his",
+    "its",
+];
+
+/// Post-process degenerate subjects from LLM extraction (KS71).
+///
+/// When a small model returns "the user", "I", "me", etc. as the subject,
+/// this function attempts to extract the real topic entity from the fact text.
+/// Falls back to the original subject if no entity can be found.
+fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
+    let subj_lower = subject.trim().to_lowercase();
+
+    if !DEGENERATE_SUBJECTS
+        .iter()
+        .any(|d| subj_lower == *d || (d.contains(' ') && subj_lower.starts_with(d)))
+    {
+        return subject.to_string(); // Already a real entity
+    }
+
+    // Strategy 1: Find prepositional-phrase entities; latest position wins.
+    // The first word after the preposition MUST be capitalized.
+    // E.g. "The user switched from VS Code to Neovim" → "Neovim" (latest prep)
+    // E.g. "I started at Stripe as a senior engineer" → "Stripe"
+    let text_lower = fact_text.to_lowercase();
+    let prepositions = ["to ", "at ", "from ", "in ", "with ", "for "];
+    let mut best_entity: Option<(usize, String)> = None;
+
+    for prep in &prepositions {
+        // Find the last word-boundary-valid occurrence of the preposition.
+        let mut search_end = text_lower.len();
+        let mut pos_opt: Option<usize> = None;
+        while let Some(p) = text_lower[..search_end].rfind(prep) {
+            if p == 0 || text_lower.as_bytes()[p - 1] == b' ' {
+                pos_opt = Some(p);
+                break;
+            }
+            // Not at a word boundary, keep searching earlier
+            search_end = p;
+        }
+        if let Some(pos) = pos_opt {
+            let after = &fact_text[pos + prep.len()..];
+            let words: Vec<&str> = after.split_whitespace().collect();
+
+            // First word must start with uppercase
+            if words.is_empty() || !words[0].chars().next().is_some_and(|c| c.is_uppercase()) {
+                continue;
+            }
+
+            // Collect capitalized words (max 3), skipping short connectors only
+            // when the next word is also capitalized.
+            let mut parts: Vec<&str> = vec![words[0]];
+            let mut wi = 1;
+            while wi < words.len() && parts.len() < 3 {
+                let w = words[wi];
+                if w.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    parts.push(w);
+                } else {
+                    break;
+                }
+                wi += 1;
+            }
+
+            let entity = parts.join(" ");
+            let trimmed = entity
+                .trim_end_matches(|c: char| c.is_ascii_punctuation())
+                .to_string();
+            if trimmed.len() > 2 {
+                let dominated = best_entity
+                    .as_ref()
+                    .is_none_or(|(prev_pos, _)| pos > *prev_pos);
+                if dominated {
+                    best_entity = Some((pos, trimmed));
+                }
+            }
+        }
+    }
+
+    if let Some((_, ref e)) = best_entity
+        && !e.is_empty()
+    {
+        return e.clone();
+    }
+
+    // Strategy 2: First capitalized proper noun (skip sentence-start and common words).
+    let skip_words: &[&str] = &[
+        "The", "A", "An", "I", "My", "In", "At", "To", "From", "With", "For", "He", "She", "They",
+        "It", "We", "You", "His", "Her", "Their", "Its", "This", "That", "User", "Person",
+    ];
+    let words: Vec<&str> = fact_text.split_whitespace().collect();
+    for (i, word) in words.iter().enumerate() {
+        if i > 0
+            && word.chars().next().is_some_and(|c| c.is_uppercase())
+            && !skip_words.contains(word)
+        {
+            let cleaned = word
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string();
+            if cleaned.len() > 1 {
+                return cleaned;
+            }
+        }
+    }
+
+    // Strategy 3: no entity found — keep the original.
+    subject.to_string()
+}
+
+// ===========================================================================
 // Relationship detection (KS18 Track 4)
 // ===========================================================================
 
-/// Detect a typed relationship from a fact string using regex patterns.
+/// Find an existing child of the same parent with matching subject and semantically
+/// similar content (cosine > 0.75).
 ///
-/// Scans the fact text for known relationship patterns:
+/// Returns the store index of the existing child if found, so the caller can update
+/// it instead of creating a duplicate. Implements the Graphiti "same-subject-predicate
+/// dedup" pattern (KS71 P2).
+fn find_duplicate_child(
+    store: &crate::store::EchoStore,
+    parent_id: &shrimpk_core::MemoryId,
+    new_subject: &Option<String>,
+    new_embedding: &[f32],
+) -> Option<usize> {
+    let new_subj = new_subject.as_deref()?; // no subject → can't dedup
+    if new_subj.is_empty() {
+        return None;
+    }
+    let embeddings = store.all_embeddings();
+
+    for &child_idx in store.children_of(parent_id) {
+        let child = match store.entry_at(child_idx) {
+            Some(c) => c,
+            None => continue,
+        };
+        // Match subject (case-insensitive)
+        let child_subj = child.subject.as_deref().unwrap_or("");
+        if child_subj.is_empty() || !child_subj.eq_ignore_ascii_case(new_subj) {
+            continue;
+        }
+        // Semantic similarity check — same subject but different meaning
+        // (e.g. "Sam works at Stripe" vs "Sam left Stripe") should NOT dedup
+        if let Some(existing_emb) = embeddings.get(child_idx) {
+            let sim = crate::similarity::cosine_similarity(new_embedding, existing_emb);
+            if sim > 0.75 {
+                return Some(child_idx);
+            }
+        }
+    }
+    None
+}
+
+/// Multi-signal quality gate for extracted facts (KS71).
+///
+/// Returns `Some(reason)` if the fact should be rejected, `None` if it passes.
+/// Confidence alone is useless with small models (qwen2.5:1.5b returns 1.0 for everything).
+/// Subject repair is handled by `fix_degenerate_subject()` (KS71) before this gate runs.
+fn fact_quality_reject(fact_text: &str) -> Option<&'static str> {
+    // 1. Minimum length — reject fragments
+    if fact_text.len() < 15 {
+        return Some("too short (<15 chars)");
+    }
+
+    // 2. Must contain a verb — reject noun phrases and fragments
+    let has_verb = fact_text.contains(" is ")
+        || fact_text.contains(" are ")
+        || fact_text.contains(" was ")
+        || fact_text.contains(" were ")
+        || fact_text.contains(" has ")
+        || fact_text.contains(" have ")
+        || fact_text.contains(" works ")
+        || fact_text.contains(" lives ")
+        || fact_text.contains(" uses ")
+        || fact_text.contains(" prefers ")
+        || fact_text.contains(" started ")
+        || fact_text.contains(" joined ")
+        || fact_text.contains(" switched ")
+        || fact_text.contains(" moved ")
+        || fact_text.contains(" visited ")
+        || fact_text.contains(" learned ")
+        || fact_text.contains(" practices ")
+        || fact_text.contains(" runs ")
+        || fact_text.contains(" built ")
+        || fact_text.contains(" leads ")
+        || fact_text.ends_with("ing")
+        || fact_text.contains("'s ")
+        || fact_text.contains("'m ");
+    if !has_verb {
+        return Some("no verb detected");
+    }
+
+    // 3. Reject noise patterns — common LLM extraction artifacts
+    let lower = fact_text.to_lowercase();
+    const NOISE_PREFIXES: &[&str] = &["all my ", "closer to ", "my daily ", "development work"];
+    if NOISE_PREFIXES.iter().any(|p| lower.starts_with(p)) {
+        return Some("noise pattern");
+    }
+
+    None
+}
+
 /// - "works at" / "employed at" / "joined" -> WorksAt
 /// - "lives in" / "moved to" / "based in" -> LivesIn
 /// - "prefers" / "likes" / "uses" / "switched to" -> PrefersTool
@@ -2288,6 +2562,148 @@ mod tests {
             "Labels should be truncated at MAX ({}), got {}",
             crate::labels::MAX_LABELS_PER_ENTRY,
             updated.labels.len()
+        );
+    }
+
+    // ===================================================================
+    // fix_degenerate_subject tests (KS71)
+    // ===================================================================
+
+    #[test]
+    fn fix_degenerate_subject_passes_real_entities() {
+        assert_eq!(
+            fix_degenerate_subject("Neovim", "Sam uses Neovim as his primary editor"),
+            "Neovim"
+        );
+        assert_eq!(
+            fix_degenerate_subject("ShrimPK", "ShrimPK is a push-based memory kernel"),
+            "ShrimPK"
+        );
+        assert_eq!(
+            fix_degenerate_subject("Stripe", "Stripe is a payment company"),
+            "Stripe"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_extracts_prep_entity() {
+        // "to X" — last preposition wins
+        assert_eq!(
+            fix_degenerate_subject("the user", "The user switched from VS Code to Neovim"),
+            "Neovim"
+        );
+        // "at X"
+        assert_eq!(
+            fix_degenerate_subject("I", "I started at Stripe as a senior engineer"),
+            "Stripe"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_extracts_proper_noun_fallback() {
+        // No preposition with capitalized object — falls back to first proper noun
+        assert_eq!(
+            fix_degenerate_subject("me", "closest to me is the Gracie gym"),
+            "Gracie"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_handles_daily_routine() {
+        let result = fix_degenerate_subject(
+            "daily routine",
+            "My daily routine includes jiu-jitsu at 6am",
+        );
+        // "6am" is too short, so strategy 2 fires — no proper nouns either.
+        // Falls back to original. Acceptable — fact text itself carries the value.
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn fix_degenerate_subject_case_insensitive_detection() {
+        assert_eq!(
+            fix_degenerate_subject("The User", "The User prefers Rust for systems work"),
+            "Rust"
+        );
+        assert_eq!(
+            fix_degenerate_subject("ME", "ME switched to Neovim last week"),
+            "Neovim"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_multi_word_entity() {
+        assert_eq!(
+            fix_degenerate_subject("the user", "The user works at Red Hat Inc"),
+            "Red Hat Inc"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_strips_trailing_punctuation() {
+        assert_eq!(fix_degenerate_subject("I", "I work at Google."), "Google");
+    }
+
+    #[test]
+    fn fix_degenerate_subject_no_entity_returns_original() {
+        // All lowercase, no prepositions with capitalized objects
+        assert_eq!(
+            fix_degenerate_subject("the user", "the user likes to run every morning"),
+            "the user"
+        );
+    }
+
+    #[test]
+    fn quality_gate_accepts_valid_facts() {
+        // Has verb, sufficient length
+        assert!(
+            fact_quality_reject("Sam works at Stripe as a senior engineer on billing").is_none()
+        );
+        assert!(fact_quality_reject("The user practices jiu-jitsu at Gracie gym").is_none());
+        assert!(fact_quality_reject("She started at Google in 2019").is_none());
+        // Gerund ending counts as verb signal
+        assert!(fact_quality_reject("Currently rock climbing").is_none());
+    }
+
+    #[test]
+    fn quality_gate_rejects_short_fragments() {
+        assert_eq!(fact_quality_reject("Neovim"), Some("too short (<15 chars)"));
+        assert_eq!(
+            fact_quality_reject("switched"),
+            Some("too short (<15 chars)")
+        );
+        assert_eq!(
+            fact_quality_reject("daily routine"),
+            Some("too short (<15 chars)")
+        );
+    }
+
+    #[test]
+    fn quality_gate_rejects_no_verb() {
+        // Long enough but no verb pattern
+        assert_eq!(
+            fact_quality_reject("senior engineer at Stripe billing team"),
+            Some("no verb detected")
+        );
+    }
+
+    #[test]
+    fn quality_gate_rejects_noise_patterns() {
+        assert_eq!(
+            fact_quality_reject("all my development work is in Rust"),
+            Some("noise pattern")
+        );
+        assert_eq!(
+            fact_quality_reject("closer to the Stripe office is better"),
+            Some("noise pattern")
+        );
+        assert_eq!(
+            fact_quality_reject("my daily routine is wake up early"),
+            Some("noise pattern")
+        );
+        assert_eq!(
+            fact_quality_reject("Development work is mostly in Go"),
+            Some("noise pattern")
         );
     }
 }
