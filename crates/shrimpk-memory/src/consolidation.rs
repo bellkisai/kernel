@@ -369,7 +369,7 @@ pub fn consolidate(
                     // KS71 P2: same-subject-predicate dedup — update existing child
                     // instead of creating a duplicate (Graphiti pattern).
                     if let Some(existing_idx) =
-                        find_duplicate_child(store, &parent_id, &child.subject, fact_text)
+                        find_duplicate_child(store, &parent_id, &child.subject, &embedding)
                     {
                         if let Some(existing) = store.entry_at_mut(existing_idx) {
                             tracing::debug!(
@@ -377,17 +377,22 @@ pub fn consolidate(
                                 old_content = %existing.content,
                                 new_content = %fact_text,
                                 subject = ?child.subject,
-                                "KS71 P2: updating existing child (subject+predicate dedup)"
+                                "KS71 P2: updating existing child (subject+similarity dedup)"
                             );
-                            existing.content = fact_text.to_string();
-                            existing.embedding = embedding.clone();
-                            existing.confidence = child.confidence;
-                            existing.triples = child.triples.clone();
-                            // Update LSH index for the updated embedding
-                            if !config.child_rescue_only {
-                                lsh.insert(existing_idx as u32, &embedding);
+                            // Keep the longer/more detailed fact text
+                            if fact_text.len() > existing.content.len() {
+                                existing.content = fact_text.to_string();
+                                existing.embedding = embedding.clone();
+                                existing.triples = child.triples.clone();
+                                // Update LSH index for the new embedding
+                                if !config.child_rescue_only {
+                                    lsh.insert(existing_idx as u32, &embedding);
+                                }
                             }
+                            // Always refresh confidence from newer extraction
+                            existing.confidence = child.confidence;
                         }
+                        fact_embeddings.push(embedding);
                         continue;
                     }
 
@@ -774,7 +779,8 @@ fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
 // Relationship detection (KS18 Track 4)
 // ===========================================================================
 
-/// Find an existing child of the same parent with matching subject and relationship type.
+/// Find an existing child of the same parent with matching subject and semantically
+/// similar content (cosine > 0.75).
 ///
 /// Returns the store index of the existing child if found, so the caller can update
 /// it instead of creating a duplicate. Implements the Graphiti "same-subject-predicate
@@ -783,27 +789,28 @@ fn find_duplicate_child(
     store: &crate::store::EchoStore,
     parent_id: &shrimpk_core::MemoryId,
     new_subject: &Option<String>,
-    new_fact_text: &str,
+    new_embedding: &[f32],
 ) -> Option<usize> {
     let new_subj = new_subject.as_deref()?; // no subject → can't dedup
-    let new_rel = detect_relationship(new_fact_text);
+    if new_subj.is_empty() {
+        return None;
+    }
+    let embeddings = store.all_embeddings();
 
     for &child_idx in store.children_of(parent_id) {
         let child = store.entry_at(child_idx)?;
         // Match subject (case-insensitive)
-        let child_subj = child.subject.as_deref()?;
-        if !child_subj.eq_ignore_ascii_case(new_subj) {
+        let child_subj = child.subject.as_deref().unwrap_or("");
+        if child_subj.is_empty() || !child_subj.eq_ignore_ascii_case(new_subj) {
             continue;
         }
-        // Match relationship category via detect_relationship on the existing child's content
-        let child_rel = detect_relationship(&child.content);
-        let same_rel = match (&child_rel, &new_rel) {
-            (None, None) => true,
-            (Some(a), Some(b)) => std::mem::discriminant(a) == std::mem::discriminant(b),
-            _ => false,
-        };
-        if same_rel {
-            return Some(child_idx);
+        // Semantic similarity check — same subject but different meaning
+        // (e.g. "Sam works at Stripe" vs "Sam left Stripe") should NOT dedup
+        if let Some(existing_emb) = embeddings.get(child_idx) {
+            let sim = crate::similarity::cosine_similarity(new_embedding, existing_emb);
+            if sim > 0.75 {
+                return Some(child_idx);
+            }
         }
     }
     None
