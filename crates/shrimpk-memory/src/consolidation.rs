@@ -296,8 +296,27 @@ pub fn consolidate(
                         continue;
                     }
 
+                    // KS72: doc2query — generate predicted questions and build reformulated text
+                    let questions = consolidator.expand_with_questions(fact_text);
+                    let (embed_text, reformulated) = if questions.is_empty() {
+                        (fact_text.to_string(), None)
+                    } else {
+                        let expanded = format!(
+                            "{} Questions this fact answers: {}",
+                            fact_text,
+                            questions.join(" ")
+                        );
+                        tracing::debug!(
+                            fact = %fact_text,
+                            n_questions = questions.len(),
+                            "KS72: doc2query expansion applied"
+                        );
+                        (expanded.clone(), Some(expanded))
+                    };
+
+                    // Embed the reformulated text (includes question keywords for better recall)
                     let embedding = match embedder.lock() {
-                        Ok(mut e) => match e.embed_text(fact_text) {
+                        Ok(mut e) => match e.embed_text(&embed_text) {
                             Ok(emb) => emb,
                             Err(err) => {
                                 tracing::debug!(error = %err, "Failed to embed fact, skipping");
@@ -328,6 +347,7 @@ pub fn consolidate(
                     );
                     child.parent_id = Some(parent_id.clone());
                     child.enriched = true;
+                    child.reformulated = reformulated;
 
                     // KS69: propagate confidence + subject from structured extraction
                     // KS71: fix degenerate subjects before storing on child

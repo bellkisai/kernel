@@ -201,6 +201,16 @@ pub trait Consolidator: Send + Sync {
     fn summarize_cluster(&self, _memories: &[&str], _label: &str) -> Option<String> {
         None
     }
+
+    /// Generate predicted questions that a user might ask to retrieve this fact (KS72 doc2query).
+    ///
+    /// Returns up to 3 short questions. The caller concatenates them with the fact text
+    /// and embeds the expanded version, improving recall for question-style queries.
+    ///
+    /// Default: returns empty vec (no-op for consolidators without LLM access).
+    fn expand_with_questions(&self, _fact_text: &str) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

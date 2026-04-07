@@ -352,6 +352,28 @@ fn parse_combined_response(content: &str, max_facts: usize) -> ConsolidationOutp
     }
 }
 
+/// Parse the doc2query JSON response from the LLM.
+///
+/// Expects `{"questions": ["q1", "q2", "q3"]}`. Returns up to 3 questions.
+/// On any parse failure, returns an empty vec (graceful degradation).
+fn parse_doc2query_response(content: &str) -> Vec<String> {
+    let json: serde_json::Value = match serde_json::from_str(content) {
+        Ok(j) => j,
+        Err(_) => return Vec::new(),
+    };
+    json["questions"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .take(3)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 impl Consolidator for OllamaConsolidator {
     fn extract_facts(&self, text: &str, max_facts: usize) -> Vec<String> {
         let prompt = match &self.system_prompt {
@@ -514,6 +536,71 @@ impl Consolidator for OllamaConsolidator {
         } else {
             Some(trimmed.to_string())
         }
+    }
+
+    fn expand_with_questions(&self, fact_text: &str) -> Vec<String> {
+        let prompt = "Given a factual statement about a person, generate exactly 3 short questions \
+             that someone might ask to retrieve this fact. \
+             Return a JSON object with one key \"questions\" containing an array of 3 strings. \
+             Each question must be under 15 words.\n\n\
+             Example:\n\
+             Fact: \"The user switched from VS Code to Neovim\"\n\
+             Output: {\"questions\": [\"What editor does the user use?\", \
+             \"What IDE did they switch to?\", \"Did they stop using VS Code?\"]}\n\n\
+             Now generate questions for the fact below. Return ONLY the JSON object.";
+
+        let format_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "questions": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                }
+            },
+            "required": ["questions"]
+        });
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": fact_text}
+            ],
+            "stream": false,
+            "format": format_schema,
+            "options": {"temperature": 0.0, "num_predict": 200}
+        });
+
+        let endpoint = format!("{}/api/chat", self.url.trim_end_matches('/'));
+
+        let body_bytes = serde_json::to_vec(&body).unwrap_or_default();
+        tracing::info!(
+            target: "shrimpk::audit",
+            endpoint = %endpoint,
+            data_bytes = body_bytes.len(),
+            direction = "outbound",
+            component = "consolidator-doc2query",
+            "External data transmission (doc2query expansion)"
+        );
+
+        let mut resp = match self.agent.post(&endpoint).send_json(&body) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(provider = "ollama", error = %e, "doc2query: Ollama unreachable");
+                return Vec::new();
+            }
+        };
+
+        let json: serde_json::Value = match resp.body_mut().read_json() {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::debug!(provider = "ollama", error = %e, "doc2query: parse error");
+                return Vec::new();
+            }
+        };
+
+        let content = json["message"]["content"].as_str().unwrap_or("");
+        parse_doc2query_response(content)
     }
 }
 
