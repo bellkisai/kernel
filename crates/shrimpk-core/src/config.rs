@@ -350,7 +350,7 @@ fn default_ollama_url() -> String {
 }
 
 fn default_enrichment_model() -> String {
-    "llama3.2:3b".to_string()
+    "qwen2.5:1.5b".to_string()
 }
 
 fn default_max_facts_per_memory() -> usize {
