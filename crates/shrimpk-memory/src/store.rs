@@ -369,8 +369,9 @@ impl EchoStore {
 
     // --- Entity store API (KS73) ---
 
-    /// Scan text for known entity aliases (case-insensitive substring match).
-    /// Returns the first match found.
+    /// Scan text for known entity aliases (case-insensitive word-boundary match).
+    /// Returns the first match found. Longest aliases checked first so
+    /// "Sam Torres" matches before "Sam".
     pub fn resolve_entity(&self, text: &str) -> Option<EntityId> {
         let lower = text.to_lowercase();
         // Iterate longest aliases first for greedy matching
@@ -381,8 +382,15 @@ impl EchoStore {
             .collect();
         aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
         for (alias, eid) in aliases {
-            if lower.contains(alias) {
-                return Some(eid.clone());
+            if let Some(pos) = lower.find(alias) {
+                // Word boundary: char before and after must be non-alphanumeric
+                let before_ok = pos == 0 || !lower.as_bytes()[pos - 1].is_ascii_alphanumeric();
+                let after_pos = pos + alias.len();
+                let after_ok = after_pos >= lower.len()
+                    || !lower.as_bytes()[after_pos].is_ascii_alphanumeric();
+                if before_ok && after_ok {
+                    return Some(eid.clone());
+                }
             }
         }
         None

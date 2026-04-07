@@ -384,11 +384,10 @@ pub fn consolidate(
                     }
 
                     // KS73: resolve child's entity from subject
+                    // memory_refs maintained by store.add() — do NOT push here
                     if let Some(ref subject) = child.subject {
                         let entity_id = if let Some(id) = store.resolve_entity(subject) {
-                            // Known entity — link memory
                             if let Some(frame) = store.get_entity_mut(&id) {
-                                frame.memory_refs.push(child.id.clone());
                                 frame.updated_at = chrono::Utc::now();
                             }
                             Some(id)
@@ -413,11 +412,7 @@ pub fn consolidate(
                             } else {
                                 shrimpk_core::EntityKind::Other
                             };
-                            let id = store.create_entity(subject.clone(), kind);
-                            if let Some(frame) = store.get_entity_mut(&id) {
-                                frame.memory_refs.push(child.id.clone());
-                            }
-                            Some(id)
+                            Some(store.create_entity(subject.clone(), kind))
                         };
                         child.entity_id = entity_id;
                     }
