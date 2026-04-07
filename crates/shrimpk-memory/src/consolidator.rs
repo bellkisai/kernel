@@ -102,7 +102,15 @@ impl OllamaConsolidator {
 /// - 3 few-shot examples for consistent output quality
 /// - Confidence scores are required (gate at 0.5 downstream)
 /// - Explicit "self-contained sentence" rule with subject+verb+object
-fn combined_enrichment_prompt(max_facts: usize) -> String {
+fn combined_enrichment_prompt(max_facts: usize, known_entities: &[String]) -> String {
+    let entity_hint = if known_entities.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nKnown entities (use these exact names when applicable): {}",
+            known_entities.join(", ")
+        )
+    };
     format!(
         "You extract structured facts from a memory snippet.\n\n\
          Return a JSON object with two keys: \"facts\" and \"labels\".\n\n\
@@ -142,7 +150,7 @@ fn combined_enrichment_prompt(max_facts: usize) -> String {
          {{\"facts\": [\n\
            {{\"text\": \"The user is training for a 5K run\", \"subject\": \"5K\", \"type\": \"goal\", \"confidence\": 1.0}},\n\
            {{\"text\": \"The user plans to run the city marathon by October\", \"subject\": \"marathon\", \"type\": \"goal\", \"confidence\": 0.9}}\n\
-         ], \"labels\": {{\"topic\": [\"fitness\", \"health\"], \"domain\": [\"health\", \"life\"], \"action\": [\"exercising\", \"planning\"], \"memtype\": \"goal\", \"sentiment\": \"positive\"}}}}\n\n\
+         ], \"labels\": {{\"topic\": [\"fitness\", \"health\"], \"domain\": [\"health\", \"life\"], \"action\": [\"exercising\", \"planning\"], \"memtype\": \"goal\", \"sentiment\": \"positive\"}}}}{entity_hint}\n\n\
          Now extract from the memory below. Return ONLY the JSON object."
     )
 }
@@ -405,7 +413,16 @@ impl Consolidator for OllamaConsolidator {
     }
 
     fn extract_facts_and_labels(&self, text: &str, max_facts: usize) -> ConsolidationOutput {
-        let prompt = combined_enrichment_prompt(max_facts);
+        self.extract_facts_and_labels_with_entities(text, max_facts, &[])
+    }
+
+    fn extract_facts_and_labels_with_entities(
+        &self,
+        text: &str,
+        max_facts: usize,
+        known_entities: &[String],
+    ) -> ConsolidationOutput {
+        let prompt = combined_enrichment_prompt(max_facts, known_entities);
         // KS69: structured JSON schema for Ollama (replaces plain "json" string).
         // Forces the model to produce conformant output, reducing parse failures.
         let format_schema = serde_json::json!({
@@ -849,7 +866,7 @@ mod tests {
 
     #[test]
     fn combined_prompt_contains_label_categories() {
-        let prompt = combined_enrichment_prompt(5);
+        let prompt = combined_enrichment_prompt(5, &[]);
         assert!(
             prompt.contains("\"topic\""),
             "Prompt should mention topic label"
@@ -982,7 +999,7 @@ mod tests {
 
     #[test]
     fn combined_prompt_v3_contains_structured_instructions() {
-        let prompt = combined_enrichment_prompt(5);
+        let prompt = combined_enrichment_prompt(5, &[]);
         assert!(
             prompt.contains("\"subject\""),
             "Prompt should mention subject field"

@@ -190,6 +190,13 @@ pub fn consolidate(
     // creation happens in EchoEngine::consolidate_now() which has embedder access.
     const MAX_ENRICHMENTS_PER_CYCLE: usize = 25;
 
+    // KS73: collect known entity names for LLM prompt grounding
+    let known_entities: Vec<String> = store
+        .all_entities()
+        .values()
+        .map(|f| f.canonical_name.clone())
+        .collect();
+
     if consolidator.name() != "noop" {
         let mut unenriched: Vec<usize> = (0..store.len())
             .filter(|&i| {
@@ -231,7 +238,11 @@ pub fn consolidate(
             // KS67: dynamic max_facts + combined extraction
             // Use dynamic scaling but cap at the operator-configured limit
             let max_facts = dynamic_max_facts(&content).min(config.max_facts_per_memory);
-            let output = consolidator.extract_facts_and_labels(&content, max_facts);
+            let output = consolidator.extract_facts_and_labels_with_entities(
+                &content,
+                max_facts,
+                &known_entities,
+            );
 
             tracing::info!(
                 idx,
@@ -330,13 +341,13 @@ pub fn consolidate(
                     child.enriched = true;
 
                     // KS69: propagate confidence + subject from structured extraction
-                    // KS71: fix degenerate subjects before storing on child
+                    // KS73: entity resolution replaces degenerate subject fix
                     if let Some(sf) = structured_fact {
                         if let Some(conf) = sf.confidence {
                             child.confidence = conf;
                         }
                         if let Some(ref subj) = sf.subject {
-                            child.subject = Some(fix_degenerate_subject(subj, fact_text));
+                            child.subject = Some(subj.clone());
                         }
                     }
 
@@ -363,13 +374,51 @@ pub fn consolidate(
                     } else if let Some(sf) = structured_fact
                         && let Some(ref subj) = sf.subject
                     {
-                        // KS71: use fixed subject in triple too
-                        let fixed = fix_degenerate_subject(subj, fact_text);
+                        // KS73: raw subject used; entity resolution handles canonicalization
                         child.triples.push(shrimpk_core::Triple {
-                            subject: fixed,
+                            subject: subj.clone(),
                             predicate: shrimpk_core::TriplePredicate::Custom(fact_text.to_string()),
                             object: fact_text.to_string(),
                         });
+                    }
+
+                    // KS73: resolve child's entity from subject
+                    if let Some(ref subject) = child.subject {
+                        let entity_id = if let Some(id) = store.resolve_entity(subject) {
+                            // Known entity — link memory
+                            if let Some(frame) = store.get_entity_mut(&id) {
+                                frame.memory_refs.push(child.id.clone());
+                                frame.updated_at = chrono::Utc::now();
+                            }
+                            Some(id)
+                        } else {
+                            // New entity — infer kind from triple predicate
+                            let kind = if let Some(triple) = child.triples.first() {
+                                match &triple.predicate {
+                                    shrimpk_core::TriplePredicate::WorksAt => {
+                                        shrimpk_core::EntityKind::Organization
+                                    }
+                                    shrimpk_core::TriplePredicate::LivesIn => {
+                                        shrimpk_core::EntityKind::Place
+                                    }
+                                    shrimpk_core::TriplePredicate::PrefersTool => {
+                                        shrimpk_core::EntityKind::Tool
+                                    }
+                                    shrimpk_core::TriplePredicate::PartOf => {
+                                        shrimpk_core::EntityKind::Project
+                                    }
+                                    _ => shrimpk_core::EntityKind::Other,
+                                }
+                            } else {
+                                shrimpk_core::EntityKind::Other
+                            };
+                            let id = store.create_entity(subject.clone(), kind);
+                            if let Some(frame) = store.get_entity_mut(&id) {
+                                frame.memory_refs.push(child.id.clone());
+                            }
+                            Some(id)
+                        };
+                        child.entity_id = entity_id;
                     }
 
                     // KS71 P2: same-subject-predicate dedup — update existing child
@@ -569,7 +618,8 @@ pub fn consolidate(
                 continue;
             }
 
-            let output = consolidator.extract_facts_and_labels(&content, 5);
+            let output =
+                consolidator.extract_facts_and_labels_with_entities(&content, 5, &known_entities);
 
             if let Some(label_set) = output.labels
                 && apply_tier2_labels(store, idx, &label_set)
@@ -645,141 +695,7 @@ pub fn consolidate(
     result
 }
 
-// ===========================================================================
-// Degenerate subject post-processing (KS71)
-// ===========================================================================
-
-/// Degenerate subjects that small LLMs return instead of real entities.
-const DEGENERATE_SUBJECTS: &[&str] = &[
-    "the user",
-    "i",
-    "me",
-    "my",
-    "us",
-    "we",
-    "the person",
-    "daily routine",
-    "my daily routine",
-    "personal machine",
-    "development work",
-    "all my",
-    "user",
-    "someone",
-    "this",
-    "he",
-    "she",
-    "they",
-    "it",
-    "you",
-    "him",
-    "her",
-    "them",
-    "his",
-    "its",
-];
-
-/// Post-process degenerate subjects from LLM extraction (KS71).
-///
-/// When a small model returns "the user", "I", "me", etc. as the subject,
-/// this function attempts to extract the real topic entity from the fact text.
-/// Falls back to the original subject if no entity can be found.
-fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
-    let subj_lower = subject.trim().to_lowercase();
-
-    if !DEGENERATE_SUBJECTS
-        .iter()
-        .any(|d| subj_lower == *d || (d.contains(' ') && subj_lower.starts_with(d)))
-    {
-        return subject.to_string(); // Already a real entity
-    }
-
-    // Strategy 1: Find prepositional-phrase entities; latest position wins.
-    // The first word after the preposition MUST be capitalized.
-    // E.g. "The user switched from VS Code to Neovim" → "Neovim" (latest prep)
-    // E.g. "I started at Stripe as a senior engineer" → "Stripe"
-    let text_lower = fact_text.to_lowercase();
-    let prepositions = ["to ", "at ", "from ", "in ", "with ", "for "];
-    let mut best_entity: Option<(usize, String)> = None;
-
-    for prep in &prepositions {
-        // Find the last word-boundary-valid occurrence of the preposition.
-        let mut search_end = text_lower.len();
-        let mut pos_opt: Option<usize> = None;
-        while let Some(p) = text_lower[..search_end].rfind(prep) {
-            if p == 0 || text_lower.as_bytes()[p - 1] == b' ' {
-                pos_opt = Some(p);
-                break;
-            }
-            // Not at a word boundary, keep searching earlier
-            search_end = p;
-        }
-        if let Some(pos) = pos_opt {
-            let after = &fact_text[pos + prep.len()..];
-            let words: Vec<&str> = after.split_whitespace().collect();
-
-            // First word must start with uppercase
-            if words.is_empty() || !words[0].chars().next().is_some_and(|c| c.is_uppercase()) {
-                continue;
-            }
-
-            // Collect capitalized words (max 3), skipping short connectors only
-            // when the next word is also capitalized.
-            let mut parts: Vec<&str> = vec![words[0]];
-            let mut wi = 1;
-            while wi < words.len() && parts.len() < 3 {
-                let w = words[wi];
-                if w.chars().next().is_some_and(|c| c.is_uppercase()) {
-                    parts.push(w);
-                } else {
-                    break;
-                }
-                wi += 1;
-            }
-
-            let entity = parts.join(" ");
-            let trimmed = entity
-                .trim_end_matches(|c: char| c.is_ascii_punctuation())
-                .to_string();
-            if trimmed.len() > 2 {
-                let dominated = best_entity
-                    .as_ref()
-                    .is_none_or(|(prev_pos, _)| pos > *prev_pos);
-                if dominated {
-                    best_entity = Some((pos, trimmed));
-                }
-            }
-        }
-    }
-
-    if let Some((_, ref e)) = best_entity
-        && !e.is_empty()
-    {
-        return e.clone();
-    }
-
-    // Strategy 2: First capitalized proper noun (skip sentence-start and common words).
-    let skip_words: &[&str] = &[
-        "The", "A", "An", "I", "My", "In", "At", "To", "From", "With", "For", "He", "She", "They",
-        "It", "We", "You", "His", "Her", "Their", "Its", "This", "That", "User", "Person",
-    ];
-    let words: Vec<&str> = fact_text.split_whitespace().collect();
-    for (i, word) in words.iter().enumerate() {
-        if i > 0
-            && word.chars().next().is_some_and(|c| c.is_uppercase())
-            && !skip_words.contains(word)
-        {
-            let cleaned = word
-                .trim_matches(|c: char| !c.is_alphanumeric())
-                .to_string();
-            if cleaned.len() > 1 {
-                return cleaned;
-            }
-        }
-    }
-
-    // Strategy 3: no entity found — keep the original.
-    subject.to_string()
-}
+// KS73: fix_degenerate_subject() removed — entity resolution handles subject canonicalization
 
 // ===========================================================================
 // Relationship detection (KS18 Track 4)
@@ -829,7 +745,7 @@ fn find_duplicate_child(
 ///
 /// Returns `Some(reason)` if the fact should be rejected, `None` if it passes.
 /// Confidence alone is useless with small models (qwen2.5:1.5b returns 1.0 for everything).
-/// Subject repair is handled by `fix_degenerate_subject()` (KS71) before this gate runs.
+/// Subject canonicalization is handled by entity resolution (KS73) before this gate runs.
 fn fact_quality_reject(fact_text: &str) -> Option<&'static str> {
     // 1. Minimum length — reject fragments
     if fact_text.len() < 15 {
@@ -1059,9 +975,13 @@ fn detect_supersedes_pairs(
 
             // Same relationship category but different entity = contradiction
             if new_category == old_category && new_rel != old_rel {
-                // Check if the facts share a subject (simple heuristic:
-                // first word or first two words overlap)
-                if subjects_overlap(fact, &entry.content) {
+                // KS73: EntityId-based supersession matching
+                let new_entity = store.resolve_entity(fact);
+                let entities_match = match (&new_entity, &entry.entity_id) {
+                    (Some(id_a), Some(id_b)) => id_a == id_b,
+                    _ => subjects_overlap(fact, &entry.content), // fallback for migration period
+                };
+                if entities_match {
                     matched_old_indices.insert(i);
                     pairs.push((i, fact.clone()));
                     break; // One supersession per fact is enough
@@ -1108,12 +1028,20 @@ fn detect_supersedes_pairs(
                 continue;
             }
 
-            // >0.70 + subject overlap: semantic supersession (lowered from 0.80
+            // >0.70 + entity match: semantic supersession (lowered from 0.80
             // to catch v2 open-domain facts with different verb forms)
-            if cosine > 0.70 && subjects_overlap(fact, &entry.content) {
-                matched_old_indices.insert(i);
-                pairs.push((i, fact.clone()));
-                break; // One supersession per fact is enough
+            if cosine > 0.70 {
+                // KS73: EntityId-based supersession matching
+                let new_entity = store.resolve_entity(fact);
+                let entities_match = match (&new_entity, &entry.entity_id) {
+                    (Some(id_a), Some(id_b)) => id_a == id_b,
+                    _ => subjects_overlap(fact, &entry.content), // fallback for migration period
+                };
+                if entities_match {
+                    matched_old_indices.insert(i);
+                    pairs.push((i, fact.clone()));
+                    break; // One supersession per fact is enough
+                }
             }
         }
     }
@@ -1171,13 +1099,18 @@ fn detect_supersedes_pairs(
 
                 let (old_category, _old_entity) = categorize_relationship(&old_rel);
 
-                if new_category == old_category
-                    && new_rel != old_rel
-                    && subjects_overlap(fact, sentence)
-                {
-                    matched_old_indices.insert(i);
-                    pairs.push((i, fact.clone()));
-                    break;
+                if new_category == old_category && new_rel != old_rel {
+                    // KS73: EntityId-based supersession matching
+                    let new_entity = store.resolve_entity(fact);
+                    let entities_match = match (&new_entity, &entry.entity_id) {
+                        (Some(id_a), Some(id_b)) => id_a == id_b,
+                        _ => subjects_overlap(fact, sentence), // fallback for migration period
+                    };
+                    if entities_match {
+                        matched_old_indices.insert(i);
+                        pairs.push((i, fact.clone()));
+                        break;
+                    }
                 }
             }
 
@@ -2568,94 +2501,6 @@ mod tests {
             "Labels should be truncated at MAX ({}), got {}",
             crate::labels::MAX_LABELS_PER_ENTRY,
             updated.labels.len()
-        );
-    }
-
-    // ===================================================================
-    // fix_degenerate_subject tests (KS71)
-    // ===================================================================
-
-    #[test]
-    fn fix_degenerate_subject_passes_real_entities() {
-        assert_eq!(
-            fix_degenerate_subject("Neovim", "Sam uses Neovim as his primary editor"),
-            "Neovim"
-        );
-        assert_eq!(
-            fix_degenerate_subject("ShrimPK", "ShrimPK is a push-based memory kernel"),
-            "ShrimPK"
-        );
-        assert_eq!(
-            fix_degenerate_subject("Stripe", "Stripe is a payment company"),
-            "Stripe"
-        );
-    }
-
-    #[test]
-    fn fix_degenerate_subject_extracts_prep_entity() {
-        // "to X" — last preposition wins
-        assert_eq!(
-            fix_degenerate_subject("the user", "The user switched from VS Code to Neovim"),
-            "Neovim"
-        );
-        // "at X"
-        assert_eq!(
-            fix_degenerate_subject("I", "I started at Stripe as a senior engineer"),
-            "Stripe"
-        );
-    }
-
-    #[test]
-    fn fix_degenerate_subject_extracts_proper_noun_fallback() {
-        // No preposition with capitalized object — falls back to first proper noun
-        assert_eq!(
-            fix_degenerate_subject("me", "closest to me is the Gracie gym"),
-            "Gracie"
-        );
-    }
-
-    #[test]
-    fn fix_degenerate_subject_handles_daily_routine() {
-        let result = fix_degenerate_subject(
-            "daily routine",
-            "My daily routine includes jiu-jitsu at 6am",
-        );
-        // "6am" is too short, so strategy 2 fires — no proper nouns either.
-        // Falls back to original. Acceptable — fact text itself carries the value.
-        assert!(!result.is_empty());
-    }
-
-    #[test]
-    fn fix_degenerate_subject_case_insensitive_detection() {
-        assert_eq!(
-            fix_degenerate_subject("The User", "The User prefers Rust for systems work"),
-            "Rust"
-        );
-        assert_eq!(
-            fix_degenerate_subject("ME", "ME switched to Neovim last week"),
-            "Neovim"
-        );
-    }
-
-    #[test]
-    fn fix_degenerate_subject_multi_word_entity() {
-        assert_eq!(
-            fix_degenerate_subject("the user", "The user works at Red Hat Inc"),
-            "Red Hat Inc"
-        );
-    }
-
-    #[test]
-    fn fix_degenerate_subject_strips_trailing_punctuation() {
-        assert_eq!(fix_degenerate_subject("I", "I work at Google."), "Google");
-    }
-
-    #[test]
-    fn fix_degenerate_subject_no_entity_returns_original() {
-        // All lowercase, no prepositions with capitalized objects
-        assert_eq!(
-            fix_degenerate_subject("the user", "the user likes to run every morning"),
-            "the user"
         );
     }
 
