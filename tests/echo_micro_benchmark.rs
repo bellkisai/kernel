@@ -440,9 +440,12 @@ fn seed_test_children(engine: &EchoEngine, ids: &[MemoryId], rt: &tokio::runtime
         let mut child_ku3 =
             MemoryEntry::new(text_ku3.to_string(), emb_ku3, "enrichment".to_string());
         child_ku3.parent_id = Some(m11_id.clone());
-        child_ku3.confidence = 0.90;
+        child_ku3.confidence = 0.95;
         child_ku3.subject = Some("Neovim".to_string());
-        child_ku3.labels = vec!["topic:technology".to_string()];
+        child_ku3.labels = vec![
+            "topic:technology".to_string(),
+            "topic:tools:editor".to_string(),
+        ];
         engine.inject_entry(child_ku3).await;
 
         // Child for M18 (Japanese language learning) → targets PT-3: "What language is Sam learning?"
