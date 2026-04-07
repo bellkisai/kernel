@@ -285,15 +285,13 @@ pub fn consolidate(
                 let mut fact_embeddings: Vec<Vec<f32>> = Vec::with_capacity(fact_entries.len());
 
                 for (fact_text, structured_fact) in &fact_entries {
-                    // KS69: confidence gate — skip low-confidence extractions
-                    if let Some(sf) = structured_fact
-                        && let Some(conf) = sf.confidence
-                        && conf < 0.5
-                    {
+                    // KS69: quality gate — reject low-quality extractions
+                    // (replaces confidence gate; small models return 1.0 for everything)
+                    if let Some(reason) = fact_quality_reject(fact_text, structured_fact) {
                         tracing::debug!(
                             fact = %fact_text,
-                            confidence = conf,
-                            "KS69: skipping low-confidence fact"
+                            reason,
+                            "KS69: skipping low-quality fact"
                         );
                         fact_embeddings.push(Vec::new()); // maintain index alignment
                         continue;
@@ -594,6 +592,44 @@ pub fn consolidate(
 /// Detect a typed relationship from a fact string using regex patterns.
 ///
 /// Scans the fact text for known relationship patterns:
+/// Quality gate for extracted facts (KS69).
+///
+/// Returns `Some(reason)` if the fact should be rejected, `None` if it passes.
+/// Replaces the confidence gate which was useless with small models
+/// (qwen2.5:1.5b returns confidence=1.0 for everything).
+fn fact_quality_reject(
+    fact_text: &str,
+    structured_fact: &Option<&shrimpk_core::ExtractedFact>,
+) -> Option<&'static str> {
+    // 1. Min text length — reject fragments shorter than 20 chars
+    if fact_text.len() < 20 {
+        return Some("too short (<20 chars)");
+    }
+
+    // 2. Fragment detection — a real sentence has at least a subject and verb.
+    //    Heuristic: must contain at least 3 whitespace-separated words.
+    let word_count = fact_text.split_whitespace().count();
+    if word_count < 3 {
+        return Some("fragment (<3 words)");
+    }
+
+    // 3. Subject validation — reject if subject is a pronoun (degenerate extraction)
+    if let Some(sf) = structured_fact
+        && let Some(ref subj) = sf.subject
+    {
+        let subj_lower = subj.trim().to_lowercase();
+        const PRONOUNS: &[&str] = &[
+            "he", "she", "they", "it", "i", "we", "you", "him", "her", "them", "his", "its",
+            "the user", "user", "me", "my", "someone", "this",
+        ];
+        if PRONOUNS.contains(&subj_lower.as_str()) {
+            return Some("pronoun subject");
+        }
+    }
+
+    None
+}
+
 /// - "works at" / "employed at" / "joined" -> WorksAt
 /// - "lives in" / "moved to" / "based in" -> LivesIn
 /// - "prefers" / "likes" / "uses" / "switched to" -> PrefersTool
