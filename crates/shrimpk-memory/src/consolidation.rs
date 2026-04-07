@@ -341,13 +341,13 @@ pub fn consolidate(
                     child.enriched = true;
 
                     // KS69: propagate confidence + subject from structured extraction
-                    // KS73: entity resolution replaces degenerate subject fix
+                    // KS71: fix degenerate subjects before storing on child
                     if let Some(sf) = structured_fact {
                         if let Some(conf) = sf.confidence {
                             child.confidence = conf;
                         }
                         if let Some(ref subj) = sf.subject {
-                            child.subject = Some(subj.clone());
+                            child.subject = Some(fix_degenerate_subject(subj, fact_text));
                         }
                     }
 
@@ -374,9 +374,10 @@ pub fn consolidate(
                     } else if let Some(sf) = structured_fact
                         && let Some(ref subj) = sf.subject
                     {
-                        // KS73: raw subject used; entity resolution handles canonicalization
+                        // KS71: use fixed subject in triple too
+                        let fixed = fix_degenerate_subject(subj, fact_text);
                         child.triples.push(shrimpk_core::Triple {
-                            subject: subj.clone(),
+                            subject: fixed,
                             predicate: shrimpk_core::TriplePredicate::Custom(fact_text.to_string()),
                             object: fact_text.to_string(),
                         });
@@ -695,7 +696,143 @@ pub fn consolidate(
     result
 }
 
-// KS73: fix_degenerate_subject() removed — entity resolution handles subject canonicalization
+// ===========================================================================
+// Degenerate subject post-processing (KS71)
+// ===========================================================================
+
+/// Degenerate subjects that small LLMs return instead of real entities.
+const DEGENERATE_SUBJECTS: &[&str] = &[
+    "the user",
+    "i",
+    "me",
+    "my",
+    "us",
+    "we",
+    "the person",
+    "daily routine",
+    "my daily routine",
+    "personal machine",
+    "development work",
+    "all my",
+    "user",
+    "someone",
+    "this",
+    "he",
+    "she",
+    "they",
+    "it",
+    "you",
+    "him",
+    "her",
+    "them",
+    "his",
+    "its",
+];
+
+/// Post-process degenerate subjects from LLM extraction (KS71).
+///
+/// When a small model returns "the user", "I", "me", etc. as the subject,
+/// this function attempts to extract the real topic entity from the fact text.
+/// Falls back to the original subject if no entity can be found.
+///
+/// NOTE: Will be removed once KS73 Track B entity resolution is verified.
+fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
+    let subj_lower = subject.trim().to_lowercase();
+
+    if !DEGENERATE_SUBJECTS
+        .iter()
+        .any(|d| subj_lower == *d || (d.contains(' ') && subj_lower.starts_with(d)))
+    {
+        return subject.to_string(); // Already a real entity
+    }
+
+    // Strategy 1: Find prepositional-phrase entities; latest position wins.
+    // The first word after the preposition MUST be capitalized.
+    // E.g. "The user switched from VS Code to Neovim" → "Neovim" (latest prep)
+    // E.g. "I started at Stripe as a senior engineer" → "Stripe"
+    let text_lower = fact_text.to_lowercase();
+    let prepositions = ["to ", "at ", "from ", "in ", "with ", "for "];
+    let mut best_entity: Option<(usize, String)> = None;
+
+    for prep in &prepositions {
+        // Find the last word-boundary-valid occurrence of the preposition.
+        let mut search_end = text_lower.len();
+        let mut pos_opt: Option<usize> = None;
+        while let Some(p) = text_lower[..search_end].rfind(prep) {
+            if p == 0 || text_lower.as_bytes()[p - 1] == b' ' {
+                pos_opt = Some(p);
+                break;
+            }
+            // Not at a word boundary, keep searching earlier
+            search_end = p;
+        }
+        if let Some(pos) = pos_opt {
+            let after = &fact_text[pos + prep.len()..];
+            let words: Vec<&str> = after.split_whitespace().collect();
+
+            // First word must start with uppercase
+            if words.is_empty() || !words[0].chars().next().is_some_and(|c| c.is_uppercase()) {
+                continue;
+            }
+
+            // Collect capitalized words (max 3), skipping short connectors only
+            // when the next word is also capitalized.
+            let mut parts: Vec<&str> = vec![words[0]];
+            let mut wi = 1;
+            while wi < words.len() && parts.len() < 3 {
+                let w = words[wi];
+                if w.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    parts.push(w);
+                } else {
+                    break;
+                }
+                wi += 1;
+            }
+
+            let entity = parts.join(" ");
+            let trimmed = entity
+                .trim_end_matches(|c: char| c.is_ascii_punctuation())
+                .to_string();
+            if trimmed.len() > 2 {
+                let dominated = best_entity
+                    .as_ref()
+                    .is_none_or(|(prev_pos, _)| pos > *prev_pos);
+                if dominated {
+                    best_entity = Some((pos, trimmed));
+                }
+            }
+        }
+    }
+
+    if let Some((_, ref e)) = best_entity
+        && !e.is_empty()
+    {
+        return e.clone();
+    }
+
+    // Strategy 2: First capitalized proper noun (skip sentence-start and common words).
+    let skip_words: &[&str] = &[
+        "The", "A", "An", "I", "My", "In", "At", "To", "From", "With", "For", "He", "She", "They",
+        "It", "We", "You", "His", "Her", "Their", "Its", "This", "That", "User", "Person",
+    ];
+    let words: Vec<&str> = fact_text.split_whitespace().collect();
+    for (i, word) in words.iter().enumerate() {
+        if i > 0
+            && word.chars().next().is_some_and(|c| c.is_uppercase())
+            && !skip_words.contains(word)
+        {
+            let cleaned = word
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string();
+            if cleaned.len() > 1 {
+                return cleaned;
+            }
+        }
+    }
+
+    // Strategy 3: no entity found — keep the original.
+    subject.to_string()
+}
 
 // ===========================================================================
 // Relationship detection (KS18 Track 4)
@@ -745,7 +882,7 @@ fn find_duplicate_child(
 ///
 /// Returns `Some(reason)` if the fact should be rejected, `None` if it passes.
 /// Confidence alone is useless with small models (qwen2.5:1.5b returns 1.0 for everything).
-/// Subject canonicalization is handled by entity resolution (KS73) before this gate runs.
+/// Subject repair is handled by `fix_degenerate_subject()` (KS71) before this gate runs.
 fn fact_quality_reject(fact_text: &str) -> Option<&'static str> {
     // 1. Minimum length — reject fragments
     if fact_text.len() < 15 {
@@ -2501,6 +2638,94 @@ mod tests {
             "Labels should be truncated at MAX ({}), got {}",
             crate::labels::MAX_LABELS_PER_ENTRY,
             updated.labels.len()
+        );
+    }
+
+    // ===================================================================
+    // fix_degenerate_subject tests (KS71)
+    // ===================================================================
+
+    #[test]
+    fn fix_degenerate_subject_passes_real_entities() {
+        assert_eq!(
+            fix_degenerate_subject("Neovim", "Sam uses Neovim as his primary editor"),
+            "Neovim"
+        );
+        assert_eq!(
+            fix_degenerate_subject("ShrimPK", "ShrimPK is a push-based memory kernel"),
+            "ShrimPK"
+        );
+        assert_eq!(
+            fix_degenerate_subject("Stripe", "Stripe is a payment company"),
+            "Stripe"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_extracts_prep_entity() {
+        // "to X" — last preposition wins
+        assert_eq!(
+            fix_degenerate_subject("the user", "The user switched from VS Code to Neovim"),
+            "Neovim"
+        );
+        // "at X"
+        assert_eq!(
+            fix_degenerate_subject("I", "I started at Stripe as a senior engineer"),
+            "Stripe"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_extracts_proper_noun_fallback() {
+        // No preposition with capitalized object — falls back to first proper noun
+        assert_eq!(
+            fix_degenerate_subject("me", "closest to me is the Gracie gym"),
+            "Gracie"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_handles_daily_routine() {
+        let result = fix_degenerate_subject(
+            "daily routine",
+            "My daily routine includes jiu-jitsu at 6am",
+        );
+        // "6am" is too short, so strategy 2 fires — no proper nouns either.
+        // Falls back to original. Acceptable — fact text itself carries the value.
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn fix_degenerate_subject_case_insensitive_detection() {
+        assert_eq!(
+            fix_degenerate_subject("The User", "The User prefers Rust for systems work"),
+            "Rust"
+        );
+        assert_eq!(
+            fix_degenerate_subject("ME", "ME switched to Neovim last week"),
+            "Neovim"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_multi_word_entity() {
+        assert_eq!(
+            fix_degenerate_subject("the user", "The user works at Red Hat Inc"),
+            "Red Hat Inc"
+        );
+    }
+
+    #[test]
+    fn fix_degenerate_subject_strips_trailing_punctuation() {
+        assert_eq!(fix_degenerate_subject("I", "I work at Google."), "Google");
+    }
+
+    #[test]
+    fn fix_degenerate_subject_no_entity_returns_original() {
+        // All lowercase, no prepositions with capitalized objects
+        assert_eq!(
+            fix_degenerate_subject("the user", "the user likes to run every morning"),
+            "the user"
         );
     }
 

@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::entity::EntityId;
+
 /// Unique identifier for a stored memory.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MemoryId(pub uuid::Uuid);
@@ -274,6 +276,9 @@ pub struct MemoryEntry {
     /// None = active (not superseded).
     #[serde(default)]
     pub superseded_at: Option<DateTime<Utc>>,
+    /// Resolved entity this memory is about. None for entity-less memories.
+    #[serde(default)]
+    pub entity_id: Option<EntityId>,
 }
 
 fn default_confidence() -> f32 {
@@ -312,6 +317,7 @@ impl MemoryEntry {
             importance_computed_at: None,
             retrieval_history_secs: Vec::new(),
             superseded_at: None,
+            entity_id: None,
         }
     }
 
