@@ -182,7 +182,7 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Embedding` if the model fails to initialize.
     #[instrument(skip(config), fields(max_memories = config.max_memories, threshold = config.similarity_threshold))]
     pub fn new(config: EchoConfig) -> Result<Self> {
-        let mut embedder = MultiEmbedder::new()?;
+        let mut embedder = MultiEmbedder::new(&config)?;
 
         // Initialize label prototypes BEFORE wrapping embedder in Mutex (ADR-015 D4).
         // Prototype embeddings are computed once at startup.
@@ -2662,6 +2662,12 @@ impl EchoEngine {
         // Persist entity store sidecar (KS73)
         crate::persistence::save_entities(&store, &self.config.data_dir)?;
 
+        // KS75: Write embedding model name sidecar for mismatch detection on next load
+        if let Ok(embedder) = self.embedder.lock() {
+            let model_path = self.config.data_dir.join("embedding_model.txt");
+            let _ = std::fs::write(&model_path, embedder.text_provider_name());
+        }
+
         Ok(())
     }
 
@@ -2675,7 +2681,7 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Persistence` if store file is corrupted.
     #[instrument(skip(config), fields(data_dir = %config.data_dir.display()))]
     pub fn load(config: EchoConfig) -> Result<Self> {
-        let mut embedder = MultiEmbedder::new()?;
+        let mut embedder = MultiEmbedder::new(&config)?;
 
         // Initialize label prototypes (ADR-015)
         let mut prototypes = crate::labels::LabelPrototypes::new_empty();
@@ -2688,6 +2694,37 @@ impl EchoEngine {
 
         let store_path = config.data_dir.join("echo_store.shrm");
         let mut loaded_store = EchoStore::load(&store_path)?;
+
+        // KS75: Dimension mismatch detection — hard error if stored vectors don't match config
+        if let Some(first_emb) = loaded_store.all_embeddings().first() {
+            let stored_dim = first_emb.len();
+            let config_dim = embedder.text_dimension();
+            if stored_dim != config_dim {
+                return Err(ShrimPKError::Embedding(format!(
+                    "Embedding dimension mismatch: stored data has {stored_dim}-dim vectors \
+                     but current model '{}' produces {config_dim}-dim. \
+                     Either switch back to the original model or clear the store with /api/clear.",
+                    embedder.text_provider_name()
+                )));
+            }
+        }
+
+        // KS75: Model name sidecar — warn if model changed (same dim, different model = mixed space)
+        let model_sidecar = config.data_dir.join("embedding_model.txt");
+        if model_sidecar.exists()
+            && let Ok(stored_model) = std::fs::read_to_string(&model_sidecar)
+        {
+            let stored_model = stored_model.trim();
+            let current_model = embedder.text_provider_name();
+            if stored_model != current_model && !loaded_store.all_entries().is_empty() {
+                tracing::warn!(
+                    stored_model = %stored_model,
+                    current_model = %current_model,
+                    "Embedding model changed since last persist. \
+                     Vectors from different models in the same space may degrade similarity quality."
+                );
+            }
+        }
 
         // Load community summaries sidecar (KS64)
         if let Err(e) =

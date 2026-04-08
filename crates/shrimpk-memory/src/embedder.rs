@@ -1,34 +1,33 @@
-//! Multi-channel embedding via fastembed.
+//! Multi-channel embedding with pluggable text provider (KS75).
 //!
-//! Wraps `fastembed::TextEmbedding` with the BGE-small-EN-v1.5 model
-//! for 384-dimensional sentence embeddings. Vision (CLIP 512-dim) and
-//! Speech (640-dim) channels are gated behind `vision` and `speech`
-//! feature flags.
-//!
-//! When `vision` is enabled, loads two additional models:
-//! - CLIP ViT-B-32 *vision* encoder (`ImageEmbedding`) — embeds images to 512-dim.
-//! - CLIP ViT-B-32 *text* encoder (`TextEmbedding`) — embeds text to the same 512-dim
-//!   space, enabling cross-modal text-to-image retrieval.
+//! Text channel delegates to an `EmbeddingProvider` implementation selected
+//! at runtime via `EchoConfig` (default: fastembed BGE-small-EN-v1.5, 384-dim).
+//! Vision (CLIP 512-dim) and Speech (640-dim) channels are gated behind
+//! `vision` and `speech` feature flags.
 
+#[cfg(feature = "vision")]
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use shrimpk_core::{Result, ShrimPKError};
+#[cfg(any(feature = "vision", feature = "speech"))]
+use shrimpk_core::ShrimPKError;
+use shrimpk_core::{EchoConfig, EmbeddingProvider, Result};
 use tracing::instrument;
 
 /// Multi-channel embedder for text, vision, and speech modalities.
 ///
-/// Text channel (always available): BGE-small-EN-v1.5, 384-dim.
+/// Text channel delegates to a pluggable `EmbeddingProvider` (KS75).
 /// Vision channel (feature = "vision"): CLIP ViT-B-32, 512-dim.
 /// Speech channel (feature = "speech"): ECAPA-TDNN (256) + Whisper-tiny encoder (384) = 640-dim.
 ///
-/// Thread-safe: `TextEmbedding` and `ImageEmbedding` are `Send` (but not `Sync`),
+/// Thread-safe: providers are `Send` (but not `Sync`),
 /// so share via `Mutex` or create per-thread instances.
 pub struct MultiEmbedder {
-    text: TextEmbedding,
+    /// Pluggable text embedding provider (fastembed or OpenAI-compatible API).
+    text_provider: Box<dyn EmbeddingProvider>,
     /// CLIP vision encoder — embeds images into 512-dim CLIP space.
     #[cfg(feature = "vision")]
     vision: Option<fastembed::ImageEmbedding>,
     /// CLIP text encoder — embeds text into the same 512-dim CLIP space.
-    /// Separate from `text` (MiniLM 384-dim) because the embedding spaces are incompatible.
+    /// Separate from text provider because the embedding spaces are incompatible.
     #[cfg(feature = "vision")]
     vision_text: Option<TextEmbedding>,
     /// Speech embedder — 2 ONNX models producing a 640-dim paralinguistic embedding.
@@ -38,32 +37,18 @@ pub struct MultiEmbedder {
 }
 
 impl MultiEmbedder {
-    /// Initialize the multi-channel embedder.
+    /// Initialize the multi-channel embedder from config.
     ///
-    /// Always loads the text model (BGE-small-EN-v1.5, 384-dim).
-    /// When the `vision` feature is enabled, also attempts to load
-    /// CLIP ViT-B-32 vision + text encoders (512-dim). If CLIP fails
-    /// to initialize, vision is disabled gracefully — text still works.
+    /// The text channel is delegated to an `EmbeddingProvider` selected by
+    /// `config.embedding_provider` (default: fastembed BGE-small-EN-v1.5).
+    /// Vision/speech channels are unchanged (compile-time feature flags).
     ///
     /// # Errors
-    /// Returns `ShrimPKError::Embedding` if the *text* model fails to initialize.
+    /// Returns `ShrimPKError::Embedding` if the text provider fails to initialize.
     /// Vision model failures are logged as warnings and result in `vision = None`.
-    #[instrument]
-    pub fn new() -> Result<Self> {
-        let start = std::time::Instant::now();
-
-        let text = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::BGESmallENV15))
-            .map_err(|e| {
-                ShrimPKError::Embedding(format!("Failed to init BGE-small-EN-v1.5: {e}"))
-            })?;
-
-        let elapsed = start.elapsed();
-        tracing::info!(
-            elapsed_ms = elapsed.as_millis(),
-            model = "BGE-small-EN-v1.5",
-            dim = 384,
-            "MultiEmbedder initialized (text channel)"
-        );
+    #[instrument(skip(config))]
+    pub fn new(config: &EchoConfig) -> Result<Self> {
+        let text_provider = crate::embedding_provider::from_config(config)?;
 
         #[cfg(feature = "vision")]
         let (vision, vision_text) = {
@@ -119,7 +104,7 @@ impl MultiEmbedder {
         };
 
         Ok(Self {
-            text,
+            text_provider,
             #[cfg(feature = "vision")]
             vision,
             #[cfg(feature = "vision")]
@@ -129,7 +114,7 @@ impl MultiEmbedder {
         })
     }
 
-    /// Embed a single text string into a 384-dimensional vector.
+    /// Embed a single text string into a vector of `text_dimension()` dimensions.
     ///
     /// # Errors
     /// Returns `ShrimPKError::Embedding` if embedding generation fails.
@@ -137,20 +122,11 @@ impl MultiEmbedder {
     pub fn embed_text(&mut self, text: &str) -> Result<Vec<f32>> {
         let start = std::time::Instant::now();
 
-        let results = self
-            .text
-            .embed(vec![text.to_string()], None)
-            .map_err(|e| ShrimPKError::Embedding(format!("Embed failed: {e}")))?;
+        let embedding = self.text_provider.embed(text)?;
 
-        let embedding = results
-            .into_iter()
-            .next()
-            .ok_or_else(|| ShrimPKError::Embedding("Empty embedding result".into()))?;
-
-        let elapsed = start.elapsed();
         tracing::debug!(
             dim = embedding.len(),
-            elapsed_us = elapsed.as_micros(),
+            elapsed_us = start.elapsed().as_micros(),
             "Single text embed complete"
         );
 
@@ -159,8 +135,7 @@ impl MultiEmbedder {
 
     /// Batch-embed multiple texts.
     ///
-    /// More efficient than calling `embed_text()` in a loop because
-    /// fastembed batches the ONNX inference.
+    /// Delegates to the provider's native batch implementation for efficiency.
     ///
     /// # Errors
     /// Returns `ShrimPKError::Embedding` if any embedding generation fails.
@@ -173,17 +148,13 @@ impl MultiEmbedder {
         let start = std::time::Instant::now();
         let count = texts.len();
 
-        let results = self
-            .text
-            .embed(texts, None)
-            .map_err(|e| ShrimPKError::Embedding(format!("Batch embed failed: {e}")))?;
+        let results = self.text_provider.embed_batch(texts)?;
 
-        let elapsed = start.elapsed();
         tracing::debug!(
             count = count,
-            elapsed_ms = elapsed.as_millis(),
+            elapsed_ms = start.elapsed().as_millis(),
             avg_us = if count > 0 {
-                elapsed.as_micros() / count as u128
+                start.elapsed().as_micros() / count as u128
             } else {
                 0
             },
@@ -193,9 +164,14 @@ impl MultiEmbedder {
         Ok(results)
     }
 
-    /// Get the text embedding dimension (384 for BGE-small-EN-v1.5).
+    /// Get the text embedding dimension from the active provider.
     pub fn text_dimension(&self) -> usize {
-        384
+        self.text_provider.dimension()
+    }
+
+    /// Get the human-readable name of the active text embedding provider.
+    pub fn text_provider_name(&self) -> &str {
+        self.text_provider.name()
     }
 
     /// Embed an image into a 512-dimensional CLIP vector.
@@ -337,14 +313,16 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embedder_initializes() {
-        let embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
         assert_eq!(embedder.text_dimension(), 384);
     }
 
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embed_single_text() {
-        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let mut embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
         let embedding = embedder.embed_text("Hello world").expect("Should embed");
         assert_eq!(
             embedding.len(),
@@ -356,7 +334,8 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embed_batch_texts() {
-        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let mut embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
         let texts = vec![
             "The cat sat on the mat".to_string(),
             "Dogs are loyal companions".to_string(),
@@ -372,7 +351,8 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn similar_texts_have_higher_similarity() {
-        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let mut embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
         let cat = embedder.embed_text("The cat sat on the mat").unwrap();
         let kitten = embedder.embed_text("A kitten rests on a rug").unwrap();
         let code = embedder
@@ -392,7 +372,8 @@ mod tests {
     #[test]
     #[ignore = "requires fastembed model download"]
     fn embed_batch_empty_returns_empty() {
-        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let mut embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
         let embeddings = embedder
             .embed_batch(Vec::new())
             .expect("Should handle empty");
@@ -406,7 +387,8 @@ mod tests {
     #[test]
     #[ignore = "requires CLIP model download (~352 MB)"]
     fn clip_vision_initializes() {
-        let embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
         assert!(embedder.has_vision(), "CLIP vision should be available");
         assert_eq!(embedder.vision_dimension(), 512);
     }
@@ -415,7 +397,8 @@ mod tests {
     #[test]
     #[ignore = "requires CLIP model download (~352 MB)"]
     fn embed_image_produces_512_dim() {
-        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let mut embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
 
         // Create a minimal 2x2 red PNG image
         let png_data = create_test_png(2, 2, [255, 0, 0]);
@@ -443,7 +426,8 @@ mod tests {
     #[test]
     #[ignore = "requires CLIP model download (~352 MB)"]
     fn embed_text_for_vision_produces_512_dim() {
-        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let mut embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
 
         let embedding = embedder
             .embed_text_for_vision("a photo of a cat")
@@ -463,7 +447,8 @@ mod tests {
     fn clip_cross_modal_similarity() {
         // CLIP's key property: text and image embeddings in the same space
         // should have positive similarity for matching concepts.
-        let mut embedder = MultiEmbedder::new().expect("MultiEmbedder should init");
+        let mut embedder =
+            MultiEmbedder::new(&EchoConfig::default()).expect("MultiEmbedder should init");
 
         // Embed a red image
         let red_png = create_test_png(32, 32, [255, 0, 0]);
@@ -496,7 +481,7 @@ mod tests {
     #[ignore = "requires CLIP model download (~352 MB)"]
     fn clip_init_latency_under_5s() {
         let start = std::time::Instant::now();
-        let _embedder = MultiEmbedder::new().expect("Should init");
+        let _embedder = MultiEmbedder::new(&EchoConfig::default()).expect("Should init");
         let elapsed = start.elapsed();
         assert!(
             elapsed.as_secs() < 10, // generous to account for cold cache

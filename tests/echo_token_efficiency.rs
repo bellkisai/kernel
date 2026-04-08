@@ -919,7 +919,8 @@ async fn vllm_throughput_projection() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn context_quality_comparison() {
-    let mut embedder = MultiEmbedder::new().expect("embedder should initialize");
+    let mut embedder = MultiEmbedder::new(&shrimpk_core::EchoConfig::default())
+        .expect("embedder should initialize");
     let scenarios = scenarios();
 
     println!("\n{}", "=".repeat(90));
