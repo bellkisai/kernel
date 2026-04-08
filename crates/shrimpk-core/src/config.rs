@@ -51,7 +51,7 @@ impl std::str::FromStr for RerankerBackend {
 /// and echo queries. The default `Fastembed` backend uses a local ONNX model
 /// (BGE-small-EN-v1.5, 384-dim) with zero external API calls.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum EmbeddingProvider {
+pub enum EmbeddingBackend {
     /// Local fastembed ONNX model (default). Zero network calls.
     /// Models: BGE-small-EN-v1.5 (384-dim), all-MiniLM-L6-v2 (384-dim), etc.
     #[default]
@@ -62,7 +62,7 @@ pub enum EmbeddingProvider {
     OpenAI,
 }
 
-impl std::fmt::Display for EmbeddingProvider {
+impl std::fmt::Display for EmbeddingBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Fastembed => write!(f, "fastembed"),
@@ -71,7 +71,7 @@ impl std::fmt::Display for EmbeddingProvider {
     }
 }
 
-impl std::str::FromStr for EmbeddingProvider {
+impl std::str::FromStr for EmbeddingBackend {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
@@ -320,7 +320,7 @@ pub struct EchoConfig {
     // --- Embedding provider (KS75) ---
     /// Embedding backend: `Fastembed` (local ONNX, default) or `OpenAI` (API).
     #[serde(default)]
-    pub embedding_provider: EmbeddingProvider,
+    pub embedding_provider: EmbeddingBackend,
     /// Model name for the embedding provider.
     /// Fastembed: "BGE-small-EN-v1.5" (default), "all-MiniLM-L6-v2", etc.
     /// OpenAI: "text-embedding-3-small", "nomic-embed-text", Ollama model name, etc.
@@ -472,7 +472,7 @@ impl Default for EchoConfig {
             enabled_modalities: default_modalities(),
             vision_embedding_dim: default_vision_dim(),
             speech_embedding_dim: default_speech_dim(),
-            embedding_provider: EmbeddingProvider::default(),
+            embedding_provider: EmbeddingBackend::default(),
             embedding_model: default_embedding_model(),
             embedding_api_url: default_embedding_api_url(),
         }
@@ -629,7 +629,7 @@ pub struct FileConfig {
     pub enabled_modalities: Option<Vec<crate::Modality>>,
     pub vision_embedding_dim: Option<usize>,
     pub speech_embedding_dim: Option<usize>,
-    pub embedding_provider: Option<EmbeddingProvider>,
+    pub embedding_provider: Option<EmbeddingBackend>,
     pub embedding_model: Option<String>,
     pub embedding_api_url: Option<String>,
 }
@@ -949,7 +949,7 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     }
 
     if let Ok(v) = std::env::var("SHRIMPK_EMBEDDING_PROVIDER")
-        && let Ok(provider) = v.parse::<EmbeddingProvider>()
+        && let Ok(provider) = v.parse::<EmbeddingBackend>()
     {
         config.embedding_provider = provider;
     }
@@ -1388,39 +1388,39 @@ mod tests {
         );
     }
 
-    // --- KS75: EmbeddingProvider ---
+    // --- KS75: EmbeddingBackend ---
 
     #[test]
     fn embedding_provider_default_is_fastembed() {
         let config = EchoConfig::default();
-        assert_eq!(config.embedding_provider, EmbeddingProvider::Fastembed);
+        assert_eq!(config.embedding_provider, EmbeddingBackend::Fastembed);
         assert_eq!(config.embedding_model, "BGE-small-EN-v1.5");
     }
 
     #[test]
     fn embedding_provider_parse_roundtrip() {
         for (input, expected) in [
-            ("fastembed", EmbeddingProvider::Fastembed),
-            ("local", EmbeddingProvider::Fastembed),
-            ("onnx", EmbeddingProvider::Fastembed),
-            ("openai", EmbeddingProvider::OpenAI),
-            ("api", EmbeddingProvider::OpenAI),
-            ("ollama", EmbeddingProvider::OpenAI),
+            ("fastembed", EmbeddingBackend::Fastembed),
+            ("local", EmbeddingBackend::Fastembed),
+            ("onnx", EmbeddingBackend::Fastembed),
+            ("openai", EmbeddingBackend::OpenAI),
+            ("api", EmbeddingBackend::OpenAI),
+            ("ollama", EmbeddingBackend::OpenAI),
         ] {
-            let parsed: EmbeddingProvider = input.parse().unwrap();
+            let parsed: EmbeddingBackend = input.parse().unwrap();
             assert_eq!(parsed, expected, "parsing '{input}'");
         }
     }
 
     #[test]
     fn embedding_provider_parse_invalid() {
-        assert!("unknown".parse::<EmbeddingProvider>().is_err());
+        assert!("unknown".parse::<EmbeddingBackend>().is_err());
     }
 
     #[test]
     fn embedding_provider_display() {
-        assert_eq!(EmbeddingProvider::Fastembed.to_string(), "fastembed");
-        assert_eq!(EmbeddingProvider::OpenAI.to_string(), "openai");
+        assert_eq!(EmbeddingBackend::Fastembed.to_string(), "fastembed");
+        assert_eq!(EmbeddingBackend::OpenAI.to_string(), "openai");
     }
 
     #[test]
@@ -1461,14 +1461,14 @@ mod tests {
     #[test]
     fn embedding_provider_serde_roundtrip() {
         let config = EchoConfig {
-            embedding_provider: EmbeddingProvider::OpenAI,
+            embedding_provider: EmbeddingBackend::OpenAI,
             embedding_model: "text-embedding-3-small".into(),
             embedding_api_url: "https://api.openai.com".into(),
             ..Default::default()
         };
         let json = serde_json::to_string(&config).unwrap();
         let parsed: EchoConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.embedding_provider, EmbeddingProvider::OpenAI);
+        assert_eq!(parsed.embedding_provider, EmbeddingBackend::OpenAI);
         assert_eq!(parsed.embedding_model, "text-embedding-3-small");
         assert_eq!(parsed.embedding_api_url, "https://api.openai.com");
     }
@@ -1476,14 +1476,14 @@ mod tests {
     #[test]
     fn file_config_embedding_fields_toml_roundtrip() {
         let fc = FileConfig {
-            embedding_provider: Some(EmbeddingProvider::OpenAI),
+            embedding_provider: Some(EmbeddingBackend::OpenAI),
             embedding_model: Some("nomic-embed-text".into()),
             embedding_api_url: Some("http://localhost:11434".into()),
             ..Default::default()
         };
         let toml_str = toml::to_string_pretty(&fc).unwrap();
         let parsed: FileConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.embedding_provider, Some(EmbeddingProvider::OpenAI));
+        assert_eq!(parsed.embedding_provider, Some(EmbeddingBackend::OpenAI));
         assert_eq!(parsed.embedding_model, Some("nomic-embed-text".into()));
     }
 }

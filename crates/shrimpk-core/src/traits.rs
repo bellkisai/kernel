@@ -86,6 +86,37 @@ pub struct ModelCapabilities {
     pub is_local: bool,
 }
 
+/// A backend that generates embedding vectors from text.
+///
+/// Implementations wrap either a local ONNX model (fastembed) or an HTTP API
+/// (OpenAI-compatible). The engine holds the provider behind a `Mutex` since
+/// fastembed requires `&mut self` for inference.
+///
+/// # Providers
+/// - `FastembedProvider` — local ONNX (default, offline, zero API calls)
+/// - `OpenAIProvider` — any OpenAI-compatible API (cloud or local Ollama)
+///
+/// # Contract
+/// - `embed` and `embed_batch` must return vectors of length `dimension()`.
+/// - On error, return `Err` — never panic.
+/// - `Send` but not `Sync` (fastembed's `TextEmbedding` is `!Sync`).
+pub trait EmbeddingProvider: Send {
+    /// Embed a single text string, returning a vector of length `dimension()`.
+    fn embed(&mut self, text: &str) -> Result<Vec<f32>>;
+
+    /// Embed a batch of texts. Default implementation calls `embed()` in a loop.
+    /// Providers with native batching (fastembed, OpenAI) should override this.
+    fn embed_batch(&mut self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        texts.iter().map(|t| self.embed(t)).collect()
+    }
+
+    /// The embedding dimension this provider produces (e.g., 384, 768, 1536).
+    fn dimension(&self) -> usize;
+
+    /// Human-readable name (e.g., "fastembed/bge-small-en-v1.5", "openai/text-embedding-3-small").
+    fn name(&self) -> &str;
+}
+
 /// Type classification for extracted facts (KS67 — schema-driven extraction).
 ///
 /// Maps to distinct retrieval patterns and supersession thresholds.
