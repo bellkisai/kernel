@@ -134,7 +134,7 @@ fn resolve_fastembed_model(name: &str) -> Result<(EmbeddingModel, usize)> {
 ///
 /// Uses [`ureq`] (synchronous HTTP). All calls block the current thread for up to 30 s.
 /// Callers in async contexts **must** invoke this provider through
-/// [`EchoEngine::embed_blocking()`](crate::echo::EchoEngine::embed_blocking) which uses
+/// `EchoEngine::embed_blocking()` which uses
 /// `tokio::task::block_in_place` to prevent worker-thread starvation.
 pub struct OpenAIProvider {
     url: String,
