@@ -1077,6 +1077,12 @@ fn detect_supersedes_pairs(
             continue;
         }
 
+        // Hoist entity resolution outside the inner store-scan loop (Greptile P2).
+        // resolve_entity sorts aliases every call — O(N_aliases); calling it once
+        // per fact instead of once per (fact × store_entry) pair eliminates
+        // redundant alias scans.
+        let new_entity = store.resolve_entity(fact);
+
         // Scan existing enriched child memories for contradictions
         for i in 0..store.len() {
             let entry = match store.entry_at(i) {
@@ -1107,8 +1113,7 @@ fn detect_supersedes_pairs(
 
             // Same relationship category but different entity = contradiction
             if new_category == old_category && new_rel != old_rel {
-                // KS73: EntityId-based supersession matching
-                let new_entity = store.resolve_entity(fact);
+                // KS73: EntityId-based supersession matching (new_entity hoisted above)
                 let entities_match = match (&new_entity, &entry.entity_id) {
                     (Some(id_a), Some(id_b)) => id_a == id_b,
                     _ => subjects_overlap(fact, &entry.content), // fallback for migration period
@@ -1131,6 +1136,9 @@ fn detect_supersedes_pairs(
             Some(emb) if !emb.is_empty() => emb,
             _ => continue,
         };
+
+        // Hoist entity resolution outside inner store-scan loop (Greptile P2).
+        let new_entity = store.resolve_entity(fact);
 
         for i in 0..store.len() {
             // Skip if already matched by regex pass
@@ -1163,8 +1171,7 @@ fn detect_supersedes_pairs(
             // >0.70 + entity match: semantic supersession (lowered from 0.80
             // to catch v2 open-domain facts with different verb forms)
             if cosine > 0.70 {
-                // KS73: EntityId-based supersession matching
-                let new_entity = store.resolve_entity(fact);
+                // KS73: EntityId-based supersession matching (new_entity hoisted above)
                 let entities_match = match (&new_entity, &entry.entity_id) {
                     (Some(id_a), Some(id_b)) => id_a == id_b,
                     _ => subjects_overlap(fact, &entry.content), // fallback for migration period
@@ -1193,6 +1200,9 @@ fn detect_supersedes_pairs(
         if new_category != "works_at" && new_category != "lives_in" {
             continue;
         }
+
+        // Hoist entity resolution outside inner store-scan loops (Greptile P2).
+        let new_entity = store.resolve_entity(fact);
 
         for i in 0..store.len() {
             if matched_old_indices.contains(&i) {
@@ -1232,8 +1242,7 @@ fn detect_supersedes_pairs(
                 let (old_category, _old_entity) = categorize_relationship(&old_rel);
 
                 if new_category == old_category && new_rel != old_rel {
-                    // KS73: EntityId-based supersession matching
-                    let new_entity = store.resolve_entity(fact);
+                    // KS73: EntityId-based supersession matching (new_entity hoisted above)
                     let entities_match = match (&new_entity, &entry.entity_id) {
                         (Some(id_a), Some(id_b)) => id_a == id_b,
                         _ => subjects_overlap(fact, sentence), // fallback for migration period

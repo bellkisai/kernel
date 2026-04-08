@@ -20,8 +20,8 @@ param(
     [switch]$SkipLongMemEval,
     [int]$LongMemEvalLimit = 0,  # 0 = full 500
     [string]$LongMemEvalModel = "gemma3:1b",
-    [string]$RepoRoot = "C:\Users\lior1\bellkis\kernel",
-    [string]$ObsidianNote = "C:\Users\lior1\Obsidian Vault\ShrimPK Kernel\Benchmark Results.md"
+    [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
+    [string]$ObsidianNote = (Join-Path $env:USERPROFILE "Obsidian Vault\ShrimPK Kernel\Benchmark Results.md")
 )
 
 Set-StrictMode -Version Latest
