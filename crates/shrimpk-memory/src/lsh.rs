@@ -99,6 +99,16 @@ impl CosineHash {
         }
     }
 
+    /// Remove all entries from the index.
+    ///
+    /// Retains hyperplanes and dimension so new entries can be inserted immediately.
+    pub fn clear(&mut self) {
+        for table in &mut self.tables {
+            table.buckets.clear();
+        }
+        self.reverse_index.clear();
+    }
+
     /// Insert an entry into the LSH index.
     ///
     /// Hashes the embedding into each table and adds the id to the matching bucket.

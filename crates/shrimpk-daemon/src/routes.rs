@@ -481,6 +481,23 @@ pub async fn persist(
     })))
 }
 
+/// POST /api/clear — remove all memories and reset engine state.
+pub async fn clear(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let count = state.engine.clear_all().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "status": "cleared",
+        "memories_removed": count
+    })))
+}
+
 /// GET /api/detect — re-scan for local LLM providers and update routing table.
 pub async fn detect_providers(State(state): State<AppState>) -> Json<Value> {
     let providers = crate::detect::detect_providers(&state.http_client).await;

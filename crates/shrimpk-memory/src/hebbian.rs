@@ -124,6 +124,15 @@ impl HebbianGraph {
         }
     }
 
+    /// Remove all edges and reset activation count.
+    ///
+    /// Retains configuration (half_life, lambda, prune_threshold).
+    pub fn clear(&mut self) {
+        self.edges.clear();
+        self.adjacency.clear();
+        self.activation_count = 0;
+    }
+
     /// Current time as seconds since UNIX epoch.
     fn now() -> f64 {
         SystemTime::now()

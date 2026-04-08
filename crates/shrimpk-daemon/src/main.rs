@@ -249,6 +249,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/config", get(routes::config_show))
         .route("/api/config", put(routes::config_set))
         .route("/api/persist", post(routes::persist))
+        .route("/api/clear", post(routes::clear))
         .route("/api/consolidate", post(routes::consolidate))
         .route("/api/bootstrap", post(routes::bootstrap_labels))
         .route("/api/detect", get(routes::detect_providers))

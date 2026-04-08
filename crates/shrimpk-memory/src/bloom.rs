@@ -42,6 +42,12 @@ impl TopicFilter {
         }
     }
 
+    /// Remove all entries and reset the filter.
+    pub fn clear(&mut self) {
+        self.filter.clear();
+        self.entry_count = 0;
+    }
+
     /// Extract text fingerprints: lowercased unigrams (3+ chars) and bigrams.
     ///
     /// Returns a combined vec of individual words and adjacent word pairs

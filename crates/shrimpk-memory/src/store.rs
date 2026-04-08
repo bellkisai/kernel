@@ -64,6 +64,23 @@ impl EchoStore {
         }
     }
 
+    /// Remove all entries and reset all indices.
+    ///
+    /// Returns the number of entries that were removed.
+    pub fn clear(&mut self) -> usize {
+        let count = self.entries.len();
+        self.entries.clear();
+        self.embeddings.clear();
+        self.id_to_index.clear();
+        self.parent_children.clear();
+        self.label_index.clear();
+        self.entity_index.clear();
+        self.community_summaries.clear();
+        self.entity_store.clear();
+        self.alias_index.clear();
+        count
+    }
+
     /// Add a memory entry to the store.
     ///
     /// The embedding is extracted from the entry and stored in the parallel array.

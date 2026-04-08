@@ -2911,6 +2911,60 @@ impl EchoEngine {
         }
     }
 
+    /// Remove all memories and reset all indices, caches, and persisted data files.
+    ///
+    /// Returns the number of memories that were removed. After this call the engine
+    /// is in the same logical state as a freshly-created instance (same config,
+    /// same embedder, empty store).
+    pub async fn clear_all(&self) -> shrimpk_core::Result<usize> {
+        // 1. Clear store (entries, embeddings, all indices)
+        let count = {
+            let mut store = self.store.write().await;
+            store.clear()
+        };
+
+        // 2. Clear LSH index (keeps hyperplanes)
+        if let Ok(mut lsh) = self.text_lsh.lock() {
+            lsh.clear();
+        }
+
+        // 3. Clear Bloom filter
+        {
+            let mut bloom = self.bloom.write().await;
+            bloom.clear();
+        }
+        if let Ok(mut dirty) = self.bloom_dirty.lock() {
+            *dirty = false;
+        }
+
+        // 4. Clear Hebbian graph (keeps config)
+        {
+            let mut hebbian = self.hebbian.write().await;
+            hebbian.clear();
+        }
+
+        // 5. Reset stats
+        if let Ok(mut stats) = self.stats.lock() {
+            *stats = EchoStats::default();
+        }
+
+        // 6. Delete persisted files
+        let files = [
+            self.config.data_dir.join("echo_store.shrm"),
+            self.config.data_dir.join("hebbian.json"),
+            self.config.data_dir.join("community_summaries.json"),
+            self.config.data_dir.join("entities.json"),
+        ];
+        for path in &files {
+            if path.exists() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+
+        tracing::info!(memories_removed = count, "clear_all completed");
+        Ok(count)
+    }
+
     /// Get the path to the store file.
     fn store_path(&self) -> PathBuf {
         self.config.data_dir.join("echo_store.shrm")
@@ -4814,5 +4868,49 @@ mod tests {
 
         super::deduplicate_parent_child(&mut results, &parent_map);
         assert_eq!(results.len(), 2, "No pairs — nothing removed");
+    }
+
+    #[tokio::test]
+    async fn clear_all_resets_engine() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = EchoConfig {
+            data_dir: dir.path().to_path_buf(),
+            ..EchoConfig::default()
+        };
+        let engine = EchoEngine::new(config).expect("engine");
+
+        // Store some memories
+        for text in &[
+            "Alpha fact",
+            "Beta fact",
+            "Gamma fact",
+            "Delta fact",
+            "Epsilon fact",
+        ] {
+            engine.store(text, "test").await.expect("store");
+        }
+
+        // Verify pre-clear state
+        let pre = engine.echo("Alpha", 5).await.expect("echo");
+        assert!(!pre.is_empty(), "should have results before clear");
+
+        // Clear all
+        let removed = engine.clear_all().await.expect("clear_all");
+        assert_eq!(removed, 5, "should remove all 5 memories");
+
+        // Verify post-clear: echo returns nothing
+        let post = engine.echo("Alpha", 5).await.expect("echo after clear");
+        assert!(post.is_empty(), "should have no results after clear");
+
+        // Verify we can store again after clearing
+        engine
+            .store("Zeta fact", "test")
+            .await
+            .expect("store after clear");
+        let after = engine.echo("Zeta", 5).await.expect("echo after re-store");
+        assert!(
+            !after.is_empty(),
+            "should find newly stored memory after clear"
+        );
     }
 }

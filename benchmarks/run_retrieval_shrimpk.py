@@ -36,7 +36,6 @@ import json
 import os
 import sys
 import time
-import subprocess
 import numpy as np
 
 DAEMON_URL = "http://127.0.0.1:11435"
@@ -84,54 +83,16 @@ def echo_query(query, max_results=10):
 
 
 def clear_memories():
-    """Fast reset: kill daemon, delete data, restart."""
-    data_file = os.path.expanduser("~/.shrimpk-kernel/echo_store.shrm")
-    hebbian_file = os.path.expanduser("~/.shrimpk-kernel/hebbian.json")
-    daemon_bin = os.path.expandvars(r"%LOCALAPPDATA%\ShrimPK\bin\shrimpk-daemon.exe")
-    if not os.path.exists(daemon_bin):
-        daemon_bin = os.path.join(
-            os.path.dirname(__file__), "..", "target", "release",
-            "shrimpk-daemon.exe" if os.name == "nt" else "shrimpk-daemon"
-        )
-
-    # Kill daemon
+    """Clear all memories via the daemon /api/clear endpoint."""
     try:
-        if sys.platform == "win32":
-            subprocess.run(["taskkill", "/F", "/IM", "shrimpk-daemon.exe"],
-                           capture_output=True, timeout=5)
-        else:
-            subprocess.run(["pkill", "-f", "shrimpk-daemon"],
-                           capture_output=True, timeout=5)
-    except Exception:
-        pass
-    time.sleep(0.3)
-
-    # Delete data files
-    for f in [data_file, hebbian_file]:
-        if os.path.exists(f):
-            try:
-                os.remove(f)
-            except Exception:
-                pass
-
-    # Restart daemon
-    try:
-        if sys.platform == "win32":
-            CREATE_NO_WINDOW = 0x08000000
-            subprocess.Popen([daemon_bin], creationflags=CREATE_NO_WINDOW)
-        else:
-            subprocess.Popen([daemon_bin],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as e:
-        print(f"  WARNING: Could not restart daemon: {e}")
-        return False
-
-    for _ in range(20):
-        time.sleep(0.3)
-        if daemon_healthy():
+        r = requests.post(f"{DAEMON_URL}/api/clear", timeout=10)
+        if r.status_code == 200:
             return True
-    print("  WARNING: Daemon did not restart in time")
-    return False
+        print(f"  WARNING: /api/clear returned {r.status_code}: {r.text[:200]}")
+        return False
+    except Exception as e:
+        print(f"  WARNING: /api/clear failed: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
