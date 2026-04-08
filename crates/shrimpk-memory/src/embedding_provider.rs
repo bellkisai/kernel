@@ -128,7 +128,14 @@ fn resolve_fastembed_model(name: &str) -> Result<(EmbeddingModel, usize)> {
 /// Works with any endpoint that implements the `/v1/embeddings` contract:
 /// OpenAI, Ollama, LiteLLM, vLLM, Azure OpenAI, etc.
 ///
-/// API key is read from `SHRIMPK_EMBEDDING_API_KEY` env var — never stored in config.
+/// API key is read from `SHRIMPK_EMBEDDING_API_KEY` env var -- never stored in config.
+///
+/// # Blocking
+///
+/// Uses [`ureq`] (synchronous HTTP). All calls block the current thread for up to 30 s.
+/// Callers in async contexts **must** invoke this provider through
+/// [`EchoEngine::embed_blocking()`](crate::echo::EchoEngine::embed_blocking) which uses
+/// `tokio::task::block_in_place` to prevent worker-thread starvation.
 pub struct OpenAIProvider {
     url: String,
     model: String,
@@ -172,6 +179,14 @@ impl OpenAIProvider {
     }
 
     /// Call the embedding API for a batch of texts.
+    ///
+    /// # Blocking
+    ///
+    /// This method performs a synchronous HTTP POST via [`ureq`] and will block the
+    /// calling thread for up to 30 s (the global timeout configured in [`Self::new`]).
+    /// In async contexts it is always reached through
+    /// [`EchoEngine::embed_blocking()`](crate::echo::EchoEngine::embed_blocking),
+    /// which wraps the call in `tokio::task::block_in_place`.
     fn call_api(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let endpoint = format!("{}/v1/embeddings", self.url);
 
