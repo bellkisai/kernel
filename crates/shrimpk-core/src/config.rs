@@ -737,6 +737,7 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
     let mut config = EchoConfig::auto_detect();
 
     // Layer 2: file overrides
+    let mut dim_set_by_file = false;
     if let Some(fc) = load_config_file()? {
         if let Some(v) = fc.max_memories {
             config.max_memories = v;
@@ -758,6 +759,7 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         }
         if let Some(v) = fc.embedding_dim {
             config.embedding_dim = v;
+            dim_set_by_file = true;
         }
         if let Some(v) = fc.use_lsh {
             config.use_lsh = v;
@@ -960,9 +962,11 @@ pub fn resolve_config() -> crate::Result<EchoConfig> {
         config.embedding_api_url = v;
     }
 
-    // Auto-infer embedding_dim from model name if not explicitly overridden
-    let dim_explicitly_set = std::env::var("SHRIMPK_EMBEDDING_DIM").is_ok();
-    if !dim_explicitly_set {
+    // Auto-infer embedding_dim from model name unless explicitly overridden
+    // by either env var (Layer 3) or config file (Layer 2).
+    if let Some(v) = env_usize("SHRIMPK_EMBEDDING_DIM")? {
+        config.embedding_dim = v;
+    } else if !dim_set_by_file {
         config.embedding_dim = config.infer_embedding_dim();
     }
 

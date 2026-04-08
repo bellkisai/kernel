@@ -346,12 +346,7 @@ impl EchoEngine {
         //    - Reformulated text if available (structured form embeds better)
         //    - Otherwise original text (semantic meaning preserved)
         let embed_text = reformulated.as_deref().unwrap_or(text);
-        let embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(embed_text)?
-        };
+        let embedding = self.embed_blocking(|e| e.embed_text(embed_text))?;
 
         // 4. Build entry with auto-categorization for adaptive decay
         let category = self.reformulator.categorize(text);
@@ -559,12 +554,7 @@ impl EchoEngine {
         }
 
         // 1. Embed image with CLIP
-        let vision_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_image(image_data)?
-        };
+        let vision_embedding = self.embed_blocking(|e| e.embed_image(image_data))?;
 
         let vision_embedding = vision_embedding.ok_or_else(|| {
             ShrimPKError::Embedding("Vision model not available — cannot embed image".into())
@@ -573,10 +563,7 @@ impl EchoEngine {
         // 2. Build content and optional text embedding for cross-modal recall
         let content = description.unwrap_or("[image]").to_string();
         let text_embedding = if let Some(desc) = description {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(desc)?
+            self.embed_blocking(|e| e.embed_text(desc))?
         } else {
             Vec::new()
         };
@@ -700,12 +687,7 @@ impl EchoEngine {
         }
 
         // 1. Embed audio with speech stack
-        let speech_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_audio(pcm_f32, sample_rate)?
-        };
+        let speech_embedding = self.embed_blocking(|e| e.embed_audio(pcm_f32, sample_rate))?;
 
         let speech_embedding = speech_embedding.ok_or_else(|| {
             ShrimPKError::Embedding("Speech models not available — cannot embed audio".into())
@@ -714,10 +696,7 @@ impl EchoEngine {
         // 2. Build content and optional text embedding for cross-modal recall
         let content = description.unwrap_or("[audio]").to_string();
         let text_embedding = if let Some(desc) = description {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(desc)?
+            self.embed_blocking(|e| e.embed_text(desc))?
         } else {
             Vec::new()
         };
@@ -840,35 +819,32 @@ impl EchoEngine {
         let reformulated = self.reformulator.reformulate(text_for_reformulation);
         let embed_text = reformulated.as_deref().unwrap_or(text);
 
-        let (text_embedding, vision_embedding, speech_embedding) = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+        let (text_embedding, vision_embedding, speech_embedding) =
+            self.embed_blocking(|embedder| {
+                let text_emb = embedder.embed_text(embed_text)?;
+
+                // 2. Optional vision embedding
+                #[cfg(feature = "vision")]
+                let vis_emb = if let Some(img) = image_data {
+                    embedder.embed_image(img)?
+                } else {
+                    None
+                };
+                #[cfg(not(feature = "vision"))]
+                let vis_emb: Option<Vec<f32>> = None;
+
+                // 3. Optional speech embedding
+                #[cfg(feature = "speech")]
+                let speech_emb = if let Some((pcm, sr)) = audio_pcm {
+                    embedder.embed_audio(pcm, sr)?
+                } else {
+                    None
+                };
+                #[cfg(not(feature = "speech"))]
+                let speech_emb: Option<Vec<f32>> = None;
+
+                Ok((text_emb, vis_emb, speech_emb))
             })?;
-
-            let text_emb = embedder.embed_text(embed_text)?;
-
-            // 2. Optional vision embedding
-            #[cfg(feature = "vision")]
-            let vis_emb = if let Some(img) = image_data {
-                embedder.embed_image(img)?
-            } else {
-                None
-            };
-            #[cfg(not(feature = "vision"))]
-            let vis_emb: Option<Vec<f32>> = None;
-
-            // 3. Optional speech embedding
-            #[cfg(feature = "speech")]
-            let speech_emb = if let Some((pcm, sr)) = audio_pcm {
-                embedder.embed_audio(pcm, sr)?
-            } else {
-                None
-            };
-            #[cfg(not(feature = "speech"))]
-            let speech_emb: Option<Vec<f32>> = None;
-
-            (text_emb, vis_emb, speech_emb)
-        };
 
         // 4. Build entry with all embeddings
         let category = self.reformulator.categorize(text);
@@ -1070,12 +1046,7 @@ impl EchoEngine {
         };
 
         // 1. Embed the (possibly expanded) query
-        let query_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(&effective_query)?
-        };
+        let query_embedding = self.embed_blocking(|e| e.embed_text(&effective_query))?;
 
         // 2. Bloom filter pre-check — skip everything if no fingerprints match.
         //    Bypass for small stores (< 50 entries) where Bloom adds risk without benefit.
@@ -1817,12 +1788,7 @@ impl EchoEngine {
         let start = std::time::Instant::now();
 
         // 1. Embed query with CLIP text encoder
-        let query_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text_for_vision(query)?
-        };
+        let query_embedding = self.embed_blocking(|e| e.embed_text_for_vision(query))?;
 
         let query_embedding = match query_embedding {
             Some(emb) => emb,
@@ -2300,12 +2266,7 @@ impl EchoEngine {
         }
 
         // Embed the entity name for ranking
-        let mut embedder = self
-            .embedder
-            .lock()
-            .map_err(|e| ShrimPKError::Memory(format!("lock: {e}")))?;
-        let query_emb = embedder.embed_text(entity)?;
-        drop(embedder);
+        let query_emb = self.embed_blocking(|e| e.embed_text(entity))?;
 
         let mut scored: Vec<(usize, f32)> = indices
             .iter()
@@ -3002,6 +2963,23 @@ impl EchoEngine {
                 parent.enriched = true;
             }
         }
+    }
+
+    /// Lock the embedder and run a blocking embedding operation.
+    ///
+    /// Uses `tokio::task::block_in_place` to inform the Tokio scheduler that
+    /// this thread will block, preventing worker-thread starvation. Critical
+    /// for API-based providers (OpenAI) where network I/O can take seconds;
+    /// harmless for local fastembed calls (~5ms).
+    fn embed_blocking<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut MultiEmbedder) -> Result<R>,
+    {
+        let mut embedder = self
+            .embedder
+            .lock()
+            .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+        tokio::task::block_in_place(|| f(&mut embedder))
     }
 
     /// Test-only: generate an embedding for text using the engine's embedder.
