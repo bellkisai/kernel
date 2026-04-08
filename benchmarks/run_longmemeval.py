@@ -2,20 +2,29 @@
 """
 ShrimPK LongMemEval Benchmark Runner
 
-Evaluates ShrimPK Echo Memory against the LongMemEval benchmark (ICLR 2025).
-Comparison target: Hindsight 91.4% (Gemini-3), Supermemory 85.2% (Gemini-3).
+Evaluates ShrimPK Echo Memory against the LongMemEval-S benchmark (ICLR 2025).
+Prompt template aligned with the official LongMemEval run_generation.py so that
+GPT-4o judge scores are directly comparable to published results.
 
-Uses Ollama for the reader LLM (no paid APIs).
+Comparison targets (LongMemEval-S, GPT-4o judge):
+  - Zep/Graphiti: 71% task-averaged
+  - Hindsight: 91.4% (Gemini-3)
+  - Supermemory: 85.2% (Gemini-3)
 
-Flow:
+Pipeline:
   1. For each question, ingest all conversation sessions into a fresh ShrimPK instance
   2. Query ShrimPK echo with the question
-  3. Feed retrieved memories + question to Ollama for answering
-  4. Output JSONL for evaluation with evaluate_qa.py
+  3. Feed retrieved memories + question to Ollama reader (official prompt format)
+  4. Output JSONL for evaluation with evaluate_qa.py (GPT-4o judge)
 
 Usage:
   python run_longmemeval.py --model gemma3:1b --limit 5
-  python run_longmemeval.py --model qwen2.5:7b
+  python run_longmemeval.py --model qwen2.5:3b
+
+Evaluate (requires OPENAI_API_KEY):
+  cd LongMemEval/src/evaluation
+  python evaluate_qa.py gpt-4o <results.jsonl> <oracle.json>
+  python print_qa_metrics.py <results.jsonl.eval-results-gpt-4o> <oracle.json>
 """
 
 import argparse
@@ -146,33 +155,30 @@ def truncate_context(context_parts, max_total=16000, max_per_item=3000):
     return truncated
 
 
-def ask_ollama(question, context, model="gemma3:1b"):
-    """Ask Ollama to answer based on retrieved context."""
-    system_prompt = (
-        "You are answering questions about past conversations. "
-        "Use ONLY the retrieved conversation memories below to answer. "
-        "If the information is not in the memories, say you don't have that information. "
-        "Be concise and direct. Give short factual answers, ideally one sentence."
+def ask_ollama(question, context, question_date, model="gemma3:1b"):
+    """Ask Ollama to answer based on retrieved context.
+
+    Prompt aligned with the official LongMemEval run_generation.py template
+    so that evaluation scores are comparable to published results (Zep, Graphiti, etc.).
+    """
+    user_prompt = (
+        "I will give you several history chats between you and a user. "
+        "Please answer the question based on the relevant chat history.\n\n\n"
+        f"History Chats:\n\n{context}\n\n"
+        f"Current Date: {question_date}\n"
+        f"Question: {question}\n"
+        "Answer:"
     )
-
-    user_prompt = f"""Retrieved memories:
-
-{context}
-
-Question: {question}
-
-Answer in one short sentence."""
 
     r = requests.post(
         f"{OLLAMA_URL}/api/chat",
         json={
             "model": model,
             "messages": [
-                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 128},
+            "options": {"temperature": 0, "num_predict": 500},
         },
         timeout=300,
     )
@@ -260,18 +266,28 @@ def run_benchmark(dataset_path, output_path, model="gemma3:1b", max_results=10,
         if count > 0:
             cat_echo_hits[q_type] = cat_echo_hits.get(q_type, 0) + 1
 
-        # Format context (truncated to fit model context window)
+        # Format context as dated sessions (aligned with official LongMemEval format)
         raw_parts = []
-        for r in echo_result.get("results", []):
-            sim = r.get("similarity", 0)
+        for idx, r in enumerate(echo_result.get("results", []), 1):
             content = r.get("content", "")
-            raw_parts.append(f"[Similarity: {sim:.0%}]\n{content}")
+            source = r.get("source", "")
+            # Extract date from content if present (sessions are stored with [Date: ...] prefix)
+            session_date = "unknown"
+            if content.startswith("[Date:"):
+                end = content.find("]")
+                if end > 0:
+                    session_date = content[6:end].strip()
+                    content = content[end+1:].strip()
+            raw_parts.append(
+                f"### Session {idx}:\nSession Date: {session_date}\nSession Content:\n{content}"
+            )
         parts = truncate_context(raw_parts)
-        context = "\n\n---\n\n".join(parts) if parts else "No relevant memories found."
+        context = "\n\n".join(parts) if parts else "No relevant memories found."
 
-        # Ask Ollama
+        # Ask Ollama (with question_date for temporal reasoning)
+        question_date = item.get("question_date", "unknown")
         try:
-            hypothesis = ask_ollama(question, context, model=model)
+            hypothesis = ask_ollama(question, context, question_date, model=model)
             print(f"  A: {hypothesis[:100]}...")
         except Exception as e:
             print(f"  LLM ERROR: {e}")
