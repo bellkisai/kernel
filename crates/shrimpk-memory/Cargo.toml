@@ -61,3 +61,7 @@ dirs = { workspace = true, optional = true }
 tempfile = "3"
 # image crate for creating test PNG data in vision tests
 image = "0.25"
+
+[[test]]
+name = "lme_micro_benchmark"
+required-features = ["test-helpers"]
