@@ -2978,10 +2978,12 @@ impl EchoEngine {
 
     /// Lock the embedder and run a blocking embedding operation.
     ///
-    /// Uses `tokio::task::block_in_place` to inform the Tokio scheduler that
-    /// this thread will block, preventing worker-thread starvation. Critical
-    /// for API-based providers (OpenAI) where network I/O can take seconds;
-    /// harmless for local fastembed calls (~5ms).
+    /// On a **multi-thread** Tokio runtime (the daemon) this uses
+    /// `tokio::task::block_in_place` to inform the scheduler that the
+    /// current thread will block, preventing worker-thread starvation.
+    /// On a **current-thread** runtime (`#[tokio::test]`) or outside
+    /// Tokio entirely (sync tests, CLI) we call `f` directly, because
+    /// `block_in_place` panics on a single-threaded runtime.
     fn embed_blocking<F, R>(&self, f: F) -> Result<R>
     where
         F: FnOnce(&mut MultiEmbedder) -> Result<R>,
@@ -2990,7 +2992,14 @@ impl EchoEngine {
             .embedder
             .lock()
             .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
-        tokio::task::block_in_place(|| f(&mut embedder))
+        // Use block_in_place on multi-thread runtime to prevent worker starvation.
+        // Fall back to direct call on current_thread runtime (tests) or outside Tokio.
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| f(&mut embedder))
+            }
+            _ => f(&mut embedder),
+        }
     }
 
     /// Test-only: generate an embedding for text using the engine's embedder.
