@@ -294,6 +294,7 @@ def run_retrieval(dataset_path, output_path, max_results=10, limit=None, resume=
                 "corpus_id": source,
                 "text": text,
                 "timestamp": timestamp,
+                "score": r.get("final_score", r.get("similarity", 0.0)),
             })
 
         # Fill in un-retrieved sessions at the end (so all sessions appear in ranking)
@@ -303,6 +304,7 @@ def run_retrieval(dataset_path, output_path, max_results=10, limit=None, resume=
                     "corpus_id": sid,
                     "text": text,
                     "timestamp": ts,
+                    "score": 0.0,
                 })
 
         # Build rankings array (indices into corpus_ids) for metric computation
