@@ -184,9 +184,17 @@ impl OpenAIProvider {
     ///
     /// This method performs a synchronous HTTP POST via [`ureq`] and will block the
     /// calling thread for up to 30 s (the global timeout configured in [`Self::new`]).
-    /// In async contexts it is always reached through
-    /// [`EchoEngine::embed_blocking()`](crate::echo::EchoEngine::embed_blocking),
-    /// which wraps the call in `tokio::task::block_in_place`.
+    ///
+    /// When running on a **multi-thread** Tokio runtime (the daemon) the blocking
+    /// HTTP call is wrapped in [`tokio::task::block_in_place`] to inform the
+    /// scheduler and prevent worker-thread starvation.  On a **current-thread**
+    /// runtime (`#[tokio::test]`) or outside Tokio entirely (sync tests, CLI) the
+    /// request runs directly, because `block_in_place` panics on a single-threaded
+    /// runtime.
+    ///
+    /// This is defense-in-depth: [`EchoEngine::embed_blocking()`] also wraps the
+    /// outer call with `block_in_place` for the mutex-lock concern; the inner wrap
+    /// here covers the provider-specific HTTP concern.
     fn call_api(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let endpoint = format!("{}/v1/embeddings", self.url);
 
@@ -207,65 +215,78 @@ impl OpenAIProvider {
             "External embedding API call"
         );
 
-        let mut req = self.agent.post(&endpoint);
-        if let Some(key) = &self.api_key {
-            req = req.header("Authorization", &format!("Bearer {key}"));
+        // Closure that performs the synchronous HTTP request and parses the response.
+        // Factored out so we can conditionally wrap it with block_in_place.
+        let do_request = || -> Result<Vec<Vec<f32>>> {
+            let mut req = self.agent.post(&endpoint);
+            if let Some(key) = &self.api_key {
+                req = req.header("Authorization", &format!("Bearer {key}"));
+            }
+
+            let mut resp = req.send_json(&body).map_err(|e| {
+                ShrimPKError::Embedding(format!("OpenAI embedding API error at {endpoint}: {e}"))
+            })?;
+
+            let json: serde_json::Value = resp.body_mut().read_json().map_err(|e| {
+                ShrimPKError::Embedding(format!("OpenAI embedding API parse error: {e}"))
+            })?;
+
+            // Extract embeddings: {"data": [{"embedding": [...], "index": 0}, ...]}
+            let data = json["data"].as_array().ok_or_else(|| {
+                ShrimPKError::Embedding(format!(
+                    "OpenAI embedding API: missing 'data' array in response: {}",
+                    truncate_json(&json)
+                ))
+            })?;
+
+            // Sort by index to maintain input order
+            let mut indexed: Vec<(usize, Vec<f32>)> = data
+                .iter()
+                .filter_map(|item| {
+                    let index = item["index"].as_u64()? as usize;
+                    let embedding: Vec<f32> = item["embedding"]
+                        .as_array()?
+                        .iter()
+                        .filter_map(|v| v.as_f64().map(|f| f as f32))
+                        .collect();
+                    Some((index, embedding))
+                })
+                .collect();
+
+            indexed.sort_by_key(|(i, _)| *i);
+            let embeddings: Vec<Vec<f32>> = indexed.into_iter().map(|(_, e)| e).collect();
+
+            if embeddings.len() != texts.len() {
+                return Err(ShrimPKError::Embedding(format!(
+                    "OpenAI embedding API returned {} embeddings for {} inputs",
+                    embeddings.len(),
+                    texts.len()
+                )));
+            }
+
+            // Validate dimension
+            if let Some(first) = embeddings.first()
+                && first.len() != self.dim
+            {
+                return Err(ShrimPKError::Embedding(format!(
+                    "OpenAI embedding dimension mismatch: expected {}, got {} from model '{}'",
+                    self.dim,
+                    first.len(),
+                    self.model
+                )));
+            }
+
+            Ok(embeddings)
+        };
+
+        // Wrap blocking HTTP in block_in_place on multi-thread Tokio runtime
+        // to prevent worker-thread starvation (ureq has a 30 s timeout).
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(do_request)
+            }
+            _ => do_request(),
         }
-
-        let mut resp = req.send_json(&body).map_err(|e| {
-            ShrimPKError::Embedding(format!("OpenAI embedding API error at {endpoint}: {e}"))
-        })?;
-
-        let json: serde_json::Value = resp.body_mut().read_json().map_err(|e| {
-            ShrimPKError::Embedding(format!("OpenAI embedding API parse error: {e}"))
-        })?;
-
-        // Extract embeddings from response: {"data": [{"embedding": [...], "index": 0}, ...]}
-        let data = json["data"].as_array().ok_or_else(|| {
-            ShrimPKError::Embedding(format!(
-                "OpenAI embedding API: missing 'data' array in response: {}",
-                truncate_json(&json)
-            ))
-        })?;
-
-        // Sort by index to maintain input order
-        let mut indexed: Vec<(usize, Vec<f32>)> = data
-            .iter()
-            .filter_map(|item| {
-                let index = item["index"].as_u64()? as usize;
-                let embedding: Vec<f32> = item["embedding"]
-                    .as_array()?
-                    .iter()
-                    .filter_map(|v| v.as_f64().map(|f| f as f32))
-                    .collect();
-                Some((index, embedding))
-            })
-            .collect();
-
-        indexed.sort_by_key(|(i, _)| *i);
-        let embeddings: Vec<Vec<f32>> = indexed.into_iter().map(|(_, e)| e).collect();
-
-        if embeddings.len() != texts.len() {
-            return Err(ShrimPKError::Embedding(format!(
-                "OpenAI embedding API returned {} embeddings for {} inputs",
-                embeddings.len(),
-                texts.len()
-            )));
-        }
-
-        // Validate dimension
-        if let Some(first) = embeddings.first()
-            && first.len() != self.dim
-        {
-            return Err(ShrimPKError::Embedding(format!(
-                "OpenAI embedding dimension mismatch: expected {}, got {} from model '{}'",
-                self.dim,
-                first.len(),
-                self.model
-            )));
-        }
-
-        Ok(embeddings)
     }
 }
 
