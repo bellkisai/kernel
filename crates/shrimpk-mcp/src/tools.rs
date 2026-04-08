@@ -701,6 +701,29 @@ pub fn handle_config_show(config: &EchoConfig) -> Result<String, String> {
             }
         ),
         String::new(),
+        "  Embedding Provider:".to_string(),
+        format!(
+            "  {:25} {:>15}  {}",
+            "embedding_provider",
+            config.embedding_provider.to_string(),
+            source(
+                "SHRIMPK_EMBEDDING_PROVIDER",
+                fc.embedding_provider.is_some()
+            )
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "embedding_model",
+            truncate(&config.embedding_model, 30),
+            source("SHRIMPK_EMBEDDING_MODEL", fc.embedding_model.is_some())
+        ),
+        format!(
+            "  {:25} {:>15}  {}",
+            "embedding_api_url",
+            truncate(&config.embedding_api_url, 30),
+            source("SHRIMPK_EMBEDDING_API_URL", fc.embedding_api_url.is_some())
+        ),
+        String::new(),
         "  Intelligence Engine:".to_string(),
         format!(
             "  {:25} {:>15}  {}",
@@ -817,6 +840,9 @@ pub fn handle_config_set(args: &Value) -> Result<String, String> {
         "use_full_actr_history" => {
             fc.use_full_actr_history = Some(value.parse().map_err(|_| "Invalid boolean")?)
         }
+        "embedding_provider" => fc.embedding_provider = Some(value.parse().map_err(|e: String| e)?),
+        "embedding_model" => fc.embedding_model = Some(value.to_string()),
+        "embedding_api_url" => fc.embedding_api_url = Some(value.to_string()),
         other => return Err(format!("Unknown config key: \"{other}\"")),
     }
 
