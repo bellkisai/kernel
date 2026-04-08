@@ -2988,17 +2988,25 @@ impl EchoEngine {
     where
         F: FnOnce(&mut MultiEmbedder) -> Result<R>,
     {
-        let mut embedder = self
-            .embedder
-            .lock()
-            .map_err(|e| ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}")))?;
+        let embedder_mutex = &self.embedder;
         // Use block_in_place on multi-thread runtime to prevent worker starvation.
-        // Fall back to direct call on current_thread runtime (tests) or outside Tokio.
+        // Both the lock acquisition AND inference run inside block_in_place so that
+        // a contended lock() does not silently block a Tokio worker thread.
         match tokio::runtime::Handle::try_current() {
             Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
-                tokio::task::block_in_place(|| f(&mut embedder))
+                tokio::task::block_in_place(|| {
+                    let mut embedder = embedder_mutex.lock().map_err(|e| {
+                        ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+                    })?;
+                    f(&mut embedder)
+                })
             }
-            _ => f(&mut embedder),
+            _ => {
+                let mut embedder = embedder_mutex.lock().map_err(|e| {
+                    ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+                })?;
+                f(&mut embedder)
+            }
         }
     }
 
