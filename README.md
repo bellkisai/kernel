@@ -73,6 +73,22 @@ In nature, cleaner shrimp maintain entire reef ecosystems — removing parasites
 | RAM (1M memories, f32) | ~1.8 GB |
 | RAM (1M memories, binary) | ~150 MB |
 
+## Benchmarks
+
+| Benchmark | Score | Notes |
+|-----------|-------|-------|
+| Micro-benchmark (20q, seeded children) | **20/20 (100%)** | Deterministic, no LLM |
+| Multi-hop retrieval (4q) | **4/4 (100%)** | 2-hop chain queries, embedding-only |
+| Embedding-only recall (20q) | 16/20 (80%) | No consolidation |
+| LongMemEval-S (500q) | — | Full results pending |
+
+Reproduce locally:
+
+```bash
+cargo test --test echo_micro_benchmark -- --ignored --nocapture benchmark_with_seeded_children
+cargo test --test echo_micro_benchmark -- --ignored --nocapture benchmark_multi_hop
+```
+
 ## Multimodal Memory
 
 ShrimPK v0.5.0 introduces a 3-channel architecture: **text**, **vision**, and **speech**. Each channel has its own embedding model, LSH index, and persistence section -- unified under a single Echo Memory engine.
