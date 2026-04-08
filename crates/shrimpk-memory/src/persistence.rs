@@ -40,7 +40,8 @@ use chrono::{DateTime, Utc};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use shrimpk_core::{
-    MemoryCategory, MemoryEntry, MemoryId, Modality, Result, SensitivityLevel, ShrimPKError,
+    EntityId, MemoryCategory, MemoryEntry, MemoryId, Modality, Result, SensitivityLevel,
+    ShrimPKError,
 };
 use std::io::Write;
 use std::path::Path;
@@ -143,6 +144,9 @@ pub struct MemoryMeta {
     /// When this memory (or its parent) was superseded by a newer fact (KS71).
     #[serde(default)]
     pub superseded_at: Option<DateTime<Utc>>,
+    /// Resolved entity this memory is about (KS73).
+    #[serde(default)]
+    pub entity_id: Option<EntityId>,
 }
 
 impl MemoryMeta {
@@ -176,6 +180,7 @@ impl MemoryMeta {
             retrieval_history_secs: entry.retrieval_history_secs.clone(),
             triples: entry.triples.clone(),
             superseded_at: entry.superseded_at,
+            entity_id: entry.entity_id.clone(),
         }
     }
 
@@ -211,6 +216,7 @@ impl MemoryMeta {
             retrieval_history_secs: self.retrieval_history_secs,
             triples: self.triples,
             superseded_at: self.superseded_at,
+            entity_id: self.entity_id,
         }
     }
 }
@@ -850,6 +856,58 @@ pub fn load_community_summaries(store: &mut EchoStore, data_dir: &Path) -> Resul
     let count = summaries.len();
     *store.summaries_mut() = summaries;
     tracing::debug!(path = %path.display(), count, "Community summaries loaded");
+    Ok(())
+}
+
+/// Save entities to a sidecar JSON file (KS73).
+///
+/// Stored alongside the SHRM binary as `entities.json`.
+pub fn save_entities(store: &EchoStore, data_dir: &Path) -> Result<()> {
+    let entities = store.all_entities();
+    if entities.is_empty() {
+        return Ok(());
+    }
+    let path = data_dir.join("entities.json");
+    let json = serde_json::to_string_pretty(entities)
+        .map_err(|e| ShrimPKError::Persistence(format!("Failed to serialize entities: {e}")))?;
+    // Atomic write: write to .tmp then rename, same as SHRM binary (F-06 pattern).
+    // A crash mid-write leaves the .tmp file; the prior entities.json remains intact.
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json).map_err(|e| {
+        ShrimPKError::Persistence(format!("Failed to write {}: {e}", tmp_path.display()))
+    })?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        ShrimPKError::Persistence(format!("Atomic rename failed for entities: {e}"))
+    })?;
+    tracing::debug!(path = %path.display(), count = entities.len(), "Entities saved");
+    Ok(())
+}
+
+/// Load entities from the sidecar JSON file (KS73).
+///
+/// Returns early if the file does not exist. Rebuilds the alias index from loaded frames.
+pub fn load_entities(store: &mut EchoStore, data_dir: &Path) -> Result<()> {
+    let path = data_dir.join("entities.json");
+    if !path.exists() {
+        return Ok(());
+    }
+    let json = std::fs::read_to_string(&path).map_err(|e| {
+        ShrimPKError::Persistence(format!("Failed to read {}: {e}", path.display()))
+    })?;
+    let entities: std::collections::HashMap<shrimpk_core::EntityId, shrimpk_core::EntityFrame> =
+        serde_json::from_str(&json)
+            .map_err(|e| ShrimPKError::Persistence(format!("Failed to parse entities: {e}")))?;
+    let count = entities.len();
+    // Rebuild alias index from loaded frames (clear stale entries first for hot-reload)
+    let alias_index = store.alias_index_mut();
+    alias_index.clear();
+    for frame in entities.values() {
+        for alias in &frame.aliases {
+            alias_index.insert(alias.to_lowercase(), frame.id.clone());
+        }
+    }
+    *store.entity_store_mut() = entities;
+    tracing::debug!(path = %path.display(), count, "Entities loaded");
     Ok(())
 }
 

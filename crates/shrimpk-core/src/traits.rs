@@ -191,6 +191,20 @@ pub trait Consolidator: Send + Sync {
         }
     }
 
+    /// Combined extraction with known entity names for consistent subject naming (KS73).
+    ///
+    /// When the entity store has existing entities, passing their canonical names
+    /// helps the LLM produce consistent subjects. Default delegates to
+    /// `extract_facts_and_labels`, ignoring entities.
+    fn extract_facts_and_labels_with_entities(
+        &self,
+        text: &str,
+        max_facts: usize,
+        _known_entities: &[String],
+    ) -> ConsolidationOutput {
+        self.extract_facts_and_labels(text, max_facts)
+    }
+
     /// Summarize a cluster of memories for a given label (KS64 — GraphRAG P4).
     ///
     /// Called during consolidation for label clusters with enough members.

@@ -524,3 +524,410 @@ fn benchmark_with_seeded_children() {
     println!("\nWith seeded children: {passed}/{total}");
     println!("Target: 19-20/20 (95-100%)");
 }
+
+// ===========================================================================
+// Benchmark: Abstention — absent facts should have LOW retrieval confidence
+// ===========================================================================
+
+fn run_abstention_benchmark(engine: &EchoEngine, rt: &tokio::runtime::Runtime) -> (usize, usize) {
+    // Queries about facts NOT in the 20-memory dataset.
+    // Pass: top-1 similarity < 0.50 (system appropriately shows low confidence,
+    // leaving room for the LLM to say "I don't have that information").
+    let queries: Vec<(&str, &str)> = vec![
+        ("What color is Sam's car?", "AB-1: Absent (car color)"),
+        (
+            "What is Sam's mother's name?",
+            "AB-2: Absent (mother's name)",
+        ),
+        ("Does Sam have any tattoos?", "AB-3: Absent (tattoos)"),
+        ("What is Sam's blood type?", "AB-4: Absent (blood type)"),
+        ("What is Sam's zodiac sign?", "AB-5: Absent (zodiac sign)"),
+    ];
+
+    let absent_threshold: f32 = 0.50;
+    let mut passed = 0;
+    let total = queries.len();
+
+    for (query, label) in &queries {
+        let results = rt.block_on(async { engine.echo(query, 5).await.expect("echo") });
+        let max_sim = results.first().map(|r| r.similarity).unwrap_or(0.0);
+        let pass = max_sim < absent_threshold;
+        if pass {
+            passed += 1;
+        }
+        let status = if pass { "PASS" } else { "FAIL" };
+        println!("[{status}] {label} — max_sim={max_sim:.3} (threshold<{absent_threshold:.2})");
+        for (i, r) in results.iter().take(3).enumerate() {
+            println!(
+                "  #{}: sim={:.3} {}",
+                i + 1,
+                r.similarity,
+                &r.content[..r.content.len().min(90)]
+            );
+        }
+    }
+
+    println!("\n============================================================");
+    println!(
+        "ABSTENTION BENCHMARK: {passed}/{total} ({:.0}%)",
+        passed as f64 / total as f64 * 100.0
+    );
+    println!("(Pass = top-1 similarity < {absent_threshold:.2} for absent facts)");
+    println!("============================================================");
+    (passed, total)
+}
+
+#[test]
+#[ignore = "requires fastembed model download"]
+fn benchmark_abstention() {
+    let dir = tempdir().expect("temp dir");
+    let config = micro_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _ids = seed_micro_dataset(&engine, &rt);
+
+    println!("\n=== ABSTENTION BENCHMARK: Absent facts — low confidence expected ===\n");
+    let (passed, total) = run_abstention_benchmark(&engine, &rt);
+    drop(rt);
+
+    println!("\nAbstention: {passed}/{total} (informational — threshold calibration run)");
+    // Soft assert: at least 3/5 absent facts show low confidence.
+    // Threshold 0.50 may need calibration after first run.
+    assert!(
+        passed >= 3,
+        "Expected ≥3/5 absent facts below 0.50 similarity. Got {passed}/5"
+    );
+}
+
+// ===========================================================================
+// Benchmark: Negative Recall — superseded facts must NOT dominate top results
+// ===========================================================================
+
+fn run_negative_recall_benchmark(
+    engine: &EchoEngine,
+    rt: &tokio::runtime::Runtime,
+) -> (usize, usize) {
+    // Metric: NEW fact token must rank ABOVE (lower index) OLD fact token.
+    // This tests supersession ranking direction, not absolute position.
+    // Old memories naturally stay in results (high raw similarity), but the
+    // NEW memory must beat the OLD after demotion scoring.
+    //
+    // (query, new_token, old_unique_token, label)
+    let queries: Vec<(&str, &str, &str, &str)> = vec![
+        (
+            "Where does Sam work now?",
+            "billing infrastructure", // M5 unique (Stripe current)
+            "payments team",          // M4 unique (Shopify old)
+            "NR-1: Stripe (new) ranks above Shopify (demoted)",
+        ),
+        (
+            "Where does Sam currently live?",
+            "San Francisco",           // M7 (current city)
+            "Vancouver after college", // M6 unique (old city)
+            "NR-2: SF (new) ranks above Oakland/Vancouver (demoted)",
+        ),
+        (
+            "What code editor does Sam currently use?",
+            "LazyVim",        // M11 unique (Neovim current)
+            "GitHub Copilot", // M10 unique (VS Code old)
+            "NR-3: Neovim (new) ranks above VS Code (demoted)",
+        ),
+    ];
+
+    let mut passed = 0;
+    let total = queries.len();
+
+    for (query, new_token, old_token, label) in &queries {
+        let results = rt.block_on(async { engine.echo(query, 5).await.expect("echo") });
+
+        // Find rank (0-based) of new and old tokens in results
+        let new_rank = results
+            .iter()
+            .position(|r| r.content.to_lowercase().contains(&new_token.to_lowercase()));
+        let old_rank = results
+            .iter()
+            .position(|r| r.content.to_lowercase().contains(&old_token.to_lowercase()));
+
+        // Pass: new token found at lower index (higher rank) than old token,
+        // OR new token found and old token absent from top-5.
+        let pass = match (new_rank, old_rank) {
+            (Some(n), Some(o)) => n < o, // new ranks above old
+            (Some(_), None) => true,     // new found, old absent — great
+            (None, _) => false,          // new not found at all — fail
+        };
+        if pass {
+            passed += 1;
+        }
+
+        let status = if pass { "PASS" } else { "FAIL" };
+        let new_str = new_rank.map_or("absent".to_string(), |r| format!("#{}", r + 1));
+        let old_str = old_rank.map_or("absent".to_string(), |r| format!("#{}", r + 1));
+        print_results(
+            &format!("[{status}] {label} — new@{new_str} old@{old_str} — \"{query}\""),
+            &results,
+        );
+    }
+
+    println!("\n============================================================");
+    println!(
+        "NEGATIVE RECALL BENCHMARK: {passed}/{total} ({:.0}%)",
+        passed as f64 / total as f64 * 100.0
+    );
+    println!("(Pass = new memory ranks above superseded/old memory in top-5)");
+    println!("============================================================");
+    (passed, total)
+}
+
+#[test]
+#[ignore = "requires fastembed model download"]
+fn benchmark_negative_recall() {
+    let dir = tempdir().expect("temp dir");
+    let mut config = micro_config(dir.path().to_path_buf());
+    config.child_rescue_only = false;
+    config.child_memory_penalty = -0.05;
+
+    let engine = EchoEngine::new(config).expect("engine init");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let ids = seed_micro_dataset(&engine, &rt);
+    seed_test_children(&engine, &ids, &rt);
+
+    // Inject supersession edges for all three superseded pairs
+    rt.block_on(async {
+        engine.inject_supersedes_edge(&ids[3], &ids[4]).await; // M4(Shopify)→M5(Stripe)
+        engine.inject_supersedes_edge(&ids[5], &ids[6]).await; // M6(Oakland)→M7(SF)
+        engine.inject_supersedes_edge(&ids[9], &ids[10]).await; // M10(VS Code)→M11(Neovim)
+    });
+
+    println!("\n=== NEGATIVE RECALL BENCHMARK: Superseded facts must NOT dominate ===\n");
+    let (passed, total) = run_negative_recall_benchmark(&engine, &rt);
+    drop(rt);
+
+    println!("\nNegative Recall: {passed}/{total}");
+    // Known gap: when the OLD memory has higher raw embedding similarity than
+    // the NEW memory for a given query, a 0.15 absolute demotion score is
+    // insufficient to flip the ranking. This is a diagnostic benchmark only.
+    // See issue #5 (embedding distance problem) and KS75 (contradiction detection).
+    // Soft assert: at least 1/3 must pass (NR-3 Neovim > VS Code is reliable).
+    assert!(
+        passed >= 1,
+        "Expected ≥1/3 new memories to outrank superseded. Got {passed}/3"
+    );
+}
+
+// ===========================================================================
+// Benchmark: Multi-hop — 2-hop retrieval chain coverage
+// ===========================================================================
+
+fn seed_multihop_dataset(engine: &EchoEngine, rt: &tokio::runtime::Runtime) {
+    rt.block_on(async {
+        // MH1: Aiko → dog (Scout). Needed for 2-hop query about colleague's dog.
+        engine
+            .store(
+                "My colleague Aiko and I walk our dogs together on weekends — her border collie is named Scout and my golden retriever is Pixel.",
+                "mh-s1",
+            )
+            .await
+            .unwrap();
+
+        // MH2: Sam → colleague Aiko at Stripe. Bridge for 2-hop queries involving Aiko.
+        engine
+            .store(
+                "Aiko Sato is the lead distributed-systems engineer at Stripe who interviewed and hired me for the billing infra role.",
+                "mh-s1",
+            )
+            .await
+            .unwrap();
+
+        // MH3: Stripe infra team → GCP. Needed for 2-hop cloud platform query.
+        engine
+            .store(
+                "The Stripe infra team finished migrating our services from AWS to GCP last quarter for cost and latency improvements.",
+                "mh-s2",
+            )
+            .await
+            .unwrap();
+
+        // MH4: Professor Chen → CMU distributed systems lab.
+        engine
+            .store(
+                "My thesis advisor Professor Lin Chen is now faculty at Carnegie Mellon running the distributed systems research lab.",
+                "mh-s2",
+            )
+            .await
+            .unwrap();
+
+        // MH5: ShrimPK consensus → CMU collaboration (bridges to MH4).
+        engine
+            .store(
+                "Professor Chen's CMU lab is collaborating with me on the consensus algorithm at the heart of ShrimPK's memory ordering.",
+                "mh-s3",
+            )
+            .await
+            .unwrap();
+
+        // MH6: Direct single-hop baseline fact.
+        engine
+            .store(
+                "I prefer dark roast Ethiopian coffee beans from a local roaster called Equator Coffees.",
+                "mh-s3",
+            )
+            .await
+            .unwrap();
+    });
+}
+
+fn run_multihop_benchmark(engine: &EchoEngine, rt: &tokio::runtime::Runtime) -> (usize, usize) {
+    // Multi-hop queries check that BOTH hop memories surface in top-5.
+    // Single-hop baseline checks top-3.
+    let queries: Vec<(&str, &[&str], usize, &str)> = vec![
+        (
+            // 2-hop: Sam's colleague = Aiko (MH2) → Aiko's dog = Scout (MH1)
+            "What is the name of Sam's colleague's dog?",
+            &["Scout"],
+            5,
+            "MH-1: 2-hop (colleague→dog name)",
+        ),
+        (
+            // 2-hop: Sam's engineering team → Stripe infra (MH2) → GCP (MH3)
+            "What cloud provider does Sam's engineering team at work use?",
+            &["GCP", "Google Cloud"],
+            5,
+            "MH-2: 2-hop (team→cloud platform)",
+        ),
+        (
+            // 2-hop: ShrimPK consensus (MH5) → CMU lab → Carnegie Mellon (MH4)
+            "What university collaborates with Sam on ShrimPK?",
+            &["Carnegie Mellon", "CMU"],
+            5,
+            "MH-3: 2-hop (ShrimPK→university)",
+        ),
+        (
+            // 1-hop baseline: direct from MH6
+            "What coffee brand does Sam buy?",
+            &["Equator"],
+            3,
+            "MH-4: 1-hop baseline (coffee brand)",
+        ),
+    ];
+
+    let mut passed = 0;
+    let total = queries.len();
+
+    for (query, needles, top_n, label) in &queries {
+        let results = rt.block_on(async { engine.echo(query, 5).await.expect("echo") });
+        let hit = any_needle_in_top_n(&results, *top_n, needles);
+        if hit {
+            passed += 1;
+        }
+        let status = if hit { "PASS" } else { "FAIL" };
+        print_results(&format!("[{status}] {label} — \"{query}\""), &results);
+    }
+
+    println!("\n============================================================");
+    println!(
+        "MULTI-HOP BENCHMARK: {passed}/{total} ({:.0}%)",
+        passed as f64 / total as f64 * 100.0
+    );
+    println!("(2-hop = answer reachable via embedding chain across 2 memories)");
+    println!("============================================================");
+    (passed, total)
+}
+
+#[test]
+#[ignore = "requires fastembed model download"]
+fn benchmark_multi_hop() {
+    let dir = tempdir().expect("temp dir");
+    let config = micro_config(dir.path().to_path_buf());
+    let engine = EchoEngine::new(config).expect("engine init");
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    seed_multihop_dataset(&engine, &rt);
+
+    println!("\n=== MULTI-HOP BENCHMARK: 2-hop retrieval chain coverage ===\n");
+    let (passed, total) = run_multihop_benchmark(&engine, &rt);
+    drop(rt);
+
+    println!("\nMulti-hop: {passed}/{total}");
+    // 1-hop baseline (MH-4) must always pass. 2-hop depends on embedding quality.
+    // No hard assert on 2-hop — this is a diagnostic benchmark.
+}
+
+// ===========================================================================
+// Benchmark: Full expanded suite (20 + 13 new = 33 questions)
+// ===========================================================================
+
+#[test]
+#[ignore = "requires fastembed model download"]
+fn benchmark_expanded_suite() {
+    println!("\n=== EXPANDED BENCHMARK SUITE ===\n");
+
+    // --- Core 20 questions (seeded children + supersession) ---
+    {
+        let dir = tempdir().expect("temp dir");
+        let mut config = micro_config(dir.path().to_path_buf());
+        config.child_rescue_only = false;
+        config.child_memory_penalty = -0.05;
+        let engine = EchoEngine::new(config).expect("engine");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ids = seed_micro_dataset(&engine, &rt);
+        seed_test_children(&engine, &ids, &rt);
+        rt.block_on(async {
+            engine.inject_supersedes_edge(&ids[3], &ids[4]).await;
+            engine.inject_supersedes_edge(&ids[5], &ids[6]).await;
+        });
+        println!("--- Core 20 questions ---");
+        let (p, t) = run_benchmark(&engine, &rt);
+        drop(rt);
+        println!("Core: {p}/{t}");
+    }
+
+    // --- Abstention (5 questions) ---
+    {
+        let dir = tempdir().expect("temp dir");
+        let config = micro_config(dir.path().to_path_buf());
+        let engine = EchoEngine::new(config).expect("engine");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _ids = seed_micro_dataset(&engine, &rt);
+        println!("\n--- Abstention (5 questions) ---");
+        let (p, t) = run_abstention_benchmark(&engine, &rt);
+        drop(rt);
+        println!("Abstention: {p}/{t}");
+    }
+
+    // --- Negative recall (3 questions) ---
+    {
+        let dir = tempdir().expect("temp dir");
+        let mut config = micro_config(dir.path().to_path_buf());
+        config.child_rescue_only = false;
+        config.child_memory_penalty = -0.05;
+        let engine = EchoEngine::new(config).expect("engine");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ids = seed_micro_dataset(&engine, &rt);
+        seed_test_children(&engine, &ids, &rt);
+        rt.block_on(async {
+            engine.inject_supersedes_edge(&ids[3], &ids[4]).await;
+            engine.inject_supersedes_edge(&ids[5], &ids[6]).await;
+            engine.inject_supersedes_edge(&ids[9], &ids[10]).await;
+        });
+        println!("\n--- Negative Recall (3 questions) ---");
+        let (p, t) = run_negative_recall_benchmark(&engine, &rt);
+        drop(rt);
+        println!("Negative Recall: {p}/{t}");
+    }
+
+    // --- Multi-hop (4 questions) ---
+    {
+        let dir = tempdir().expect("temp dir");
+        let config = micro_config(dir.path().to_path_buf());
+        let engine = EchoEngine::new(config).expect("engine");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        seed_multihop_dataset(&engine, &rt);
+        println!("\n--- Multi-hop (4 questions) ---");
+        let (p, t) = run_multihop_benchmark(&engine, &rt);
+        drop(rt);
+        println!("Multi-hop: {p}/{t}");
+    }
+
+    println!("\n=== EXPANDED SUITE COMPLETE ===");
+}

@@ -5,6 +5,7 @@
 //! It has zero heavy dependencies (no ML, no async runtime, no I/O).
 
 pub mod config;
+pub mod entity;
 pub mod error;
 pub mod memory;
 pub mod pii;
@@ -15,6 +16,7 @@ pub use config::{
     EchoConfig, FileConfig, QuantizationMode, RerankerBackend, config_dir, config_path, disk_usage,
     load_config_file, resolve_config, save_config_file,
 };
+pub use entity::{EntityFrame, EntityId, EntityKind};
 pub use error::{Result, ShrimPKError};
 pub use memory::{
     CommunitySummary, EchoResult, GraphCluster, GraphEdge, GraphInterEdge, GraphNeighbor,

@@ -3,7 +3,9 @@
 //! Primary format: binary (`.shrm`) via `crate::persistence` — structured header,
 //! flat embedding array, CRC32 checksum. Falls back to JSON for migration.
 
-use shrimpk_core::{MemoryEntry, MemoryId, Result, ShrimPKError};
+use shrimpk_core::{
+    EntityFrame, EntityId, EntityKind, MemoryEntry, MemoryId, Result, ShrimPKError,
+};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::instrument;
@@ -40,6 +42,10 @@ pub struct EchoStore {
     /// Per-label community summaries (KS64 — GraphRAG P4).
     /// Generated during consolidation for clusters with enough members.
     community_summaries: HashMap<String, shrimpk_core::CommunitySummary>,
+    /// Entity store: EntityId -> EntityFrame (KS73).
+    entity_store: HashMap<EntityId, EntityFrame>,
+    /// Alias index: lowercased alias -> EntityId (KS73).
+    alias_index: HashMap<String, EntityId>,
 }
 
 impl EchoStore {
@@ -53,6 +59,8 @@ impl EchoStore {
             label_index: HashMap::new(),
             entity_index: HashMap::new(),
             community_summaries: HashMap::new(),
+            entity_store: HashMap::new(),
+            alias_index: HashMap::new(),
         }
     }
 
@@ -87,6 +95,12 @@ impl EchoStore {
                 .or_default()
                 .push(index as u32);
             self.entity_index.entry(obj).or_default().push(index as u32);
+        }
+        // Maintain entity_store memory_refs (KS73)
+        if let Some(ref eid) = entry.entity_id
+            && let Some(frame) = self.entity_store.get_mut(eid)
+        {
+            frame.memory_refs.push(entry.id.clone());
         }
         self.entries.push(entry);
         self.embeddings.push(embedding);
@@ -133,6 +147,12 @@ impl EchoStore {
                     }
                 }
             }
+        }
+        // KS73: prune entity memory_refs on remove
+        if let Some(ref entity_id) = self.entries[index].entity_id
+            && let Some(frame) = self.entity_store.get_mut(entity_id)
+        {
+            frame.memory_refs.retain(|id| id != &self.entries[index].id);
         }
 
         if index != last_index {
@@ -351,6 +371,99 @@ impl EchoStore {
     /// Get mutable reference to all community summaries (for persistence load).
     pub fn summaries_mut(&mut self) -> &mut HashMap<String, shrimpk_core::CommunitySummary> {
         &mut self.community_summaries
+    }
+
+    // --- Entity store API (KS73) ---
+
+    /// Scan text for known entity aliases (case-insensitive word-boundary match).
+    /// Returns the first match found. Longest aliases checked first so
+    /// "Sam Torres" matches before "Sam".
+    pub fn resolve_entity(&self, text: &str) -> Option<EntityId> {
+        let lower = text.to_lowercase();
+        // Iterate longest aliases first for greedy matching
+        let mut aliases: Vec<(&str, &EntityId)> = self
+            .alias_index
+            .iter()
+            .map(|(a, e)| (a.as_str(), e))
+            .collect();
+        // Sort: longest first. Tie-break by alias string (lexicographic) for
+        // deterministic output across HashMap iteration orders (Greptile P1).
+        aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(b.0)));
+        for (alias, eid) in aliases {
+            if let Some(pos) = lower.find(alias) {
+                // Word boundary: use chars(), not as_bytes(), to handle UTF-8
+                // correctly — as_bytes()[pos-1] can land on a continuation byte
+                // (0x80–0xBF) and produce a spurious match (Greptile P2).
+                let before_ok = pos == 0
+                    || lower[..pos]
+                        .chars()
+                        .last()
+                        .map(|c| !c.is_alphanumeric())
+                        .unwrap_or(true);
+                let after_pos = pos + alias.len();
+                let after_ok = after_pos >= lower.len()
+                    || lower[after_pos..]
+                        .chars()
+                        .next()
+                        .map(|c| !c.is_alphanumeric())
+                        .unwrap_or(true);
+                if before_ok && after_ok {
+                    return Some(eid.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Get an entity by its ID.
+    pub fn get_entity(&self, id: &EntityId) -> Option<&EntityFrame> {
+        self.entity_store.get(id)
+    }
+
+    /// Get a mutable entity by its ID (KS73: for updating memory_refs during consolidation).
+    pub fn get_entity_mut(&mut self, id: &EntityId) -> Option<&mut EntityFrame> {
+        self.entity_store.get_mut(id)
+    }
+
+    /// Create a new entity and populate the alias index.
+    ///
+    /// Idempotent: if an EntityFrame with this deterministic ID already exists
+    /// (same canonical name), the existing frame is preserved and its
+    /// `memory_refs` are not lost (Greptile P1 — silent clobber prevention).
+    pub fn create_entity(&mut self, name: String, kind: EntityKind) -> EntityId {
+        let frame = EntityFrame::new(name, kind);
+        let id = frame.id.clone();
+        if !self.entity_store.contains_key(&id) {
+            for alias in &frame.aliases {
+                self.alias_index.insert(alias.to_lowercase(), id.clone());
+            }
+            self.entity_store.insert(id.clone(), frame);
+        }
+        id
+    }
+
+    /// Add an alias to an existing entity.
+    pub fn add_alias(&mut self, id: &EntityId, alias: String) {
+        if let Some(frame) = self.entity_store.get_mut(id) {
+            self.alias_index.insert(alias.to_lowercase(), id.clone());
+            frame.aliases.push(alias);
+            frame.updated_at = chrono::Utc::now();
+        }
+    }
+
+    /// Get all entities.
+    pub fn all_entities(&self) -> &HashMap<EntityId, EntityFrame> {
+        &self.entity_store
+    }
+
+    /// Mutable access to entity store (for persistence load).
+    pub fn entity_store_mut(&mut self) -> &mut HashMap<EntityId, EntityFrame> {
+        &mut self.entity_store
+    }
+
+    /// Mutable access to alias index (for persistence load).
+    pub fn alias_index_mut(&mut self) -> &mut HashMap<String, EntityId> {
+        &mut self.alias_index
     }
 
     /// Labels with at least `min` members in the label index.

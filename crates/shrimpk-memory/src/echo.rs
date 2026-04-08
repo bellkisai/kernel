@@ -416,6 +416,46 @@ impl EchoEngine {
             }
         }
 
+        // KS73: resolve entity from subject, not full text
+        // (full-text resolve can match a longer object alias over the shorter subject)
+        {
+            let store = self.store.read().await;
+            let subject = consolidation::extract_subject(&entry.content);
+            if !subject.is_empty()
+                && let Some(entity_id) = store.resolve_entity(&subject)
+            {
+                entry.entity_id = Some(entity_id);
+            }
+        }
+
+        // KS73: self-entity detection for first-person memories
+        if entry.entity_id.is_none() {
+            let lower = text.to_lowercase();
+            let is_first_person = lower.starts_with("i ")
+                || lower.starts_with("my ")
+                || lower.contains(" i ")
+                || lower.contains(" my ")
+                || lower.starts_with("i'm ")
+                || lower.starts_with("i've ");
+
+            if is_first_person {
+                let store = self.store.read().await;
+                let self_entity = store
+                    .all_entities()
+                    .values()
+                    .find(|e| {
+                        e.kind == shrimpk_core::EntityKind::Person
+                            && e.aliases.iter().any(|a| a == "self")
+                    })
+                    .map(|e| e.id.clone());
+                if let Some(eid) = self_entity {
+                    entry.entity_id = Some(eid);
+                }
+                // Don't auto-create self entity at store time — let consolidation handle it
+                // when it has enough context (name extraction from "My name is..." patterns)
+            }
+        }
+
         let id = entry.id.clone();
 
         tracing::debug!(
@@ -423,7 +463,8 @@ impl EchoEngine {
             category = ?category,
             labels = entry.labels.len(),
             novelty = entry.novelty_score,
-            "Memory reformulation + categorization + labeling + novelty step"
+            entity = ?entry.entity_id,
+            "Memory reformulation + categorization + labeling + novelty + entity step"
         );
 
         // 4. Add to store, LSH index, and Bloom filter
@@ -2618,6 +2659,9 @@ impl EchoEngine {
         // Persist community summaries sidecar (KS64)
         crate::persistence::save_community_summaries(&store, &self.config.data_dir)?;
 
+        // Persist entity store sidecar (KS73)
+        crate::persistence::save_entities(&store, &self.config.data_dir)?;
+
         Ok(())
     }
 
@@ -2650,6 +2694,11 @@ impl EchoEngine {
             crate::persistence::load_community_summaries(&mut loaded_store, &config.data_dir)
         {
             tracing::warn!(error = %e, "Failed to load community summaries, continuing without");
+        }
+
+        // Load entity store sidecar (KS73)
+        if let Err(e) = crate::persistence::load_entities(&mut loaded_store, &config.data_dir) {
+            tracing::warn!(error = %e, "Failed to load entities, continuing without");
         }
 
         // Rebuild text LSH index from loaded embeddings
@@ -3053,15 +3102,21 @@ fn build_subject_topic_map(
 
             for &child_idx in child_indices {
                 if let Some(child) = store.entry_at(child_idx) {
+                    // KS73: prefer entity canonical name over triple subject
+                    if let Some(ref eid) = child.entity_id
+                        && let Some(frame) = store.get_entity(eid)
+                    {
+                        subjects.push(frame.canonical_name.clone());
+                        continue;
+                    }
                     for triple in &child.triples {
                         subjects.push(triple.subject.clone());
                     }
-                    // Fallback: extract subject from content
-                    if child.triples.is_empty() {
-                        let subj = crate::consolidation::extract_subject(&child.content);
-                        if !subj.is_empty() {
-                            subjects.push(subj);
-                        }
+                    // Fallback: first word of content as subject
+                    if child.triples.is_empty()
+                        && let Some(word) = child.content.split_whitespace().next()
+                    {
+                        subjects.push(word.to_string());
                     }
                 }
             }

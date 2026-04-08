@@ -190,6 +190,13 @@ pub fn consolidate(
     // creation happens in EchoEngine::consolidate_now() which has embedder access.
     const MAX_ENRICHMENTS_PER_CYCLE: usize = 25;
 
+    // KS73: collect known entity names for LLM prompt grounding
+    let known_entities: Vec<String> = store
+        .all_entities()
+        .values()
+        .map(|f| f.canonical_name.clone())
+        .collect();
+
     if consolidator.name() != "noop" {
         let mut unenriched: Vec<usize> = (0..store.len())
             .filter(|&i| {
@@ -231,7 +238,11 @@ pub fn consolidate(
             // KS67: dynamic max_facts + combined extraction
             // Use dynamic scaling but cap at the operator-configured limit
             let max_facts = dynamic_max_facts(&content).min(config.max_facts_per_memory);
-            let output = consolidator.extract_facts_and_labels(&content, max_facts);
+            let output = consolidator.extract_facts_and_labels_with_entities(
+                &content,
+                max_facts,
+                &known_entities,
+            );
 
             tracing::info!(
                 idx,
@@ -370,6 +381,42 @@ pub fn consolidate(
                             predicate: shrimpk_core::TriplePredicate::Custom(fact_text.to_string()),
                             object: fact_text.to_string(),
                         });
+                    }
+
+                    // KS73: resolve child's entity from subject
+                    // memory_refs maintained by store.add() — do NOT push here
+                    if let Some(ref subject) = child.subject {
+                        let entity_id = if let Some(id) = store.resolve_entity(subject) {
+                            if let Some(frame) = store.get_entity_mut(&id) {
+                                frame.updated_at = chrono::Utc::now();
+                            }
+                            Some(id)
+                        } else {
+                            // New entity — infer kind from triple predicate
+                            // The subject of WorksAt/LivesIn/PrefersTool is a Person;
+                            // PartOf is ambiguous (could be project or person).
+                            let kind = if let Some(triple) = child.triples.first() {
+                                match &triple.predicate {
+                                    shrimpk_core::TriplePredicate::WorksAt => {
+                                        shrimpk_core::EntityKind::Person
+                                    }
+                                    shrimpk_core::TriplePredicate::LivesIn => {
+                                        shrimpk_core::EntityKind::Person
+                                    }
+                                    shrimpk_core::TriplePredicate::PrefersTool => {
+                                        shrimpk_core::EntityKind::Person
+                                    }
+                                    shrimpk_core::TriplePredicate::PartOf => {
+                                        shrimpk_core::EntityKind::Other
+                                    }
+                                    _ => shrimpk_core::EntityKind::Other,
+                                }
+                            } else {
+                                shrimpk_core::EntityKind::Other
+                            };
+                            Some(store.create_entity(subject.clone(), kind))
+                        };
+                        child.entity_id = entity_id;
                     }
 
                     // KS71 P2: same-subject-predicate dedup — update existing child
@@ -569,7 +616,8 @@ pub fn consolidate(
                 continue;
             }
 
-            let output = consolidator.extract_facts_and_labels(&content, 5);
+            let output =
+                consolidator.extract_facts_and_labels_with_entities(&content, 5, &known_entities);
 
             if let Some(label_set) = output.labels
                 && apply_tier2_labels(store, idx, &label_set)
@@ -683,6 +731,8 @@ const DEGENERATE_SUBJECTS: &[&str] = &[
 /// When a small model returns "the user", "I", "me", etc. as the subject,
 /// this function attempts to extract the real topic entity from the fact text.
 /// Falls back to the original subject if no entity can be found.
+///
+/// NOTE: Will be removed once KS73 Track B entity resolution is verified.
 fn fix_degenerate_subject(subject: &str, fact_text: &str) -> String {
     let subj_lower = subject.trim().to_lowercase();
 
@@ -1029,6 +1079,14 @@ fn detect_supersedes_pairs(
             continue;
         }
 
+        // Hoist entity resolution outside the inner store-scan loop (Greptile P2).
+        // resolve_entity sorts aliases every call — O(N_aliases); calling it once
+        // per fact instead of once per (fact × store_entry) pair eliminates
+        // redundant alias scans.
+        // Greptile P1: resolve from subject only, not full fact — longest-alias
+        // matching on full text can resolve to the object entity instead of the subject.
+        let new_entity = store.resolve_entity(&extract_subject(fact));
+
         // Scan existing enriched child memories for contradictions
         for i in 0..store.len() {
             let entry = match store.entry_at(i) {
@@ -1059,9 +1117,12 @@ fn detect_supersedes_pairs(
 
             // Same relationship category but different entity = contradiction
             if new_category == old_category && new_rel != old_rel {
-                // Check if the facts share a subject (simple heuristic:
-                // first word or first two words overlap)
-                if subjects_overlap(fact, &entry.content) {
+                // KS73: EntityId-based supersession matching (new_entity hoisted above)
+                let entities_match = match (&new_entity, &entry.entity_id) {
+                    (Some(id_a), Some(id_b)) => id_a == id_b,
+                    _ => subjects_overlap(fact, &entry.content), // fallback for migration period
+                };
+                if entities_match {
                     matched_old_indices.insert(i);
                     pairs.push((i, fact.clone()));
                     break; // One supersession per fact is enough
@@ -1079,6 +1140,10 @@ fn detect_supersedes_pairs(
             Some(emb) if !emb.is_empty() => emb,
             _ => continue,
         };
+
+        // Hoist entity resolution outside inner store-scan loop (Greptile P2).
+        // Greptile P1: resolve from subject only, not full fact.
+        let new_entity = store.resolve_entity(&extract_subject(fact));
 
         for i in 0..store.len() {
             // Skip if already matched by regex pass
@@ -1108,12 +1173,19 @@ fn detect_supersedes_pairs(
                 continue;
             }
 
-            // >0.70 + subject overlap: semantic supersession (lowered from 0.80
+            // >0.70 + entity match: semantic supersession (lowered from 0.80
             // to catch v2 open-domain facts with different verb forms)
-            if cosine > 0.70 && subjects_overlap(fact, &entry.content) {
-                matched_old_indices.insert(i);
-                pairs.push((i, fact.clone()));
-                break; // One supersession per fact is enough
+            if cosine > 0.70 {
+                // KS73: EntityId-based supersession matching (new_entity hoisted above)
+                let entities_match = match (&new_entity, &entry.entity_id) {
+                    (Some(id_a), Some(id_b)) => id_a == id_b,
+                    _ => subjects_overlap(fact, &entry.content), // fallback for migration period
+                };
+                if entities_match {
+                    matched_old_indices.insert(i);
+                    pairs.push((i, fact.clone()));
+                    break; // One supersession per fact is enough
+                }
             }
         }
     }
@@ -1133,6 +1205,10 @@ fn detect_supersedes_pairs(
         if new_category != "works_at" && new_category != "lives_in" {
             continue;
         }
+
+        // Hoist entity resolution outside inner store-scan loops (Greptile P2).
+        // Greptile P1: resolve from subject only, not full fact.
+        let new_entity = store.resolve_entity(&extract_subject(fact));
 
         for i in 0..store.len() {
             if matched_old_indices.contains(&i) {
@@ -1171,13 +1247,17 @@ fn detect_supersedes_pairs(
 
                 let (old_category, _old_entity) = categorize_relationship(&old_rel);
 
-                if new_category == old_category
-                    && new_rel != old_rel
-                    && subjects_overlap(fact, sentence)
-                {
-                    matched_old_indices.insert(i);
-                    pairs.push((i, fact.clone()));
-                    break;
+                if new_category == old_category && new_rel != old_rel {
+                    // KS73: EntityId-based supersession matching (new_entity hoisted above)
+                    let entities_match = match (&new_entity, &entry.entity_id) {
+                        (Some(id_a), Some(id_b)) => id_a == id_b,
+                        _ => subjects_overlap(fact, sentence), // fallback for migration period
+                    };
+                    if entities_match {
+                        matched_old_indices.insert(i);
+                        pairs.push((i, fact.clone()));
+                        break;
+                    }
                 }
             }
 
