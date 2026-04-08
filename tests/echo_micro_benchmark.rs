@@ -617,8 +617,8 @@ fn run_negative_recall_benchmark(
     let queries: Vec<(&str, &str, &str, &str)> = vec![
         (
             "Where does Sam work now?",
-            "billing infrastructure",  // M5 unique (Stripe current)
-            "payments team",           // M4 unique (Shopify old)
+            "billing infrastructure", // M5 unique (Stripe current)
+            "payments team",          // M4 unique (Shopify old)
             "NR-1: Stripe (new) ranks above Shopify (demoted)",
         ),
         (
@@ -652,9 +652,9 @@ fn run_negative_recall_benchmark(
         // Pass: new token found at lower index (higher rank) than old token,
         // OR new token found and old token absent from top-5.
         let pass = match (new_rank, old_rank) {
-            (Some(n), Some(o)) => n < o,        // new ranks above old
-            (Some(_), None) => true,             // new found, old absent — great
-            (None, _) => false,                  // new not found at all — fail
+            (Some(n), Some(o)) => n < o, // new ranks above old
+            (Some(_), None) => true,     // new found, old absent — great
+            (None, _) => false,          // new not found at all — fail
         };
         if pass {
             passed += 1;
@@ -663,7 +663,10 @@ fn run_negative_recall_benchmark(
         let status = if pass { "PASS" } else { "FAIL" };
         let new_str = new_rank.map_or("absent".to_string(), |r| format!("#{}", r + 1));
         let old_str = old_rank.map_or("absent".to_string(), |r| format!("#{}", r + 1));
-        print_results(&format!("[{status}] {label} — new@{new_str} old@{old_str} — \"{query}\""), &results);
+        print_results(
+            &format!("[{status}] {label} — new@{new_str} old@{old_str} — \"{query}\""),
+            &results,
+        );
     }
 
     println!("\n============================================================");

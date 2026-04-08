@@ -870,8 +870,14 @@ pub fn save_entities(store: &EchoStore, data_dir: &Path) -> Result<()> {
     let path = data_dir.join("entities.json");
     let json = serde_json::to_string_pretty(entities)
         .map_err(|e| ShrimPKError::Persistence(format!("Failed to serialize entities: {e}")))?;
-    std::fs::write(&path, json).map_err(|e| {
-        ShrimPKError::Persistence(format!("Failed to write {}: {e}", path.display()))
+    // Atomic write: write to .tmp then rename, same as SHRM binary (F-06 pattern).
+    // A crash mid-write leaves the .tmp file; the prior entities.json remains intact.
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json).map_err(|e| {
+        ShrimPKError::Persistence(format!("Failed to write {}: {e}", tmp_path.display()))
+    })?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        ShrimPKError::Persistence(format!("Atomic rename failed for entities: {e}"))
     })?;
     tracing::debug!(path = %path.display(), count = entities.len(), "Entities saved");
     Ok(())
@@ -892,8 +898,9 @@ pub fn load_entities(store: &mut EchoStore, data_dir: &Path) -> Result<()> {
         serde_json::from_str(&json)
             .map_err(|e| ShrimPKError::Persistence(format!("Failed to parse entities: {e}")))?;
     let count = entities.len();
-    // Rebuild alias index from loaded frames
+    // Rebuild alias index from loaded frames (clear stale entries first for hot-reload)
     let alias_index = store.alias_index_mut();
+    alias_index.clear();
     for frame in entities.values() {
         for alias in &frame.aliases {
             alias_index.insert(alias.to_lowercase(), frame.id.clone());

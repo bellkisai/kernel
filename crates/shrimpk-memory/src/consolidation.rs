@@ -393,19 +393,21 @@ pub fn consolidate(
                             Some(id)
                         } else {
                             // New entity — infer kind from triple predicate
+                            // The subject of WorksAt/LivesIn/PrefersTool is a Person;
+                            // PartOf is ambiguous (could be project or person).
                             let kind = if let Some(triple) = child.triples.first() {
                                 match &triple.predicate {
                                     shrimpk_core::TriplePredicate::WorksAt => {
-                                        shrimpk_core::EntityKind::Organization
+                                        shrimpk_core::EntityKind::Person
                                     }
                                     shrimpk_core::TriplePredicate::LivesIn => {
-                                        shrimpk_core::EntityKind::Place
+                                        shrimpk_core::EntityKind::Person
                                     }
                                     shrimpk_core::TriplePredicate::PrefersTool => {
-                                        shrimpk_core::EntityKind::Tool
+                                        shrimpk_core::EntityKind::Person
                                     }
                                     shrimpk_core::TriplePredicate::PartOf => {
-                                        shrimpk_core::EntityKind::Project
+                                        shrimpk_core::EntityKind::Other
                                     }
                                     _ => shrimpk_core::EntityKind::Other,
                                 }

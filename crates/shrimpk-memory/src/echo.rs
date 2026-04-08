@@ -416,10 +416,14 @@ impl EchoEngine {
             }
         }
 
-        // KS73: resolve entity from memory text
+        // KS73: resolve entity from subject, not full text
+        // (full-text resolve can match a longer object alias over the shorter subject)
         {
             let store = self.store.read().await;
-            if let Some(entity_id) = store.resolve_entity(&entry.content) {
+            let subject = consolidation::extract_subject(&entry.content);
+            if !subject.is_empty()
+                && let Some(entity_id) = store.resolve_entity(&subject)
+            {
                 entry.entity_id = Some(entity_id);
             }
         }
