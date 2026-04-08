@@ -46,6 +46,7 @@ coverage/
 **/.fastembed_cache/
 benchmarks/LongMemEval/
 benchmarks/hindsight-benchmarks/
+benchmarks/results/
 
 # Node.js / Frontend (shrimpk-viz)
 node_modules/
