@@ -850,6 +850,29 @@ fn cmd_config_show(config: &EchoConfig) {
             "auto"
         }
     );
+    println!();
+    println!("  Embedding Provider:");
+    println!(
+        "  {:25} {:>15}  {}",
+        "embedding_provider",
+        config.embedding_provider.to_string(),
+        source(
+            "SHRIMPK_EMBEDDING_PROVIDER",
+            fc.embedding_provider.is_some()
+        )
+    );
+    println!(
+        "  {:25} {:>15}  {}",
+        "embedding_model",
+        &config.embedding_model,
+        source("SHRIMPK_EMBEDDING_MODEL", fc.embedding_model.is_some())
+    );
+    println!(
+        "  {:25} {:>15}  {}",
+        "embedding_api_url",
+        &config.embedding_api_url,
+        source("SHRIMPK_EMBEDDING_API_URL", fc.embedding_api_url.is_some())
+    );
 }
 
 fn cmd_config_set(key: &str, value: &str) -> anyhow::Result<()> {
@@ -872,6 +895,11 @@ fn cmd_config_set(key: &str, value: &str) -> anyhow::Result<()> {
         "enrichment_model" => fc.enrichment_model = Some(value.to_string()),
         "consolidation_provider" => fc.consolidation_provider = Some(value.to_string()),
         "max_facts_per_memory" => fc.max_facts_per_memory = Some(value.parse()?),
+        "embedding_provider" => {
+            fc.embedding_provider = Some(value.parse().map_err(|e: String| anyhow::anyhow!(e))?)
+        }
+        "embedding_model" => fc.embedding_model = Some(value.to_string()),
+        "embedding_api_url" => fc.embedding_api_url = Some(value.to_string()),
         other => anyhow::bail!("Unknown config key: \"{other}\""),
     }
 

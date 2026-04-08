@@ -346,7 +346,10 @@ pub async fn config_show(State(state): State<AppState>) -> Json<Value> {
         "proxy_max_echo_results": c.proxy_max_echo_results,
         "hebbian_half_life_secs": c.hebbian_half_life_secs,
         "hebbian_prune_threshold": c.hebbian_prune_threshold,
-        "proxy_max_conversation_turns": c.proxy_max_conversation_turns
+        "proxy_max_conversation_turns": c.proxy_max_conversation_turns,
+        "embedding_provider": c.embedding_provider.to_string(),
+        "embedding_model": c.embedding_model,
+        "embedding_api_url": c.embedding_api_url
     }))
 }
 
@@ -440,6 +443,15 @@ pub async fn config_set(
                 )
             })?)
         }
+        "embedding_provider" => {
+            fc.embedding_provider = Some(
+                req.value
+                    .parse()
+                    .map_err(|e: String| (StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?,
+            )
+        }
+        "embedding_model" => fc.embedding_model = Some(req.value.clone()),
+        "embedding_api_url" => fc.embedding_api_url = Some(req.value.clone()),
         other => {
             return Err((
                 StatusCode::BAD_REQUEST,

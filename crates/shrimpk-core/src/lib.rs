@@ -13,8 +13,8 @@ pub mod traits;
 
 // Re-export commonly used types at crate root
 pub use config::{
-    EchoConfig, FileConfig, QuantizationMode, RerankerBackend, config_dir, config_path, disk_usage,
-    load_config_file, resolve_config, save_config_file,
+    EchoConfig, EmbeddingBackend, FileConfig, QuantizationMode, RerankerBackend, config_dir,
+    config_path, disk_usage, load_config_file, resolve_config, save_config_file,
 };
 pub use entity::{EntityFrame, EntityId, EntityKind};
 pub use error::{Result, ShrimPKError};
@@ -26,5 +26,6 @@ pub use memory::{
 };
 pub use pii::{PiiMatch, PiiType};
 pub use traits::{
-    ConsolidationOutput, Consolidator, ExtractedFact, FactType, LabelSet, ModelBackend, Provider,
+    ConsolidationOutput, Consolidator, EmbeddingProvider, ExtractedFact, FactType, LabelSet,
+    ModelBackend, Provider,
 };

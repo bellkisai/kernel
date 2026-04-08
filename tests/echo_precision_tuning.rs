@@ -588,7 +588,8 @@ async fn threshold_range_sweep() {
     println!();
 
     // Collect similarity scores for all pairs using raw embeddings
-    let mut embedder = MultiEmbedder::new().expect("embedder init");
+    let mut embedder =
+        MultiEmbedder::new(&shrimpk_core::EchoConfig::default()).expect("embedder init");
 
     // Build memory embeddings map
     let mut mem_embeddings: Vec<(&str, Vec<f32>)> = Vec::new();
@@ -730,7 +731,8 @@ async fn threshold_range_sweep() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn query_formulation_analysis() {
-    let mut embedder = MultiEmbedder::new().expect("embedder init");
+    let mut embedder =
+        MultiEmbedder::new(&shrimpk_core::EchoConfig::default()).expect("embedder init");
 
     let positives = positive_pairs();
 
@@ -849,7 +851,8 @@ async fn query_formulation_analysis() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn memory_formulation_analysis() {
-    let mut embedder = MultiEmbedder::new().expect("embedder init");
+    let mut embedder =
+        MultiEmbedder::new(&shrimpk_core::EchoConfig::default()).expect("embedder init");
 
     println!();
     println!("====================================================================");
@@ -1198,7 +1201,8 @@ async fn context_window_simulation() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn recommended_configuration() {
-    let mut embedder = MultiEmbedder::new().expect("embedder init");
+    let mut embedder =
+        MultiEmbedder::new(&shrimpk_core::EchoConfig::default()).expect("embedder init");
 
     let positives = positive_pairs();
     let negatives = negative_pairs();
@@ -1533,7 +1537,8 @@ async fn recommended_configuration() {
 #[tokio::test]
 #[ignore = "requires fastembed model download"]
 async fn hardest_pairs_deep_dive() {
-    let mut embedder = MultiEmbedder::new().expect("embedder init");
+    let mut embedder =
+        MultiEmbedder::new(&shrimpk_core::EchoConfig::default()).expect("embedder init");
 
     println!();
     println!("====================================================================");

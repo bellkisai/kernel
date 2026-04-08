@@ -182,7 +182,7 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Embedding` if the model fails to initialize.
     #[instrument(skip(config), fields(max_memories = config.max_memories, threshold = config.similarity_threshold))]
     pub fn new(config: EchoConfig) -> Result<Self> {
-        let mut embedder = MultiEmbedder::new()?;
+        let mut embedder = MultiEmbedder::new(&config)?;
 
         // Initialize label prototypes BEFORE wrapping embedder in Mutex (ADR-015 D4).
         // Prototype embeddings are computed once at startup.
@@ -194,13 +194,43 @@ impl EchoEngine {
         let pii_filter = PiiFilter::new();
         let reformulator = MemoryReformulator::new();
         let store = RwLock::new(EchoStore::new());
-        let text_lsh = CosineHash::new(config.embedding_dim, 16, 10);
+        // KS75: use embedder's actual dimension, not config's possibly-stale value
+        let text_dim = embedder.text_dimension();
+        let text_lsh = CosineHash::new(text_dim, 16, 10);
         let bloom = TopicFilter::new(config.max_memories, 0.01);
+
+        // Pre-build vision/speech LSH before embedder is moved into Mutex
+        #[cfg(feature = "vision")]
+        let vision_lsh_init = if config
+            .enabled_modalities
+            .contains(&shrimpk_core::Modality::Vision)
+        {
+            Some(Mutex::new(CosineHash::new(
+                embedder.vision_dimension(),
+                16,
+                10,
+            )))
+        } else {
+            None
+        };
+        #[cfg(feature = "speech")]
+        let speech_lsh_init = if config
+            .enabled_modalities
+            .contains(&shrimpk_core::Modality::Speech)
+        {
+            Some(Mutex::new(CosineHash::new(
+                embedder.speech_dimension(),
+                16,
+                10,
+            )))
+        } else {
+            None
+        };
 
         tracing::info!(
             max_memories = config.max_memories,
             threshold = config.similarity_threshold,
-            dim = config.embedding_dim,
+            dim = text_dim,
             use_lsh = config.use_lsh,
             use_bloom = config.use_bloom,
             "EchoEngine initialized (empty store)"
@@ -213,31 +243,9 @@ impl EchoEngine {
             store,
             text_lsh: Mutex::new(text_lsh),
             #[cfg(feature = "vision")]
-            vision_lsh: if config
-                .enabled_modalities
-                .contains(&shrimpk_core::Modality::Vision)
-            {
-                Some(Mutex::new(CosineHash::new(
-                    config.vision_embedding_dim,
-                    16,
-                    10,
-                )))
-            } else {
-                None
-            },
+            vision_lsh: vision_lsh_init,
             #[cfg(feature = "speech")]
-            speech_lsh: if config
-                .enabled_modalities
-                .contains(&shrimpk_core::Modality::Speech)
-            {
-                Some(Mutex::new(CosineHash::new(
-                    config.speech_embedding_dim,
-                    16,
-                    10,
-                )))
-            } else {
-                None
-            },
+            speech_lsh: speech_lsh_init,
             bloom: RwLock::new(bloom),
             bloom_dirty: Mutex::new(false),
             pii_filter,
@@ -346,12 +354,7 @@ impl EchoEngine {
         //    - Reformulated text if available (structured form embeds better)
         //    - Otherwise original text (semantic meaning preserved)
         let embed_text = reformulated.as_deref().unwrap_or(text);
-        let embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(embed_text)?
-        };
+        let embedding = self.embed_blocking(|e| e.embed_text(embed_text))?;
 
         // 4. Build entry with auto-categorization for adaptive decay
         let category = self.reformulator.categorize(text);
@@ -559,12 +562,7 @@ impl EchoEngine {
         }
 
         // 1. Embed image with CLIP
-        let vision_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_image(image_data)?
-        };
+        let vision_embedding = self.embed_blocking(|e| e.embed_image(image_data))?;
 
         let vision_embedding = vision_embedding.ok_or_else(|| {
             ShrimPKError::Embedding("Vision model not available — cannot embed image".into())
@@ -573,10 +571,7 @@ impl EchoEngine {
         // 2. Build content and optional text embedding for cross-modal recall
         let content = description.unwrap_or("[image]").to_string();
         let text_embedding = if let Some(desc) = description {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(desc)?
+            self.embed_blocking(|e| e.embed_text(desc))?
         } else {
             Vec::new()
         };
@@ -700,12 +695,7 @@ impl EchoEngine {
         }
 
         // 1. Embed audio with speech stack
-        let speech_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_audio(pcm_f32, sample_rate)?
-        };
+        let speech_embedding = self.embed_blocking(|e| e.embed_audio(pcm_f32, sample_rate))?;
 
         let speech_embedding = speech_embedding.ok_or_else(|| {
             ShrimPKError::Embedding("Speech models not available — cannot embed audio".into())
@@ -714,10 +704,7 @@ impl EchoEngine {
         // 2. Build content and optional text embedding for cross-modal recall
         let content = description.unwrap_or("[audio]").to_string();
         let text_embedding = if let Some(desc) = description {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(desc)?
+            self.embed_blocking(|e| e.embed_text(desc))?
         } else {
             Vec::new()
         };
@@ -840,35 +827,32 @@ impl EchoEngine {
         let reformulated = self.reformulator.reformulate(text_for_reformulation);
         let embed_text = reformulated.as_deref().unwrap_or(text);
 
-        let (text_embedding, vision_embedding, speech_embedding) = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+        let (text_embedding, vision_embedding, speech_embedding) =
+            self.embed_blocking(|embedder| {
+                let text_emb = embedder.embed_text(embed_text)?;
+
+                // 2. Optional vision embedding
+                #[cfg(feature = "vision")]
+                let vis_emb = if let Some(img) = image_data {
+                    embedder.embed_image(img)?
+                } else {
+                    None
+                };
+                #[cfg(not(feature = "vision"))]
+                let vis_emb: Option<Vec<f32>> = None;
+
+                // 3. Optional speech embedding
+                #[cfg(feature = "speech")]
+                let speech_emb = if let Some((pcm, sr)) = audio_pcm {
+                    embedder.embed_audio(pcm, sr)?
+                } else {
+                    None
+                };
+                #[cfg(not(feature = "speech"))]
+                let speech_emb: Option<Vec<f32>> = None;
+
+                Ok((text_emb, vis_emb, speech_emb))
             })?;
-
-            let text_emb = embedder.embed_text(embed_text)?;
-
-            // 2. Optional vision embedding
-            #[cfg(feature = "vision")]
-            let vis_emb = if let Some(img) = image_data {
-                embedder.embed_image(img)?
-            } else {
-                None
-            };
-            #[cfg(not(feature = "vision"))]
-            let vis_emb: Option<Vec<f32>> = None;
-
-            // 3. Optional speech embedding
-            #[cfg(feature = "speech")]
-            let speech_emb = if let Some((pcm, sr)) = audio_pcm {
-                embedder.embed_audio(pcm, sr)?
-            } else {
-                None
-            };
-            #[cfg(not(feature = "speech"))]
-            let speech_emb: Option<Vec<f32>> = None;
-
-            (text_emb, vis_emb, speech_emb)
-        };
 
         // 4. Build entry with all embeddings
         let category = self.reformulator.categorize(text);
@@ -1070,12 +1054,7 @@ impl EchoEngine {
         };
 
         // 1. Embed the (possibly expanded) query
-        let query_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text(&effective_query)?
-        };
+        let query_embedding = self.embed_blocking(|e| e.embed_text(&effective_query))?;
 
         // 2. Bloom filter pre-check — skip everything if no fingerprints match.
         //    Bypass for small stores (< 50 entries) where Bloom adds risk without benefit.
@@ -1817,12 +1796,7 @@ impl EchoEngine {
         let start = std::time::Instant::now();
 
         // 1. Embed query with CLIP text encoder
-        let query_embedding = {
-            let mut embedder = self.embedder.lock().map_err(|e| {
-                ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
-            })?;
-            embedder.embed_text_for_vision(query)?
-        };
+        let query_embedding = self.embed_blocking(|e| e.embed_text_for_vision(query))?;
 
         let query_embedding = match query_embedding {
             Some(emb) => emb,
@@ -2300,12 +2274,7 @@ impl EchoEngine {
         }
 
         // Embed the entity name for ranking
-        let mut embedder = self
-            .embedder
-            .lock()
-            .map_err(|e| ShrimPKError::Memory(format!("lock: {e}")))?;
-        let query_emb = embedder.embed_text(entity)?;
-        drop(embedder);
+        let query_emb = self.embed_blocking(|e| e.embed_text(entity))?;
 
         let mut scored: Vec<(usize, f32)> = indices
             .iter()
@@ -2662,6 +2631,12 @@ impl EchoEngine {
         // Persist entity store sidecar (KS73)
         crate::persistence::save_entities(&store, &self.config.data_dir)?;
 
+        // KS75: Write embedding model name sidecar for mismatch detection on next load
+        if let Ok(embedder) = self.embedder.lock() {
+            let model_path = self.config.data_dir.join("embedding_model.txt");
+            let _ = std::fs::write(&model_path, embedder.text_provider_name());
+        }
+
         Ok(())
     }
 
@@ -2675,7 +2650,7 @@ impl EchoEngine {
     /// Returns `ShrimPKError::Persistence` if store file is corrupted.
     #[instrument(skip(config), fields(data_dir = %config.data_dir.display()))]
     pub fn load(config: EchoConfig) -> Result<Self> {
-        let mut embedder = MultiEmbedder::new()?;
+        let mut embedder = MultiEmbedder::new(&config)?;
 
         // Initialize label prototypes (ADR-015)
         let mut prototypes = crate::labels::LabelPrototypes::new_empty();
@@ -2689,6 +2664,37 @@ impl EchoEngine {
         let store_path = config.data_dir.join("echo_store.shrm");
         let mut loaded_store = EchoStore::load(&store_path)?;
 
+        // KS75: Dimension mismatch detection — hard error if stored vectors don't match config
+        if let Some(first_emb) = loaded_store.all_embeddings().first() {
+            let stored_dim = first_emb.len();
+            let config_dim = embedder.text_dimension();
+            if stored_dim != config_dim {
+                return Err(ShrimPKError::Embedding(format!(
+                    "Embedding dimension mismatch: stored data has {stored_dim}-dim vectors \
+                     but current model '{}' produces {config_dim}-dim. \
+                     Either switch back to the original model or clear the store with /api/clear.",
+                    embedder.text_provider_name()
+                )));
+            }
+        }
+
+        // KS75: Model name sidecar — warn if model changed (same dim, different model = mixed space)
+        let model_sidecar = config.data_dir.join("embedding_model.txt");
+        if model_sidecar.exists()
+            && let Ok(stored_model) = std::fs::read_to_string(&model_sidecar)
+        {
+            let stored_model = stored_model.trim();
+            let current_model = embedder.text_provider_name();
+            if stored_model != current_model && !loaded_store.all_entries().is_empty() {
+                tracing::warn!(
+                    stored_model = %stored_model,
+                    current_model = %current_model,
+                    "Embedding model changed since last persist. \
+                     Vectors from different models in the same space may degrade similarity quality."
+                );
+            }
+        }
+
         // Load community summaries sidecar (KS64)
         if let Err(e) =
             crate::persistence::load_community_summaries(&mut loaded_store, &config.data_dir)
@@ -2701,8 +2707,11 @@ impl EchoEngine {
             tracing::warn!(error = %e, "Failed to load entities, continuing without");
         }
 
+        // KS75: use embedder's actual dimension, not config's possibly-stale value
+        let text_dim = embedder.text_dimension();
+
         // Rebuild text LSH index from loaded embeddings
-        let mut text_lsh = CosineHash::new(config.embedding_dim, 16, 10);
+        let mut text_lsh = CosineHash::new(text_dim, 16, 10);
         if config.use_lsh {
             for (i, embedding) in loaded_store.all_embeddings().iter().enumerate() {
                 text_lsh.insert(i as u32, embedding);
@@ -2738,7 +2747,7 @@ impl EchoEngine {
             .enabled_modalities
             .contains(&shrimpk_core::Modality::Vision)
         {
-            let mut vlsh = CosineHash::new(config.vision_embedding_dim, 16, 10);
+            let mut vlsh = CosineHash::new(embedder.vision_dimension(), 16, 10);
             let mut vision_count = 0usize;
             for (i, entry) in loaded_store.all_entries().iter().enumerate() {
                 if let Some(ref ve) = entry.vision_embedding {
@@ -2763,7 +2772,7 @@ impl EchoEngine {
             .enabled_modalities
             .contains(&shrimpk_core::Modality::Speech)
         {
-            let mut slsh = CosineHash::new(config.speech_embedding_dim, 16, 10);
+            let mut slsh = CosineHash::new(embedder.speech_dimension(), 16, 10);
             let mut speech_count = 0usize;
             for (i, entry) in loaded_store.all_entries().iter().enumerate() {
                 if let Some(ref se) = entry.speech_embedding {
@@ -2963,6 +2972,40 @@ impl EchoEngine {
                 && let Some(parent) = store.entry_at_mut(parent_idx)
             {
                 parent.enriched = true;
+            }
+        }
+    }
+
+    /// Lock the embedder and run a blocking embedding operation.
+    ///
+    /// On a **multi-thread** Tokio runtime (the daemon) this uses
+    /// `tokio::task::block_in_place` to inform the scheduler that the
+    /// current thread will block, preventing worker-thread starvation.
+    /// On a **current-thread** runtime (`#[tokio::test]`) or outside
+    /// Tokio entirely (sync tests, CLI) we call `f` directly, because
+    /// `block_in_place` panics on a single-threaded runtime.
+    fn embed_blocking<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut MultiEmbedder) -> Result<R>,
+    {
+        let embedder_mutex = &self.embedder;
+        // Use block_in_place on multi-thread runtime to prevent worker starvation.
+        // Both the lock acquisition AND inference run inside block_in_place so that
+        // a contended lock() does not silently block a Tokio worker thread.
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| {
+                    let mut embedder = embedder_mutex.lock().map_err(|e| {
+                        ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+                    })?;
+                    f(&mut embedder)
+                })
+            }
+            _ => {
+                let mut embedder = embedder_mutex.lock().map_err(|e| {
+                    ShrimPKError::Embedding(format!("MultiEmbedder lock poisoned: {e}"))
+                })?;
+                f(&mut embedder)
             }
         }
     }

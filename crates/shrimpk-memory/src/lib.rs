@@ -19,6 +19,7 @@ pub mod consolidation;
 pub mod consolidator;
 pub mod echo;
 pub mod embedder;
+pub mod embedding_provider;
 pub mod hebbian;
 pub mod importance;
 pub mod labels;
