@@ -386,14 +386,27 @@ impl EchoStore {
             .iter()
             .map(|(a, e)| (a.as_str(), e))
             .collect();
-        aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        // Sort: longest first. Tie-break by alias string (lexicographic) for
+        // deterministic output across HashMap iteration orders (Greptile P1).
+        aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(b.0)));
         for (alias, eid) in aliases {
             if let Some(pos) = lower.find(alias) {
-                // Word boundary: char before and after must be non-alphanumeric
-                let before_ok = pos == 0 || !lower.as_bytes()[pos - 1].is_ascii_alphanumeric();
+                // Word boundary: use chars(), not as_bytes(), to handle UTF-8
+                // correctly — as_bytes()[pos-1] can land on a continuation byte
+                // (0x80–0xBF) and produce a spurious match (Greptile P2).
+                let before_ok = pos == 0
+                    || lower[..pos]
+                        .chars()
+                        .last()
+                        .map(|c| !c.is_alphanumeric())
+                        .unwrap_or(true);
                 let after_pos = pos + alias.len();
                 let after_ok = after_pos >= lower.len()
-                    || !lower.as_bytes()[after_pos].is_ascii_alphanumeric();
+                    || lower[after_pos..]
+                        .chars()
+                        .next()
+                        .map(|c| !c.is_alphanumeric())
+                        .unwrap_or(true);
                 if before_ok && after_ok {
                     return Some(eid.clone());
                 }
@@ -413,13 +426,19 @@ impl EchoStore {
     }
 
     /// Create a new entity and populate the alias index.
+    ///
+    /// Idempotent: if an EntityFrame with this deterministic ID already exists
+    /// (same canonical name), the existing frame is preserved and its
+    /// `memory_refs` are not lost (Greptile P1 — silent clobber prevention).
     pub fn create_entity(&mut self, name: String, kind: EntityKind) -> EntityId {
         let frame = EntityFrame::new(name, kind);
         let id = frame.id.clone();
-        for alias in &frame.aliases {
-            self.alias_index.insert(alias.to_lowercase(), id.clone());
+        if !self.entity_store.contains_key(&id) {
+            for alias in &frame.aliases {
+                self.alias_index.insert(alias.to_lowercase(), id.clone());
+            }
+            self.entity_store.insert(id.clone(), frame);
         }
-        self.entity_store.insert(id.clone(), frame);
         id
     }
 
