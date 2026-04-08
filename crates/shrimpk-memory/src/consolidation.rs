@@ -1081,7 +1081,9 @@ fn detect_supersedes_pairs(
         // resolve_entity sorts aliases every call — O(N_aliases); calling it once
         // per fact instead of once per (fact × store_entry) pair eliminates
         // redundant alias scans.
-        let new_entity = store.resolve_entity(fact);
+        // Greptile P1: resolve from subject only, not full fact — longest-alias
+        // matching on full text can resolve to the object entity instead of the subject.
+        let new_entity = store.resolve_entity(&extract_subject(fact));
 
         // Scan existing enriched child memories for contradictions
         for i in 0..store.len() {
@@ -1138,7 +1140,8 @@ fn detect_supersedes_pairs(
         };
 
         // Hoist entity resolution outside inner store-scan loop (Greptile P2).
-        let new_entity = store.resolve_entity(fact);
+        // Greptile P1: resolve from subject only, not full fact.
+        let new_entity = store.resolve_entity(&extract_subject(fact));
 
         for i in 0..store.len() {
             // Skip if already matched by regex pass
@@ -1202,7 +1205,8 @@ fn detect_supersedes_pairs(
         }
 
         // Hoist entity resolution outside inner store-scan loops (Greptile P2).
-        let new_entity = store.resolve_entity(fact);
+        // Greptile P1: resolve from subject only, not full fact.
+        let new_entity = store.resolve_entity(&extract_subject(fact));
 
         for i in 0..store.len() {
             if matched_old_indices.contains(&i) {
