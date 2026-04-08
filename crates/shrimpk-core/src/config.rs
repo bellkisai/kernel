@@ -552,6 +552,9 @@ impl EchoConfig {
             s if s.contains("bge-small") => 384,
             s if s.contains("bge-base") => 768,
             s if s.contains("bge-large") => 1024,
+            s if s.contains("bge-m3") => 1024,
+            s if s.contains("gte-large") => 1024,
+            s if s.contains("gte-base") => 768,
             s if s.contains("minilm-l6") => 384,
             s if s.contains("minilm-l12") => 384,
             // OpenAI
@@ -1429,32 +1432,37 @@ mod tests {
 
     #[test]
     fn infer_embedding_dim_known_models() {
-        let mut config = EchoConfig::default();
-
-        config.embedding_model = "BGE-small-EN-v1.5".into();
-        assert_eq!(config.infer_embedding_dim(), 384);
-
-        config.embedding_model = "BGE-base-EN-v1.5".into();
-        assert_eq!(config.infer_embedding_dim(), 768);
-
-        config.embedding_model = "BGE-large-EN-v1.5".into();
-        assert_eq!(config.infer_embedding_dim(), 1024);
-
-        config.embedding_model = "text-embedding-3-small".into();
-        assert_eq!(config.infer_embedding_dim(), 1536);
-
-        config.embedding_model = "text-embedding-3-large".into();
-        assert_eq!(config.infer_embedding_dim(), 3072);
-
-        config.embedding_model = "nomic-embed-text".into();
-        assert_eq!(config.infer_embedding_dim(), 768);
+        let cases: &[(&str, usize)] = &[
+            ("BGE-small-EN-v1.5", 384),
+            ("BGE-base-EN-v1.5", 768),
+            ("BGE-large-EN-v1.5", 1024),
+            ("bge-m3", 1024),
+            ("gte-large-en-v1.5", 1024),
+            ("gte-base-en-v1.5", 768),
+            ("text-embedding-3-small", 1536),
+            ("text-embedding-3-large", 3072),
+            ("nomic-embed-text", 768),
+        ];
+        for &(model, expected_dim) in cases {
+            let config = EchoConfig {
+                embedding_model: model.into(),
+                ..Default::default()
+            };
+            assert_eq!(
+                config.infer_embedding_dim(),
+                expected_dim,
+                "model '{model}'"
+            );
+        }
     }
 
     #[test]
     fn infer_embedding_dim_unknown_falls_back() {
-        let mut config = EchoConfig::default();
-        config.embedding_model = "my-custom-model".into();
-        config.embedding_dim = 512;
+        let config = EchoConfig {
+            embedding_model: "my-custom-model".into(),
+            embedding_dim: 512,
+            ..Default::default()
+        };
         assert_eq!(
             config.infer_embedding_dim(),
             512,
