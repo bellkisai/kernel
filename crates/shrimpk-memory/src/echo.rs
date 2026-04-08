@@ -194,13 +194,43 @@ impl EchoEngine {
         let pii_filter = PiiFilter::new();
         let reformulator = MemoryReformulator::new();
         let store = RwLock::new(EchoStore::new());
-        let text_lsh = CosineHash::new(config.embedding_dim, 16, 10);
+        // KS75: use embedder's actual dimension, not config's possibly-stale value
+        let text_dim = embedder.text_dimension();
+        let text_lsh = CosineHash::new(text_dim, 16, 10);
         let bloom = TopicFilter::new(config.max_memories, 0.01);
+
+        // Pre-build vision/speech LSH before embedder is moved into Mutex
+        #[cfg(feature = "vision")]
+        let vision_lsh_init = if config
+            .enabled_modalities
+            .contains(&shrimpk_core::Modality::Vision)
+        {
+            Some(Mutex::new(CosineHash::new(
+                embedder.vision_dimension(),
+                16,
+                10,
+            )))
+        } else {
+            None
+        };
+        #[cfg(feature = "speech")]
+        let speech_lsh_init = if config
+            .enabled_modalities
+            .contains(&shrimpk_core::Modality::Speech)
+        {
+            Some(Mutex::new(CosineHash::new(
+                embedder.speech_dimension(),
+                16,
+                10,
+            )))
+        } else {
+            None
+        };
 
         tracing::info!(
             max_memories = config.max_memories,
             threshold = config.similarity_threshold,
-            dim = config.embedding_dim,
+            dim = text_dim,
             use_lsh = config.use_lsh,
             use_bloom = config.use_bloom,
             "EchoEngine initialized (empty store)"
@@ -213,31 +243,9 @@ impl EchoEngine {
             store,
             text_lsh: Mutex::new(text_lsh),
             #[cfg(feature = "vision")]
-            vision_lsh: if config
-                .enabled_modalities
-                .contains(&shrimpk_core::Modality::Vision)
-            {
-                Some(Mutex::new(CosineHash::new(
-                    config.vision_embedding_dim,
-                    16,
-                    10,
-                )))
-            } else {
-                None
-            },
+            vision_lsh: vision_lsh_init,
             #[cfg(feature = "speech")]
-            speech_lsh: if config
-                .enabled_modalities
-                .contains(&shrimpk_core::Modality::Speech)
-            {
-                Some(Mutex::new(CosineHash::new(
-                    config.speech_embedding_dim,
-                    16,
-                    10,
-                )))
-            } else {
-                None
-            },
+            speech_lsh: speech_lsh_init,
             bloom: RwLock::new(bloom),
             bloom_dirty: Mutex::new(false),
             pii_filter,
@@ -2699,8 +2707,11 @@ impl EchoEngine {
             tracing::warn!(error = %e, "Failed to load entities, continuing without");
         }
 
+        // KS75: use embedder's actual dimension, not config's possibly-stale value
+        let text_dim = embedder.text_dimension();
+
         // Rebuild text LSH index from loaded embeddings
-        let mut text_lsh = CosineHash::new(config.embedding_dim, 16, 10);
+        let mut text_lsh = CosineHash::new(text_dim, 16, 10);
         if config.use_lsh {
             for (i, embedding) in loaded_store.all_embeddings().iter().enumerate() {
                 text_lsh.insert(i as u32, embedding);
@@ -2736,7 +2747,7 @@ impl EchoEngine {
             .enabled_modalities
             .contains(&shrimpk_core::Modality::Vision)
         {
-            let mut vlsh = CosineHash::new(config.vision_embedding_dim, 16, 10);
+            let mut vlsh = CosineHash::new(embedder.vision_dimension(), 16, 10);
             let mut vision_count = 0usize;
             for (i, entry) in loaded_store.all_entries().iter().enumerate() {
                 if let Some(ref ve) = entry.vision_embedding {
@@ -2761,7 +2772,7 @@ impl EchoEngine {
             .enabled_modalities
             .contains(&shrimpk_core::Modality::Speech)
         {
-            let mut slsh = CosineHash::new(config.speech_embedding_dim, 16, 10);
+            let mut slsh = CosineHash::new(embedder.speech_dimension(), 16, 10);
             let mut speech_count = 0usize;
             for (i, entry) in loaded_store.all_entries().iter().enumerate() {
                 if let Some(ref se) = entry.speech_embedding {
