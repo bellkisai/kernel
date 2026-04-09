@@ -1,37 +1,88 @@
 @import "tailwindcss";
 
-:root {
-  --color-graph-bg: #09090b;
-  --color-panel-bg: #18181b;
-  --color-border: #27272a;
+@theme {
+  /* Surfaces */
+  --color-canvas: #09090b;
+  --color-base: #18181b;
+  --color-elevated: #1f1f22;
+  --color-overlay: #27272a;
+
+  /* Text */
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --color-text-disabled: #52525b;
+
+  /* Accent */
   --color-accent: #6366f1;
+  --color-accent-hover: #818cf8;
+  --color-accent-active: #4f46e5;
 
-  /* Category node colors */
-  --node-identity: #3b82f6;
-  --node-fact: #22c55e;
-  --node-preference: #a855f7;
-  --node-active-project: #f97316;
-  --node-conversation: #64748b;
-  --node-default: #71717a;
+  /* Status */
+  --color-error: #f87171;
+  --color-success: #4ade80;
+  --color-warning: #fb923c;
 
-  /* Cluster super-node */
-  --node-cluster: #6366f1;
+  /* Border */
+  --color-border: #27272a;
+  --color-border-subtle: #1f1f22;
+
+  /* Ring (focus) */
+  --color-ring: #6366f1;
+
+  /* Typography scale */
+  --font-size-title: 16px;
+  --font-size-heading: 14px;
+  --font-size-body: 13px;
+  --font-size-label: 12px;
+  --font-size-caption: 11px;
+  --font-size-micro: 10px;
+
+  /* Animation */
+  --duration-micro: 150ms;
+  --duration-transition: 200ms;
+  --duration-panel: 300ms;
+  --duration-camera: 250ms;
+  --ease-micro: ease-out;
+  --ease-transition: ease-in-out;
+  --ease-panel: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-camera: ease-out;
+
+  /* Z-index */
+  --z-index-canvas: 0;
+  --z-index-panels: 10;
+  --z-index-top-bar: 20;
+  --z-index-overlays: 30;
+  --z-index-dropdowns: 40;
+  --z-index-tooltips: 50;
+  --z-index-modals: 60;
+
+  /* Spacing (4px grid) */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
 }
 
 body {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
 }
 
 /* react-sigma wrapper: override its default white background */
 div.react-sigma {
-  background: var(--color-graph-bg);
+  background: var(--color-canvas);
 }
 
 /* Sigma container */
 .sigma-container {
   width: 100%;
   height: 100%;
-  background: var(--color-graph-bg);
+  background: var(--color-canvas);
 }
 
 /* Node detail panel slide-in */
@@ -46,7 +97,7 @@ div.react-sigma {
   }
 }
 .animate-slide-in {
-  animation: slide-in-right 0.15s ease-out;
+  animation: slide-in-right var(--duration-micro) var(--ease-micro);
 }
 
 /* Custom scrollbar */
@@ -57,6 +108,20 @@ div.react-sigma {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--color-overlay);
   border-radius: 3px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    --duration-micro: 1ms !important;
+    --duration-transition: 1ms !important;
+    --duration-panel: 1ms !important;
+    --duration-camera: 1ms !important;
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }

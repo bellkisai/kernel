@@ -1,31 +1,49 @@
 import { create } from "zustand";
 import Graph from "graphology";
+import louvain from "graphology-communities-louvain";
 import {
   fetchOverview,
-  fetchNeighbors,
   fetchMemoryGet,
-  fetchRelated,
+  searchMemories,
   type GraphCluster,
   type GraphInterEdge,
   type MemoryDetail,
 } from "../api/client";
-
-// ---------------------------------------------------------------------------
-// Category → color mapping (matches TUI palette)
-// ---------------------------------------------------------------------------
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Identity: "#3b82f6",
-  Fact: "#22c55e",
-  Preference: "#a855f7",
-  ActiveProject: "#f97316",
-  Conversation: "#64748b",
-  Default: "#71717a",
-};
-
-const CLUSTER_COLOR = "#6366f1";
+import { getCategoryHex, CLUSTER_COLOR, ISOLATED_COLOR, communityColor } from "@/lib/categoryColors";
 
 export type ZoomLevel = "galaxy" | "cluster" | "neighborhood";
+
+/** Run Louvain and assign colors. Returns community→nodeIDs map. */
+function assignCommunityColors(graph: Graph): Map<string, string[]> {
+  const communityMap = new Map<string, string[]>();
+  if (graph.order < 2 || graph.size === 0) {
+    // No edges — mark all nodes with ISOLATED_COLOR
+    graph.forEachNode((node) => {
+      graph.setNodeAttribute(node, "color", ISOLATED_COLOR);
+    });
+    return communityMap;
+  }
+  louvain.assign(graph);
+  graph.forEachNode((node, attrs) => {
+    const community = attrs.community;
+    if (community != null) {
+      const key = String(community);
+      graph.setNodeAttribute(node, "color", communityColor(community));
+      const list = communityMap.get(key);
+      if (list) list.push(node);
+      else communityMap.set(key, [node]);
+    } else {
+      graph.setNodeAttribute(node, "color", ISOLATED_COLOR);
+    }
+  });
+  return communityMap;
+}
+
+/** Log-scale node sizing: 10px (low importance) → 40px (high importance). */
+function importanceToSize(importance: number, maxImportance: number): number {
+  if (maxImportance <= 0) return 10;
+  return 10 + 30 * (Math.log(importance + 1) / Math.log(maxImportance + 1));
+}
 
 interface GraphState {
   // Graph data
@@ -41,6 +59,9 @@ interface GraphState {
   clusters: GraphCluster[];
   interEdges: GraphInterEdge[];
   activeCommunity: string | null;
+
+  // Louvain community data
+  communityMap: Map<string, string[]>;
 
   // UI state
   loading: boolean;
@@ -67,6 +88,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   clusters: [],
   interEdges: [],
   activeCommunity: null,
+  communityMap: new Map(),
   loading: false,
   error: null,
   detailError: null,
@@ -115,6 +137,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         interEdges: data.inter_edges,
         zoomLevel: "galaxy",
         activeCommunity: null,
+        communityMap: new Map(),
         selectedNode: null,
         selectedDetail: null,
         loading: false,
@@ -129,24 +152,21 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (get().loading) return;
     set({ loading: true, error: null });
     try {
-      // Find a member ID to anchor the query
       const cluster = get().clusters.find((c) => c.label === label);
-      if (!cluster) {
-        set({ loading: false, error: `Cluster "${label}" not found` });
-        return;
-      }
-      if (cluster.top_members.length === 0) {
-        set({ loading: false, error: `Cluster "${label}" has no members` });
+      if (!cluster || cluster.top_members.length === 0) {
+        set({ loading: false, error: `Cluster "${label}" not found or empty` });
         return;
       }
 
-      const anchorId = cluster.top_members[0].id;
-      const data = await fetchRelated(anchorId, label, 100);
+      // Use top member's content as semantic search query
+      // (Hebbian graph endpoints deadlock, label string search returns 0)
+      const query = cluster.top_members[0].content_preview;
+      const data = await searchMemories(query, 100);
 
       if (!data.results || data.results.length === 0) {
         set({
           loading: false,
-          error: `No related memories found for cluster "${label}"`,
+          error: `No memories found for cluster "${label}"`,
         });
         return;
       }
@@ -155,6 +175,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
       // Add member nodes with initial positions
       const count = data.results.length;
+      const maxImportance = Math.max(...data.results.map((r) => r.final_score));
       for (let i = 0; i < count; i++) {
         const result = data.results[i];
         if (!graph.hasNode(result.memory_id)) {
@@ -164,8 +185,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
             label: result.content.slice(0, 40),
             x: Math.cos(angle) * radius,
             y: Math.sin(angle) * radius,
-            size: 6 + result.final_score * 8,
-            color: "#71717a",
+            size: importanceToSize(result.final_score, maxImportance),
+            color: getCategoryHex("Default"),
             nodeType: "memory",
             content: result.content,
             similarity: result.similarity,
@@ -173,10 +194,33 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         }
       }
 
+      // Create edges based on similarity proximity for community detection
+      const nodeIds = graph.nodes();
+      let edgeCount = 0;
+      for (let i = 0; i < nodeIds.length && edgeCount < 200; i++) {
+        for (let j = i + 1; j < nodeIds.length && edgeCount < 200; j++) {
+          const a = graph.getNodeAttributes(nodeIds[i]);
+          const b = graph.getNodeAttributes(nodeIds[j]);
+          const weight = Math.min(a.similarity ?? 0, b.similarity ?? 0);
+          if (weight > 0.3) {
+            graph.addEdge(nodeIds[i], nodeIds[j], {
+              weight,
+              size: 0.5 + weight * 2,
+              color: "#3f3f46",
+            });
+            edgeCount++;
+          }
+        }
+      }
+
+      // Assign community colors via Louvain (needs edges; falls back to isolated)
+      const communityMap = assignCommunityColors(graph);
+
       set({
         graph,
         zoomLevel: "cluster",
         activeCommunity: label,
+        communityMap,
         selectedNode: null,
         selectedDetail: null,
         loading: false,
@@ -189,53 +233,70 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   expandNode: async (id) => {
     set({ loading: true, error: null });
     try {
-      const data = await fetchNeighbors(id);
+      // Get center node details (memory_get works, neighbors deadlocks)
+      const center = await fetchMemoryGet(id);
+
+      // Find semantic neighbors via echo search
+      const neighbors = await searchMemories(center.content.slice(0, 200), 20);
       const graph = new Graph();
 
+      // Filter out the center node from results
+      const neighborResults = neighbors.results.filter(r => r.memory_id !== id);
+
+      // Compute maxImportance
+      const maxImportance = Math.max(
+        center.novelty_score ?? 0,
+        ...neighborResults.map((n) => n.final_score),
+      );
+
       // Add center node
-      graph.addNode(data.node.id, {
-        label: data.node.content_preview.slice(0, 40),
+      graph.addNode(center.memory_id, {
+        label: center.content.slice(0, 40),
         x: 0,
         y: 0,
-        size: 14,
-        color: CATEGORY_COLORS[data.node.category] ?? "#71717a",
+        size: importanceToSize(center.novelty_score ?? 0, maxImportance),
+        color: getCategoryHex(center.category),
         nodeType: "memory",
-        content: data.node.content_preview,
-        importance: data.node.importance,
-        category: data.node.category,
+        content: center.content,
+        importance: center.novelty_score,
+        category: center.category,
         isCenter: true,
       });
 
-      // Add neighbors
-      for (let i = 0; i < data.neighbors.length; i++) {
-        const neighbor = data.neighbors[i];
-        if (!graph.hasNode(neighbor.id)) {
-          const angle = (2 * Math.PI * i) / data.neighbors.length;
-          const radius = 100 + neighbor.weight * 200;
-          graph.addNode(neighbor.id, {
-            label: neighbor.content_preview.slice(0, 40),
+      // Add neighbors from echo results
+      for (let i = 0; i < neighborResults.length; i++) {
+        const result = neighborResults[i];
+        if (!graph.hasNode(result.memory_id)) {
+          const angle = (2 * Math.PI * i) / neighborResults.length;
+          const radius = 100 + result.similarity * 200;
+          graph.addNode(result.memory_id, {
+            label: result.content.slice(0, 40),
             x: Math.cos(angle) * radius,
             y: Math.sin(angle) * radius,
-            size: 4 + neighbor.weight * 10,
-            color: "#71717a",
+            size: importanceToSize(result.final_score, maxImportance),
+            color: getCategoryHex("Default"),
             nodeType: "memory",
-            content: neighbor.content_preview,
-            weight: neighbor.weight,
+            content: result.content,
+            weight: result.similarity,
           });
         }
-        if (!graph.hasEdge(data.node.id, neighbor.id)) {
-          graph.addEdge(data.node.id, neighbor.id, {
-            weight: neighbor.weight,
-            size: 0.5 + neighbor.weight * 2.5,
-            color: neighbor.relationship ? "#6366f1" : "#3f3f46",
-            relationship: neighbor.relationship,
+        // Add edge from center to neighbor
+        if (!graph.hasEdge(center.memory_id, result.memory_id)) {
+          graph.addEdge(center.memory_id, result.memory_id, {
+            weight: result.similarity,
+            size: 0.5 + result.similarity * 2.5,
+            color: result.similarity > 0.5 ? "#6366f1" : "#3f3f46",
           });
         }
       }
 
+      // Assign community colors via Louvain
+      const communityMap = assignCommunityColors(graph);
+
       set({
         graph,
         zoomLevel: "neighborhood",
+        communityMap,
         selectedNode: null,
         selectedDetail: null,
         loading: false,
