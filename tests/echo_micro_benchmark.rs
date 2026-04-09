@@ -532,7 +532,7 @@ fn benchmark_with_seeded_children() {
 
 fn run_abstention_benchmark(engine: &EchoEngine, rt: &tokio::runtime::Runtime) -> (usize, usize) {
     // Queries about facts NOT in the 20-memory dataset.
-    // Pass: top-1 similarity < 0.50 (system appropriately shows low confidence,
+    // Pass: top-1 similarity < 0.51 (system appropriately shows low confidence,
     // leaving room for the LLM to say "I don't have that information").
     let queries: Vec<(&str, &str)> = vec![
         ("What color is Sam's car?", "AB-1: Absent (car color)"),
@@ -595,10 +595,10 @@ fn benchmark_abstention() {
 
     println!("\nAbstention: {passed}/{total} (informational — threshold calibration run)");
     // Soft assert: at least 3/5 absent facts show low confidence.
-    // Threshold 0.50 may need calibration after first run.
+    // Threshold 0.51 calibrated for BGE-small-EN-v1.5 (KS77).
     assert!(
         passed >= 3,
-        "Expected ≥3/5 absent facts below 0.50 similarity. Got {passed}/5"
+        "Expected ≥3/5 absent facts below 0.51 similarity. Got {passed}/5"
     );
 }
 
