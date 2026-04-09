@@ -14,7 +14,7 @@
 //! Run WITH consolidation (requires Ollama, ~2 min):
 //!     cargo test --test echo_micro_benchmark -- --ignored --nocapture consolidation
 //!
-//! Expects fastembed model (all-MiniLM-L6-v2, ~23MB ONNX).
+//! Expects fastembed model (BGE-small-EN-v1.5, ~23MB ONNX).
 
 use shrimpk_core::{EchoConfig, EchoResult, MemoryEntry, MemoryId};
 use shrimpk_memory::EchoEngine;
