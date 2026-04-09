@@ -9,6 +9,35 @@ use std::path::PathBuf;
 /// Default maximum disk usage: 2 GB.
 const DEFAULT_MAX_DISK_BYTES: u64 = 2_147_483_648;
 
+/// Temporal query keywords shared between echo scoring (`apply_temporal_boost`)
+/// and memory reformulation (`detect_temporal_keyword`).
+///
+/// Single source of truth to prevent keyword vocabulary mismatch (KS76 Track 2).
+pub const TEMPORAL_QUERY_KEYWORDS: &[&str] = &[
+    "yesterday",
+    "today",
+    "last week",
+    "last month",
+    "last year",
+    "recently",
+    "just now",
+    "this morning",
+    "this week",
+    "this month",
+    "days ago",
+    "weeks ago",
+    "months ago",
+    "deadline",
+    "upcoming",
+    "when",
+    "scheduled",
+    "date",
+    "due",
+    "plan",
+    "next week",
+    "next month",
+];
+
 /// Reranker backend for echo result reranking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RerankerBackend {
@@ -458,7 +487,7 @@ impl Default for EchoConfig {
             use_power_law_decay: default_true(),
             use_importance: default_true(),
             activation_weight: default_activation_weight(),
-            importance_weight: 0.0,
+            importance_weight: 0.25,
             use_full_actr_history: false,
             community_summaries_enabled: default_true(),
             community_summary_threshold: default_community_summary_threshold(),
