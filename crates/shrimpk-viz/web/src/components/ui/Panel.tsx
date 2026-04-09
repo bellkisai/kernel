@@ -7,6 +7,7 @@ interface PanelProps {
   children: ReactNode;
   style?: CSSProperties;
   width?: number;
+  "aria-hidden"?: boolean;
 }
 
 const variantClasses = {
@@ -15,7 +16,7 @@ const variantClasses = {
   legend: "absolute bg-base/80 backdrop-blur-sm rounded px-3 py-2 z-panels",
 } as const;
 
-export function Panel({ variant, className = "", children, style, width }: PanelProps) {
+export function Panel({ variant, className = "", children, style, width, "aria-hidden": ariaHidden }: PanelProps) {
   const resolvedStyle: CSSProperties = { ...style };
   if (variant === "sidebar") {
     resolvedStyle.width = width ?? SIDEBAR_WIDTH;
@@ -25,6 +26,7 @@ export function Panel({ variant, className = "", children, style, width }: Panel
     <div
       className={`${variantClasses[variant]} ${className}`}
       style={resolvedStyle}
+      aria-hidden={ariaHidden}
     >
       {children}
     </div>

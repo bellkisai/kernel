@@ -44,7 +44,17 @@ export function CommunityPanel() {
 
       {/* Cluster list */}
       <div className="flex-1 overflow-y-auto">
-        {clusters.length === 0 ? (
+        {clusters.length === 0 && loading ? (
+          <div className="p-2 space-y-2" aria-hidden>
+            {Array.from({ length: 5 }, (_, i) => (
+              <div
+                key={i}
+                className="h-12 bg-overlay/50 rounded animate-pulse motion-reduce:animate-none"
+                style={{ width: `${85 - i * 8}%` }}
+              />
+            ))}
+          </div>
+        ) : clusters.length === 0 ? (
           <div className="p-4 text-xs text-text-muted">
             No communities found. Store some memories first.
           </div>

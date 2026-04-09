@@ -14,6 +14,7 @@ export function SizeLegend() {
   return (
     <Panel
       variant="legend"
+      aria-hidden={!visible}
       className={`bottom-4 right-4 flex items-end gap-3 border border-border transition-opacity duration-panel ease-out motion-reduce:transition-none ${visible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
     >
       {CIRCLES.map(({ size, label }) => (
