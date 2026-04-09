@@ -9,14 +9,12 @@ const CIRCLES = [
 
 export function SizeLegend() {
   const zoomLevel = useGraphStore((s) => s.zoomLevel);
-
-  // Only show for memory views, not galaxy (clusters use different sizing)
-  if (zoomLevel === "galaxy") return null;
+  const visible = zoomLevel !== "galaxy";
 
   return (
     <Panel
       variant="legend"
-      className="bottom-4 right-4 flex items-end gap-3 border border-border"
+      className={`bottom-4 right-4 flex items-end gap-3 border border-border transition-opacity duration-panel ease-out motion-reduce:transition-none ${visible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
     >
       {CIRCLES.map(({ size, label }) => (
         <div key={label} className="flex flex-col items-center gap-1">

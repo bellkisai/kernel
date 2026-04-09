@@ -9,6 +9,18 @@ export function SearchBar() {
   const [open, setOpen] = useState(false);
   const expandNode = useGraphStore((s) => s.expandNode);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleCtrlK = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handleCtrlK);
+    return () => document.removeEventListener("keydown", handleCtrlK);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -46,11 +58,12 @@ export function SearchBar() {
       <div className="flex items-center gap-2 bg-base border border-border rounded-lg px-3 py-1.5 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 focus-within:ring-offset-canvas">
         <Search size={14} className="text-text-muted" />
         <input
+          ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Search memories..."
+          placeholder="Search memories... (Ctrl+K)"
           className="bg-transparent text-sm text-text-primary placeholder:text-text-disabled outline-none w-64"
         />
       </div>
