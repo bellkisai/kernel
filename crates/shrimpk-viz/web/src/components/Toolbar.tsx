@@ -9,6 +9,7 @@ export function Toolbar() {
   const drillIntoCommunity = useGraphStore((s) => s.drillIntoCommunity);
   const activeCommunity = useGraphStore((s) => s.activeCommunity);
   const loading = useGraphStore((s) => s.loading);
+  const graph = useGraphStore((s) => s.graph);
 
   const handleRefresh = () => {
     if (zoomLevel === "cluster" && activeCommunity) {
@@ -32,6 +33,11 @@ export function Toolbar() {
           }`}
         />
         <span className="text-text-secondary capitalize">{zoomLevel}</span>
+        {zoomLevel !== "galaxy" && (
+          <span className="text-text-muted text-micro">
+            {graph.order} nodes, {graph.size} edges
+          </span>
+        )}
       </div>
 
       <div className="w-px h-4 bg-border mx-1" />

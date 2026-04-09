@@ -297,10 +297,12 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         graph,
         zoomLevel: "neighborhood",
         communityMap,
-        selectedNode: null,
+        selectedNode: id,
         selectedDetail: null,
         loading: false,
       });
+      // Auto-select center node to show detail panel
+      get().selectNode(id);
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
