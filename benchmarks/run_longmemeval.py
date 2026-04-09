@@ -146,33 +146,38 @@ def truncate_context(context_parts, max_total=16000, max_per_item=3000):
     return truncated
 
 
+READER_SYSTEM_PROMPT = (
+    "You are extracting facts from conversation memories. "
+    "The answer is contained in the memories below. "
+    "Focus on what the USER said — user statements contain personal facts. "
+    "Extract the specific answer. Respond in one short sentence."
+)
+
+READER_USER_TEMPLATE = (
+    "Context:\n"
+    "-----\n"
+    "{context}\n"
+    "-----\n"
+    "\n"
+    "Given only the context above and not prior knowledge, extract the answer.\n"
+    "Question: {question}\n"
+    "Answer:"
+)
+
+
 def ask_ollama(question, context, model="gemma3:1b"):
     """Ask Ollama to answer based on retrieved context."""
-    system_prompt = (
-        "You are answering questions about past conversations. "
-        "Use ONLY the retrieved conversation memories below to answer. "
-        "If the information is not in the memories, say you don't have that information. "
-        "Be concise and direct. Give short factual answers, ideally one sentence."
-    )
-
-    user_prompt = f"""Retrieved memories:
-
-{context}
-
-Question: {question}
-
-Answer in one short sentence."""
-
     r = requests.post(
         f"{OLLAMA_URL}/api/chat",
         json={
             "model": model,
             "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": READER_SYSTEM_PROMPT},
+                {"role": "user", "content": READER_USER_TEMPLATE.format(
+                    context=context, question=question)},
             ],
             "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 128},
+            "options": {"temperature": 0.0, "num_predict": 64},
         },
         timeout=300,
     )

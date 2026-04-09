@@ -93,18 +93,33 @@ def format_context(echo_results):
     return "\n\n".join(kept) if kept else "No relevant memories found."
 
 
+READER_SYSTEM_PROMPT = (
+    "You are extracting facts from conversation memories. "
+    "The answer is contained in the memories below. "
+    "Focus on what the USER said — user statements contain personal facts. "
+    "Extract the specific answer. Respond in one short sentence."
+)
+
+READER_USER_TEMPLATE = (
+    "Context:\n"
+    "-----\n"
+    "{context}\n"
+    "-----\n"
+    "\n"
+    "Given only the context above and not prior knowledge, extract the answer.\n"
+    "Question: {question}\n"
+    "Answer:"
+)
+
+
 def ask_ollama(question, context, model):
-    system = ("You are extracting facts from conversation memories. "
-              "The answer is contained in the memories below. "
-              "Focus on what the USER said -- user statements contain personal facts. "
-              "Extract the specific answer. Respond in one short sentence.")
-    user = f"{context}\n\nQuestion: {question}\nBased on the memories above, the answer is:"
     t0 = time.time()
     r = requests.post(f"{OLLAMA}/api/chat", json={
         "model": model,
         "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "system", "content": READER_SYSTEM_PROMPT},
+            {"role": "user", "content": READER_USER_TEMPLATE.format(
+                context=context, question=question)},
         ],
         "stream": False,
         "options": {"temperature": 0.0, "num_predict": 64},

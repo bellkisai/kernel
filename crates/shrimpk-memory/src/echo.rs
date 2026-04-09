@@ -11,7 +11,7 @@ use shrimpk_core::{
     EchoConfig, EchoResult, GraphCluster, GraphEdge, GraphInterEdge, GraphNeighbor,
     GraphNeighborsResult, GraphNode, GraphNodePreview, GraphOverviewResult, GraphSubgraphResult,
     LabelConnection, MemoryEntry, MemoryEntrySummary, MemoryGraphResult, MemoryId, MemoryStats,
-    Modality, QueryMode, Result, SensitivityLevel, ShrimPKError,
+    Modality, QueryMode, Result, SensitivityLevel, ShrimPKError, TEMPORAL_QUERY_KEYWORDS,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -1615,9 +1615,10 @@ impl EchoEngine {
         // 7c5. Career/intro adjustment (KS68 IE-1)
         career_intro_adjustment(&all_query_labels, &mut results);
 
-        // 7c6. Score inflation cap (KS69): prevent unbounded boost stacking
+        // 7c6. Score inflation cap (KS69, KS76 Track 3): prevent unbounded boost stacking
+        // Raised from 0.35 to 0.50 to give temporal + importance boosts headroom.
         for result in &mut results {
-            let max_allowed = result.similarity as f64 + 0.35;
+            let max_allowed = result.similarity as f64 + 0.50;
             if result.final_score > max_allowed {
                 result.final_score = max_allowed;
             }
@@ -3238,27 +3239,19 @@ fn co_occurrence_boost(content: &str) -> f64 {
     }
 }
 
-/// Temporal query boost (KS68 TR-3): if the query contains temporal keywords,
-/// boost results that have `temporal:*` labels by +0.015.
+/// Temporal query boost (KS68 TR-3, KS76 Track 2): if the query contains temporal
+/// keywords, boost results that have `temporal:*` labels by +0.08.
+/// Uses the shared `TEMPORAL_QUERY_KEYWORDS` constant from `shrimpk_core`.
 fn apply_temporal_boost(query: &str, results: &mut [EchoResult]) {
-    const TEMPORAL_KEYWORDS: &[&str] = &[
-        "deadline",
-        "upcoming",
-        "when",
-        "scheduled",
-        "date",
-        "due",
-        "plan",
-        "next week",
-        "next month",
-    ];
     let query_lower = query.to_lowercase();
-    let is_temporal_query = TEMPORAL_KEYWORDS.iter().any(|kw| query_lower.contains(kw));
+    let is_temporal_query = TEMPORAL_QUERY_KEYWORDS
+        .iter()
+        .any(|kw| query_lower.contains(kw));
     if is_temporal_query {
         for result in results.iter_mut() {
             let has_temporal_label = result.labels.iter().any(|l| l.starts_with("temporal:"));
             if has_temporal_label {
-                result.final_score += 0.015;
+                result.final_score += 0.08;
             }
         }
     }
@@ -4291,8 +4284,8 @@ mod tests {
         ];
         super::apply_temporal_boost("What upcoming deadlines does Sam have?", &mut results);
         assert!(
-            (results[0].final_score - 0.515).abs() < f64::EPSILON,
-            "Temporal result should be boosted to 0.515, got {}",
+            (results[0].final_score - 0.58).abs() < f64::EPSILON,
+            "Temporal result should be boosted to 0.58, got {}",
             results[0].final_score
         );
         assert!(
@@ -4857,5 +4850,25 @@ mod tests {
 
         super::deduplicate_parent_child(&mut results, &parent_map);
         assert_eq!(results.len(), 2, "No pairs — nothing removed");
+    }
+
+    #[test]
+    fn temporal_boost_uses_shared_keywords() {
+        // Verify that apply_temporal_boost detects keywords from the shared constant
+        let mut results = vec![
+            make_echo_result("Tokyo trip last week", 0.5, vec!["temporal:past".into()]),
+            make_echo_result("Favorite food is sushi", 0.5, vec!["topic:food".into()]),
+        ];
+        // "recently" is in the shared constant but was NOT in the old inline list
+        super::apply_temporal_boost("Where did I travel recently?", &mut results);
+        assert!(
+            results[0].final_score > 0.5,
+            "Temporal result should be boosted for 'recently' query, got {}",
+            results[0].final_score
+        );
+        assert!(
+            (results[1].final_score - 0.5).abs() < f64::EPSILON,
+            "Non-temporal result should not be boosted",
+        );
     }
 }
