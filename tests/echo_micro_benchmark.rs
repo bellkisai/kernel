@@ -473,7 +473,7 @@ fn seed_test_children(engine: &EchoEngine, ids: &[MemoryId], rt: &tokio::runtime
         child_tr2.parent_id = Some(m18_id.clone());
         child_tr2.confidence = 0.92;
         child_tr2.subject = Some("Tokyo".to_string());
-        child_tr2.labels = vec!["topic:travel".to_string(), "temporal:past".to_string()];
+        child_tr2.labels = vec!["topic:travel".to_string()];
         engine.inject_entry(child_tr2).await;
 
         // Child for M19 (patent deadline) → targets TR-3: "What upcoming deadlines does Sam have?"
