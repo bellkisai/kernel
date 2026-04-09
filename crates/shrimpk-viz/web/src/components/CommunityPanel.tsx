@@ -1,8 +1,9 @@
-import { Network, ChevronLeft, Layers, Loader2 } from "lucide-react";
+import { Network, ChevronLeft, PanelLeftClose, Loader2 } from "lucide-react";
 import { useGraphStore } from "../stores/graphStore";
 import { Panel } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
-import { SIDEBAR_WIDTH } from "@/lib/layout";
+import { IconButton } from "@/components/ui/IconButton";
+import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED, SIDEBAR_COLLAPSE_ICONS } from "@/lib/layout";
 
 export function CommunityPanel() {
   const clusters = useGraphStore((s) => s.clusters);
@@ -11,14 +12,41 @@ export function CommunityPanel() {
   const drillIntoCommunity = useGraphStore((s) => s.drillIntoCommunity);
   const backToGalaxy = useGraphStore((s) => s.backToGalaxy);
   const loading = useGraphStore((s) => s.loading);
+  const collapsed = useGraphStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useGraphStore((s) => s.toggleSidebar);
 
   const handleDrill = (label: string) => {
     if (loading) return;
     drillIntoCommunity(label);
   };
 
+  if (collapsed) {
+    return (
+      <Panel
+        variant="sidebar"
+        width={SIDEBAR_COLLAPSED}
+        className="transition-all duration-panel motion-reduce:transition-none"
+      >
+        <div className="flex flex-col items-center gap-1 py-3">
+          {SIDEBAR_COLLAPSE_ICONS.map(({ icon, label }) => (
+            <IconButton
+              key={label}
+              icon={icon}
+              tooltip={label}
+              onClick={toggleSidebar}
+            />
+          ))}
+        </div>
+      </Panel>
+    );
+  }
+
   return (
-    <Panel variant="sidebar" width={SIDEBAR_WIDTH}>
+    <Panel
+      variant="sidebar"
+      width={SIDEBAR_WIDTH}
+      className="transition-all duration-panel motion-reduce:transition-none"
+    >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         {zoomLevel !== "galaxy" ? (
@@ -29,9 +57,7 @@ export function CommunityPanel() {
           >
             <ChevronLeft size={14} className="text-text-secondary" />
           </button>
-        ) : (
-          <Layers size={14} className="text-text-muted" />
-        )}
+        ) : null}
         <h3 className="text-sm font-medium text-text-primary truncate">
           {zoomLevel === "galaxy"
             ? "Communities"
@@ -40,6 +66,13 @@ export function CommunityPanel() {
         {loading && (
           <Loader2 size={12} className="text-accent animate-spin ml-auto shrink-0" />
         )}
+        <IconButton
+          icon={PanelLeftClose}
+          tooltip="Collapse sidebar"
+          size="sm"
+          onClick={toggleSidebar}
+          className={loading ? "ml-1" : "ml-auto"}
+        />
       </div>
 
       {/* Cluster list */}

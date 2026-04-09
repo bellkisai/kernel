@@ -7,11 +7,12 @@ import {
 } from "@react-sigma/core";
 import "@react-sigma/core/lib/react-sigma.min.css";
 import forceAtlas2 from "graphology-layout-forceatlas2";
-import { ZoomIn, ZoomOut } from "lucide-react";
+import { ZoomIn, ZoomOut, Network } from "lucide-react";
 import { useGraphStore } from "../stores/graphStore";
 import { CATEGORY_HEX } from "@/lib/categoryColors";
 import { useCameraTransition } from "@/hooks/useCameraTransition";
 import { IconButton } from "@/components/ui/IconButton";
+import { EmptyState } from "@/components/ui/StateDisplay";
 import { SizeLegend } from "./SizeLegend";
 import { CommunityLegend } from "./CommunityLegend";
 
@@ -185,6 +186,13 @@ function ZoomControls() {
 }
 
 export function GraphCanvas() {
+  const clusters = useGraphStore((s) => s.clusters);
+  const loading = useGraphStore((s) => s.loading);
+  const error = useGraphStore((s) => s.error);
+  const daemonOnline = useGraphStore((s) => s.daemonOnline);
+
+  const showEmpty = clusters.length === 0 && !loading && !error && daemonOnline;
+
   return (
     <div className="flex-1 relative">
       <SigmaContainer
@@ -207,6 +215,15 @@ export function GraphCanvas() {
         <LayoutRunner />
         <ZoomControls />
       </SigmaContainer>
+      {showEmpty && (
+        <div className="absolute inset-0 flex items-center justify-center z-overlays pointer-events-none">
+          <EmptyState
+            icon={Network}
+            heading="No memories yet"
+            description="Store some memories to see your knowledge graph come alive."
+          />
+        </div>
+      )}
       <SizeLegend />
       <CommunityLegend />
     </div>

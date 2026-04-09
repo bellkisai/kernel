@@ -68,6 +68,7 @@ interface GraphState {
   error: string | null;
   detailError: string | null;
   daemonOnline: boolean;
+  sidebarCollapsed: boolean;
 
   // Actions
   loadOverview: () => Promise<void>;
@@ -77,6 +78,7 @@ interface GraphState {
   setHoveredNode: (id: string | null) => void;
   backToGalaxy: () => Promise<void>;
   setDaemonOnline: (online: boolean) => void;
+  toggleSidebar: () => void;
 }
 
 export const useGraphStore = create<GraphState>((set, get) => ({
@@ -93,8 +95,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   error: null,
   detailError: null,
   daemonOnline: false,
+  sidebarCollapsed: false,
 
   setDaemonOnline: (online) => set({ daemonOnline: online }),
+  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setHoveredNode: (id) => set({ hoveredNode: id }),
 
   loadOverview: async () => {
