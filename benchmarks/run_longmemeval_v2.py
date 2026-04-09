@@ -191,27 +191,35 @@ def format_context(echo_results):
 # FIX 2: Extraction-focused prompt — no refusal, positive framing
 # ---------------------------------------------------------------------------
 
+READER_SYSTEM_PROMPT = (
+    "You are extracting facts from conversation memories. "
+    "The answer is contained in the memories below. "
+    "Focus on what the USER said — user statements contain personal facts. "
+    "Extract the specific answer. Respond in one short sentence."
+)
+
+READER_USER_TEMPLATE = (
+    "Context:\n"
+    "-----\n"
+    "{context}\n"
+    "-----\n"
+    "\n"
+    "Given only the context above and not prior knowledge, extract the answer.\n"
+    "Question: {question}\n"
+    "Answer:"
+)
+
+
 def ask_ollama(question, context, model="gemma3:1b"):
     """Ask Ollama with extraction-focused prompt."""
-    system_prompt = (
-        "You are extracting facts from conversation memories. "
-        "The answer is contained in the memories below. "
-        "Focus on what the USER said — user statements contain personal facts. "
-        "Extract the specific answer. Respond in one short sentence."
-    )
-
-    user_prompt = f"""{context}
-
-Question: {question}
-Based on the memories above, the answer is:"""
-
     r = requests.post(
         f"{OLLAMA_URL}/api/chat",
         json={
             "model": model,
             "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": READER_SYSTEM_PROMPT},
+                {"role": "user", "content": READER_USER_TEMPLATE.format(
+                    context=context, question=question)},
             ],
             "stream": False,
             "options": {"temperature": 0.0, "num_predict": 64},
