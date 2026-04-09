@@ -27,7 +27,7 @@ export function Badge(props: BadgeProps) {
 
   // count variant
   return (
-    <span className={`${base} min-w-[20px] h-5 px-1.5 bg-overlay text-text-secondary ${props.className ?? ""}`}>
+    <span title={`${props.count} members`} className={`${base} min-w-[20px] h-5 px-1.5 bg-overlay text-text-secondary ${props.className ?? ""}`}>
       {props.count}
     </span>
   );
