@@ -490,7 +490,8 @@ pub fn load_binary(path: &Path) -> Result<EchoStore> {
         Ok(store)
     } else {
         Err(ShrimPKError::Persistence(format!(
-            "Unsupported format version: {}",
+            "Unsupported format version: {} (supported: 1, 2). \
+             If your data was written by a newer ShrimPK version, update your binary.",
             version_byte
         )))
     }
@@ -1194,11 +1195,18 @@ mod tests {
 
         let result = load_binary(&path);
         assert!(result.is_err(), "Should reject wrong version");
+        let err_msg = result.unwrap_err().to_string();
         assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Unsupported format version")
+            err_msg.contains("Unsupported format version: 99"),
+            "Should include the version number: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("supported: 1, 2"),
+            "Should list supported versions: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("update your binary"),
+            "Should hint at updating the binary: {err_msg}"
         );
     }
 
