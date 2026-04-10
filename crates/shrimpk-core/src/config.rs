@@ -239,8 +239,8 @@ pub struct EchoConfig {
     /// Default: 0.0 (no penalty). Negative values demote children relative to parents.
     #[serde(default)]
     pub child_memory_penalty: f32,
-    /// Demotion applied to older (superseded) memories when a Supersedes edge exists.
-    /// Default: 0.0 (disabled). Positive values penalize stale facts.
+    /// Supersession demotion factor (multiplicative). 0.40 = retain 60% of score.
+    /// Applied as `score *= (1 - factor)^count` for each supersession edge.
     #[serde(default)]
     pub supersedes_demotion: f32,
     /// Custom system prompt for the consolidator LLM fact extraction.
@@ -478,7 +478,7 @@ impl Default for EchoConfig {
             recency_weight: default_recency_weight(),
             child_rescue_only: default_child_rescue_only(),
             child_memory_penalty: 0.0,
-            supersedes_demotion: 0.15,
+            supersedes_demotion: 0.40,
             fact_extraction_prompt: None,
             query_expansion_enabled: false,
             reranker_enabled: false,

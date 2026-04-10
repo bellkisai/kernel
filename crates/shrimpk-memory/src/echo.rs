@@ -1424,7 +1424,7 @@ impl EchoEngine {
                                         if idx > *neighbor {
                                             boost += 0.1;
                                         } else {
-                                            demotion -= self.config.supersedes_demotion as f64;
+                                            superseded_count += 1;
                                         }
                                     }
                                     crate::hebbian::RelationshipType::CoActivation => {}
@@ -1448,7 +1448,7 @@ impl EchoEngine {
                                         if idx > other {
                                             boost += 0.1;
                                         } else {
-                                            demotion -= self.config.supersedes_demotion as f64;
+                                            superseded_count += 1;
                                         }
                                     }
                                     crate::hebbian::RelationshipType::CoActivation => {}
@@ -1460,18 +1460,17 @@ impl EchoEngine {
                         }
                     }
 
-                    boost.min(0.4) + demotion
+                    (boost.min(0.4), superseded_count)
                 })
                 .collect()
         };
 
         // 7b2. Parent supersession demotion (KS68 KU-1): if a parent entry has
         // children with Supersedes edges (child is the older/superseded side),
-        // apply a flat demotion to the parent. This propagates child-level
+        // apply a multiplicative demotion to the parent. This propagates child-level
         // supersession to parent ranking in Pipe A.
-        let parent_demotions: std::collections::HashMap<usize, f64> = {
+        let parent_demotions: std::collections::HashMap<usize, u32> = {
             let hebbian = self.hebbian.read().await;
-            let demotion = self.config.supersedes_demotion as f64;
             let mut demotions = std::collections::HashMap::new();
             for &(idx, _) in &top {
                 if let Some(entry) = store.entry_at(idx) {
@@ -1492,7 +1491,7 @@ impl EchoEngine {
                         }
                     }
                     if has_superseded_child {
-                        demotions.insert(idx, -demotion);
+                        demotions.insert(idx, 1);
                     }
                 }
             }
@@ -1505,7 +1504,7 @@ impl EchoEngine {
         let mut results: Vec<EchoResult> = top
             .iter()
             .zip(hebbian_boosts.iter())
-            .filter_map(|(&(idx, score), &boost)| {
+            .filter_map(|(&(idx, score), &(boost, direct_superseded_count))| {
                 let entry = store.entry_at(idx)?;
 
                 // Apply category-aware decay: older memories score lower (F-02 fix)
@@ -1556,9 +1555,13 @@ impl EchoEngine {
                 // Co-occurrence bonus (KS68 ME-4)
                 final_score += co_occurrence_boost(&entry.content);
 
-                // Parent supersession demotion (KS68 KU-1)
-                if let Some(&demotion) = parent_demotions.get(&idx) {
-                    final_score += demotion;
+                // Supersession demotion -- multiplicative (KS78 #11)
+                // Combines direct Supersedes edges + parent supersession into one factor
+                let total_superseded =
+                    direct_superseded_count + parent_demotions.get(&idx).copied().unwrap_or(0);
+                if total_superseded > 0 {
+                    let retain = 1.0 - self.config.supersedes_demotion as f64;
+                    final_score *= retain.powi(total_superseded as i32);
                 }
 
                 // Child memory penalty (KS69): demote children to prevent hallucination inflation
@@ -4430,38 +4433,41 @@ mod tests {
         );
     }
 
-    // --- KU-1: Parent supersession flat demotion ---
+    // --- KU-1: Parent supersession multiplicative demotion (KS78) ---
 
     #[test]
-    fn supersession_flat_demotion_closes_gap() {
+    fn supersession_multiplicative_demotion_closes_gap() {
         // Simulate: M4 (Shopify, old job) final_score = 1.027
         //           M5 (Stripe, new job) final_score = 1.001
-        // With full demotion of 0.15: M4 drops to 0.877, well below M5.
-        let demotion: f64 = 0.15;
+        // With multiplicative demotion of 0.40: M4 retains 60%.
+        // 1.027 * 0.60 = 0.6162, well below 1.001.
+        let demotion_factor: f64 = 0.40;
         let mut old_parent_score: f64 = 1.027;
         let new_parent_score: f64 = 1.001;
 
-        old_parent_score += -demotion;
+        old_parent_score *= 1.0 - demotion_factor;
 
+        let expected = 1.027 * 0.6;
         assert!(
             old_parent_score < new_parent_score,
             "Old parent ({old_parent_score}) must rank below new parent ({new_parent_score})"
         );
         assert!(
-            (old_parent_score - 0.877).abs() < 1e-10,
-            "Old parent should be demoted to 0.877, got {old_parent_score}"
+            (old_parent_score - expected).abs() < 1e-10,
+            "Old parent should be demoted to {expected}, got {old_parent_score}"
         );
     }
 
     #[test]
-    fn supersession_flat_demotion_no_op_without_superseded_child() {
+    fn supersession_demotion_no_op_without_superseded_child() {
         // If parent has no superseded children, no demotion is applied
         let original: f64 = 1.027;
-        let demotions: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+        let demotions: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
         let mut score = original;
 
-        if let Some(&d) = demotions.get(&0) {
-            score += d;
+        let total_superseded = demotions.get(&0).copied().unwrap_or(0);
+        if total_superseded > 0 {
+            score *= (1.0 - 0.40_f64).powi(total_superseded as i32);
         }
 
         assert!(
