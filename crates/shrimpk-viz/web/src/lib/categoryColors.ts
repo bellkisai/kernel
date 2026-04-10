@@ -3,6 +3,8 @@
  * Non-graph design tokens live in globals.css @theme block.
  */
 
+import { schemeTableau10 } from "d3-scale-chromatic";
+
 /** Hex colors for Sigma WebGL rendering (CSS vars can't be read at paint time) */
 export const CATEGORY_HEX: Record<string, string> = {
   Identity: "#3b82f6",
@@ -42,8 +44,6 @@ export function getCategoryBadge(category: string): string {
 // ---------------------------------------------------------------------------
 // Community colors (Louvain detection → Tableau10 palette)
 // ---------------------------------------------------------------------------
-
-import { schemeTableau10 } from "d3-scale-chromatic";
 
 /** Deterministic hash for stable community→color mapping */
 function hashCode(str: string): number {
