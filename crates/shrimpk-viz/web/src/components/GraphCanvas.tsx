@@ -7,7 +7,18 @@ import {
 } from "@react-sigma/core";
 import "@react-sigma/core/lib/react-sigma.min.css";
 import forceAtlas2 from "graphology-layout-forceatlas2";
+import { ZoomIn, ZoomOut, Network } from "lucide-react";
 import { useGraphStore } from "../stores/graphStore";
+import { CATEGORY_HEX } from "@/lib/categoryColors";
+import { useCameraTransition } from "@/hooks/useCameraTransition";
+import { IconButton } from "@/components/ui/IconButton";
+import { EmptyState } from "@/components/ui/StateDisplay";
+import { SizeLegend } from "./SizeLegend";
+import { CommunityLegend } from "./CommunityLegend";
+
+/** Named constants for WebGL reducer colors (hex required, not CSS vars) */
+const DIMMED_NODE_COLOR = "#27272a";
+const DIMMED_EDGE_COLOR = "#1c1c1e";
 
 /** Inner component that wires sigma events + loads graph data. */
 function GraphEvents() {
@@ -21,6 +32,8 @@ function GraphEvents() {
   const drillIntoCommunity = useGraphStore((s) => s.drillIntoCommunity);
   const setHoveredNode = useGraphStore((s) => s.setHoveredNode);
   const hoveredNode = useGraphStore((s) => s.hoveredNode);
+  const selectedNode = useGraphStore((s) => s.selectedNode);
+  const { animateToNode } = useCameraTransition();
 
   // Keep refs to current zoom level and store graph so event handlers
   // always read the latest values without needing to re-register.
@@ -59,6 +72,13 @@ function GraphEvents() {
     });
   }, [registerEvents, sigma, selectNode, expandNode, drillIntoCommunity, setHoveredNode]);
 
+  // Animate camera to center on the selected node.
+  useEffect(() => {
+    if (selectedNode) {
+      animateToNode(selectedNode);
+    }
+  }, [selectedNode, animateToNode]);
+
   // Dim non-neighbor nodes on hover using sigma's nodeReducer, which
   // applies a visual override without mutating the graph data.
   useEffect(() => {
@@ -67,7 +87,7 @@ function GraphEvents() {
       const sigGraph = sigma.getGraph();
       const isNeighbor =
         node === hoveredNode || sigGraph.areNeighbors(node, hoveredNode);
-      return isNeighbor ? attrs : { ...attrs, color: "#27272a" };
+      return isNeighbor ? attrs : { ...attrs, color: DIMMED_NODE_COLOR };
     });
     sigma.setSetting("edgeReducer", (edge, attrs) => {
       if (!hoveredNode) return attrs;
@@ -75,7 +95,7 @@ function GraphEvents() {
       const src = sigGraph.source(edge);
       const tgt = sigGraph.target(edge);
       const connected = src === hoveredNode || tgt === hoveredNode;
-      return connected ? attrs : { ...attrs, color: "#1c1c1e" };
+      return connected ? attrs : { ...attrs, color: DIMMED_EDGE_COLOR };
     });
   }, [hoveredNode, sigma]);
 
@@ -86,6 +106,7 @@ function GraphEvents() {
 function LayoutRunner() {
   const sigma = useSigma();
   const graph = useGraphStore((s) => s.graph);
+  const { animateToNodes } = useCameraTransition();
   const animFrame = useRef<number>();
   const iterRef = useRef(0);
 
@@ -108,6 +129,8 @@ function LayoutRunner() {
     const step = () => {
       if (iterRef.current >= totalIterations) {
         animFrame.current = undefined;
+        // Fit camera to all nodes after layout stabilizes
+        animateToNodes(sigGraph.nodes());
         return;
       }
 
@@ -132,18 +155,50 @@ function LayoutRunner() {
     animFrame.current = requestAnimationFrame(step);
 
     return stopLayout;
-  }, [graph, sigma, stopLayout]);
+  }, [graph, sigma, stopLayout, animateToNodes]);
 
   return null;
 }
 
+/** Zoom buttons rendered inside SigmaContainer so they can use useSigma(). */
+function ZoomControls() {
+  const sigma = useSigma();
+  return (
+    <div className="absolute top-2 right-2 flex flex-col gap-1 z-panels">
+      <IconButton
+        icon={ZoomIn}
+        tooltip="Zoom in"
+        onClick={() => {
+          const camera = sigma.getCamera();
+          camera.animate({ ratio: camera.ratio / 1.5 }, { duration: 250 });
+        }}
+      />
+      <IconButton
+        icon={ZoomOut}
+        tooltip="Zoom out"
+        onClick={() => {
+          const camera = sigma.getCamera();
+          camera.animate({ ratio: camera.ratio * 1.5 }, { duration: 250 });
+        }}
+      />
+    </div>
+  );
+}
+
 export function GraphCanvas() {
+  const clusters = useGraphStore((s) => s.clusters);
+  const loading = useGraphStore((s) => s.loading);
+  const error = useGraphStore((s) => s.error);
+  const daemonOnline = useGraphStore((s) => s.daemonOnline);
+
+  const showEmpty = clusters.length === 0 && !loading && !error && daemonOnline;
+
   return (
     <div className="flex-1 relative">
       <SigmaContainer
         className="sigma-container"
         settings={{
-          defaultNodeColor: "#71717a",
+          defaultNodeColor: CATEGORY_HEX.Default,
           defaultEdgeColor: "#3f3f46",
           labelColor: { color: "#a1a1aa" },
           labelFont: "Inter, system-ui, sans-serif",
@@ -152,13 +207,25 @@ export function GraphCanvas() {
           edgeLabelSize: 10,
           renderEdgeLabels: false,
           enableEdgeEvents: false,
-          zoomDuration: 200,
+          zoomDuration: 250,
           inertiaDuration: 300,
         }}
       >
         <GraphEvents />
         <LayoutRunner />
+        <ZoomControls />
       </SigmaContainer>
+      {showEmpty && (
+        <div className="absolute inset-0 flex items-center justify-center z-overlays pointer-events-none">
+          <EmptyState
+            icon={Network}
+            heading="No memories yet"
+            description="Store some memories to see your knowledge graph come alive."
+          />
+        </div>
+      )}
+      <SizeLegend />
+      <CommunityLegend />
     </div>
   );
 }

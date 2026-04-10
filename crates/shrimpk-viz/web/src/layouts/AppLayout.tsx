@@ -9,14 +9,14 @@ export function AppLayout() {
   const error = useGraphStore((s) => s.error);
 
   return (
-    <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
+    <div className="h-screen flex flex-col bg-canvas text-text-primary">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900/80">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-elevated/80">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold tracking-tight text-indigo-400">
+          <span className="text-sm font-semibold tracking-tight text-accent">
             ShrimPK
           </span>
-          <span className="text-xs text-zinc-600">Knowledge Graph</span>
+          <span className="text-xs text-text-disabled">Knowledge Graph</span>
           <SearchBar />
         </div>
         <Toolbar />
@@ -24,7 +24,7 @@ export function AppLayout() {
 
       {/* Error banner */}
       {error && (
-        <div className="px-4 py-2 bg-red-950/50 border-b border-red-900/50 text-xs text-red-400">
+        <div className="px-4 py-2 bg-error/10 border-b border-error/20 text-xs text-error">
           {error}
         </div>
       )}
