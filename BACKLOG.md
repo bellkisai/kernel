@@ -14,13 +14,14 @@ Source of truth for the ShrimPK kernel project.
 ## Sprint Roadmap (KS73-KS80)
 
 - [x] KS73: Entity unification — EntityFrame, UUID v5, alias store, entity supersession (PR #10)
-- [ ] KS74: v0.8.0-beta — recall gap fixes (NR demotion, abstention threshold), TUI dashboard, README rewrite, installer testing
-- [ ] KS75: Store-time contradiction detection
-- [ ] KS76: Memory import — cold start solver, 4+ parsers (Claude Code, ChatGPT, Obsidian, Mem0)
-- [ ] KS77: KU-3 fix + remaining recall fixes (90% gate)
-- [ ] KS78: Public launch preparation
-- [ ] KS79: Context compression — LLMLingua-2 ONNX at store time
-- [ ] KS80: Retroactive link re-scoring + sleep replay
+- [x] KS74: LME micro-benchmark suite + evaluation pipeline
+- [x] KS75: Runtime-configurable embedding model — EmbeddingProvider trait, 10 fastembed + OpenAI API (PR #14)
+- [x] KS76: Universal prompt + temporal boost + importance scoring (PR #15)
+- [x] KS77: KU-3 fix + abstention calibration — 19/20 seeded, 5/5 abstention (PR #17)
+- [x] KS77b: Design system foundation + P0 graph polish — Tailwind 4.0 @theme, 6 components, 10 micro-improvements (PR #18)
+- [ ] KS78: Critical bug fixes — persistence format (#16), recency test panic (#13), supersession demotion (#11)
+- [ ] KS79: Multi-resolution retrieval — PPR-weighted Hebbian, fallback cascade, retrieval modes
+- [ ] KS80: Memory lifecycle — merge operation, soft-deletion compaction, multi-granularity storage
 
 ---
 
@@ -52,7 +53,7 @@ Source of truth for the ShrimPK kernel project.
 - [ ] f16 quantization for vision/speech — SHRM v3, ~50% disk/RAM savings, f32 promotion at query time
 - [ ] Band-limited resampling — replace resample_linear() with rubato crate. Correctness bug: aliasing at 48→16kHz
 - [ ] BuiltinConsolidator — bundled extraction model, zero Ollama dependency for consolidation quality
-- [ ] Configurable embedding provider — EmbeddingProvider trait, 10 fastembed models + OpenAI API (KS75 — DONE)
+- [x] Configurable embedding provider — EmbeddingProvider trait, 10 fastembed models + OpenAI API (KS75, PR #14)
 
 ## MEDIUM — Graph & Entity
 
@@ -144,4 +145,4 @@ Source of truth for the ShrimPK kernel project.
 
 ---
 
-*Last updated: 2026-04-09*
+*Last updated: 2026-04-10*
