@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.7.5] -- 2026-04-10
+## [0.7.5] — 2026-04-10
 
 ### Added
 - **Schema-driven fact extraction** (KS67): structured extraction pipeline replacing free-form LLM output

@@ -5,7 +5,7 @@ Dates are aspirational. Contributions welcome -- see Contribution Opportunities 
 
 ---
 
-## Current State -- v0.7.0
+## Current State -- v0.7.5
 
 Released April 2026. The core pipeline is stable with 11 crates + CLI, hybrid GraphRAG retrieval, and entity unification.
 
