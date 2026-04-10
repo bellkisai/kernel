@@ -241,7 +241,7 @@ pub struct EchoConfig {
     pub child_memory_penalty: f32,
     /// Supersession demotion factor (multiplicative). 0.40 = retain 60% of score.
     /// Applied as `score *= (1 - factor)^count` for each supersession edge.
-    #[serde(default)]
+    #[serde(default = "default_supersedes_demotion")]
     pub supersedes_demotion: f32,
     /// Custom system prompt for the consolidator LLM fact extraction.
     /// Use `{max_facts}` placeholder for the max facts count.
@@ -429,6 +429,10 @@ fn default_child_rescue_only() -> bool {
 
 fn default_recency_weight() -> f32 {
     0.05
+}
+
+fn default_supersedes_demotion() -> f32 {
+    0.40
 }
 
 fn default_max_disk_bytes() -> u64 {
