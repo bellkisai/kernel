@@ -662,7 +662,7 @@ Integration layer that wires together `shrimpk-memory`, `shrimpk-context`, and `
 
 ### shrimpk-mcp
 
-Model Context Protocol server. Exposes Echo Memory as MCP tools (`store`, `echo`, `stats`, `forget`, `status`, `config_show`, `dump`) via JSON-RPC 2.0 over stdio. Compatible with any MCP-aware AI client.
+Model Context Protocol server. Exposes Echo Memory as 12 MCP tools (`store`, `echo`, `memory_graph`, `memory_related`, `memory_get`, `stats`, `forget`, `status`, `config_show`, `config_set`, `dump`, `persist`) via JSON-RPC 2.0 over stdio. Compatible with any MCP-aware AI client.
 
 Key design: the `EchoEngine` is lazily initialized on first tool call. The server starts in milliseconds; fastembed model loading (a few seconds) is deferred until a memory operation is actually requested.
 

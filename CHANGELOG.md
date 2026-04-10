@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.7.5] -- 2026-04-10
+
+### Added
+- **Schema-driven fact extraction** (KS67): structured extraction pipeline replacing free-form LLM output
+- **Entity unification** (KS73): EntityFrame, EntityId resolution, alias tracking, supersession rewrite
+- **Configurable embedding** (KS75): EmbeddingProvider trait, 10 fastembed models, OpenAI API support
+- **Universal prompt** (KS76): single consolidation prompt for all reader models (no per-model tuning)
+- **Temporal boost** (KS76): recency-weighted scoring for time-sensitive queries
+- **Importance scoring** (KS76): 5-signal importance scoring (entity density, temporal salience, novelty, info density, user signal)
+- **Design system foundation** (KS77): design tokens, component spec for viz app
+- **Negative recall benchmark**: 3/3 baseline for "I don't know" scenarios
+- **Abstention benchmark**: 5/5 -- engine correctly abstains when no relevant memory exists
+
+### Changed
+- **Consolidation redesign** (KS69): child memory pipeline rewrite with quality gates, dedup, soft invalidation
+- **Consolidation Tier 2** (KS71): subject fix, quality gate, dedup, soft invalidation
+- **Child keyword labels** (KS72): labels assigned at child creation time
+- **Default enrichment model**: switched to `qwen2.5:1.5b`
+- **MCP server**: now exposes 12 tools (was 9) -- added `memory_graph`, `memory_related`, `memory_get`
+
+### Fixed
+- **KU-3 recall** (KS77): knowledge update scenario now passes in seeded benchmark
+- **IE-3, TR-3, ME-4, PT-3 recall** (KS68): multiple recall fixes across LME categories
+- **Temporal label dedup trap** (KS77): avoid adding temporal labels to children when parent has temporal content
+- **Persistence format version**: format mismatch fix for MCP store/echo
+
+### Performance
+- Seeded micro-benchmark: 19/20 (up from 55% baseline)
+- Abstention: 5/5
+- Negative recall: 3/3
+- LME-S baseline (GPT-4o judge): 24.2% overall
+
 ## [0.7.0] — 2026-04-02
 
 ### Added
@@ -153,8 +185,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Competitive scan update (MuninnDB, memU, Hindsight, NeuralMemory)
 
 ### Added — KS7: MCP Server
-- **MCP Server** (`shrimpk-mcp`): 9 tools over JSON-RPC 2.0 stdio
-  - store, echo, stats, forget, dump, config_show, config_set, persist, status
+- **MCP Server** (`shrimpk-mcp`): 12 tools over JSON-RPC 2.0 stdio
+  - store, echo, memory_graph, memory_related, memory_get, stats, forget, dump, config_show, config_set, persist, status
   - Lazy engine init (fastembed loads on first tool call, not on handshake)
   - Auto-persist after store/forget, stdout sacred (logs to stderr)
   - Registered globally via `claude mcp add --scope user`

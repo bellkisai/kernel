@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.5.x (latest) | Yes |
-| < 0.5.0 | No |
+| 0.7.x (latest) | Yes |
+| < 0.7.0 | No |
 
 Only the latest released version receives security fixes. If you are running an older version, please upgrade before reporting.
 
