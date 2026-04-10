@@ -1617,6 +1617,9 @@ impl EchoEngine {
 
         // 7c6. Score inflation cap (KS69, KS76 Track 3): prevent unbounded boost stacking
         // Raised from 0.35 to 0.50 to give temporal + importance boosts headroom.
+        // NOTE: Step 7c7 (recency epsilon) follows this cap and may exceed it
+        // by up to ~3e-5. This is intentional — the epsilon only breaks ties,
+        // never meaningful score differences.
         for result in &mut results {
             let max_allowed = result.similarity as f64 + 0.50;
             if result.final_score > max_allowed {
