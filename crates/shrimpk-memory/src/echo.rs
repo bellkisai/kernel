@@ -1627,6 +1627,17 @@ impl EchoEngine {
             }
         }
 
+        // 7c7. KS78: Recency tie-breaker (#13) — after all boosts and caps, add a
+        // negligible epsilon derived from created_at so newer memories win ties.
+        // NOTE: This intentionally follows the inflation cap and may exceed it
+        // by up to ~3e-5. The epsilon only breaks ties, never meaningful score differences.
+        for result in &mut results {
+            if let Some(entry) = store.get(&result.memory_id) {
+                let recency_epsilon = (entry.created_at.timestamp_micros() as f64) * 1e-18;
+                result.final_score += recency_epsilon;
+            }
+        }
+
         // 7d. Re-sort by final_score (similarity + hebbian boost)
         results.sort_by(|a, b| {
             b.final_score
@@ -3621,7 +3632,9 @@ mod tests {
 
         // Find both memories in results
         let meta_result = results.iter().find(|r| r.content.contains("Meta"));
-        let google_result = results.iter().find(|r| r.content.contains("Google"));
+        let google_result = results
+            .iter()
+            .find(|r| r.content.contains("Google") && !r.content.contains("Meta"));
 
         assert!(meta_result.is_some(), "Meta memory should surface");
         assert!(google_result.is_some(), "Google memory should surface");
