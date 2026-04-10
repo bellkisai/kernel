@@ -1402,13 +1402,13 @@ impl EchoEngine {
         //     - Typed relationships: small extra boost when relationship type is relevant
         //     When at_time is provided (KS63), use get_valid_associations to filter
         //     expired/not-yet-valid edges for point-in-time queries.
-        let hebbian_boosts: Vec<f64> = {
+        let hebbian_boosts: Vec<(f64, u32)> = {
             let hebbian = self.hebbian.read().await;
             top.iter()
                 .map(|&(idx, _)| {
                     let idx = idx as u32;
                     let mut boost: f64 = 0.0;
-                    let mut demotion: f64 = 0.0;
+                    let mut superseded_count: u32 = 0;
 
                     if let Some(at) = at_time {
                         // Temporal query: only consider edges valid at the given timestamp
