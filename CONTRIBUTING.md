@@ -30,7 +30,7 @@ Unit tests run entirely in-memory and complete in seconds. Integration tests dow
 | `shrimpk-security` | Sandbox, permissions | Planned (stub) |
 | `shrimpk-kernel` | Integration facade | Stable |
 | `shrimpk-python` | PyO3 bindings | Exists (untested in CI) |
-| `shrimpk-mcp` | MCP server (9 tools) | Stable |
+| `shrimpk-mcp` | MCP server (12 tools) | Stable |
 | `shrimpk-daemon` | HTTP daemon + proxy | Stable |
 | `shrimpk-tray` | System tray app | Stable |
 
