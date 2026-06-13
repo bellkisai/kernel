@@ -32,7 +32,9 @@ Unit tests run entirely in-memory and complete in seconds. Integration tests dow
 | `shrimpk-python` | PyO3 bindings | Exists (untested in CI) |
 | `shrimpk-mcp` | MCP server (14 tools) | Stable |
 | `shrimpk-daemon` | HTTP daemon + proxy | Stable |
+| `shrimpk-ros2` | ROS2 bridge (String/Image/Audio/Pose) | Stub |
 | `shrimpk-tray` | System tray app | Stable |
+| `shrimpk-viz` | GraphRAG visualization (Tauri + Sigma.js) | MVP |
 
 ## Code Style
 

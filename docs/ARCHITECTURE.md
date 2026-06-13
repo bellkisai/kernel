@@ -590,7 +590,7 @@ This process is rate-limited to 10 enrichments per consolidation cycle to bound 
 
 ## 7. Crate Architecture
 
-ShrimPK is organized as a Cargo workspace with 10 crates plus a CLI. The separation follows the principle of minimal dependencies: lower-level crates know nothing about higher-level ones.
+ShrimPK is organized as a Cargo workspace with 12 crates plus a CLI. The separation follows the principle of minimal dependencies: lower-level crates know nothing about higher-level ones.
 
 ```
 shrimpk-kernel/      workspace root (integration tests only)
@@ -605,7 +605,9 @@ shrimpk-kernel/      workspace root (integration tests only)
     |     shrimpk-mcp/        -- MCP server (JSON-RPC 2.0 over stdio)
     |     shrimpk-daemon/     -- HTTP daemon (Axum on localhost:11435)
     |     shrimpk-tray/       -- system tray application
+    |     shrimpk-ros2/       -- ROS2 bridge (String/Image/Audio/Pose messages)
     |     shrimpk-python/     -- Python bindings (PyO3)
+    |     shrimpk-viz/        -- GraphRAG visualization (Tauri + Sigma.js)
     |
     +-- cli/                  -- shrimpk CLI binary
 ```
@@ -690,6 +692,14 @@ System tray application. Provides a persistent icon in the OS notification area 
 ### shrimpk-python
 
 Python bindings via PyO3. Exposes the `EchoEngine` API to Python with async support. Enables use in Python-based AI frameworks, Jupyter notebooks, and scripts.
+
+### shrimpk-ros2
+
+ROS2 bridge. Maps ROS2 messages (`String`, `Image`, `Audio`, `Pose`) onto Echo Memory store operations, with a replay mode and health check. Enables robotics workloads to persist and recall perception and state data.
+
+### shrimpk-viz
+
+GraphRAG visualization app. A Tauri desktop shell rendering the label graph with Sigma.js, backed by dedicated daemon endpoints and a level-of-detail (LOD) architecture for large graphs. (Built on Windows/macOS; excluded from Linux/macOS CI.)
 
 ### cli
 

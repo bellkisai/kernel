@@ -13,7 +13,7 @@ retrieval, entity unification, configurable embedding, and universal prompt supp
 
 ### Workspace
 
-11 crates + CLI binary:
+12 crates + CLI binary:
 
 | Crate | Purpose |
 |-------|---------|
@@ -28,6 +28,7 @@ retrieval, entity unification, configurable embedding, and universal prompt supp
 | `shrimpk-python` | PyO3 bindings (maturin) |
 | `shrimpk-ros2` | ROS2 bridge (stub) |
 | `shrimpk-tray` | Windows system tray (win32) |
+| `shrimpk-viz` | GraphRAG visualization (Tauri + Sigma.js, LOD architecture) |
 | `cli/` | CLI binary: store, echo, status, explore (ratatui TUI) |
 
 ### What is shipped and working
