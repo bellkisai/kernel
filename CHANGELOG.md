@@ -17,10 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Universal prompt (KS76):** Single prompt template for all reader models (no per-model tuning); temporal boost and 5-signal importance scoring
 - **Temporal boost (KS76):** Temporal-aware retrieval weighting for time-sensitive queries
 - **Multiplicative supersession demotion (KS78):** Superseded memories receive 0.40x multiplicative penalty (configurable)
-- **12 MCP tools:** Added `memory_graph`, `memory_related`, `memory_get` for graph navigation; `config_set` and `persist` for management
+- **14 MCP tools:** Added `memory_graph`, `memory_related`, `memory_get` for graph navigation; `entity_search` and `community_summaries` for GraphRAG; `config_set` and `persist` for management
 
 ### Changed
-- **MCP tool count:** 9 to 12 tools (graph navigation + management tools)
+- **MCP tool count:** 9 to 14 tools (graph navigation + GraphRAG + management tools)
 - **Benchmark results:** 19/20 seeded micro-benchmark, 5/5 abstention, 3/3 NR, 24.2% LME-S (GPT-4o judge)
 - **Default reader model:** qwen2.5:1.5b for consolidation
 

@@ -20,7 +20,7 @@ retrieval, entity unification, configurable embedding, and universal prompt supp
 | `shrimpk-core` | Types: MemoryEntry, EchoResult, EchoConfig, Modality |
 | `shrimpk-memory` | Engine: EchoEngine, embedding, LSH, Bloom, Hebbian, labels, FSRS decay, ACT-R activation |
 | `shrimpk-daemon` | HTTP server: axum, proxy, routes (/health, /debug, /v1/chat/completions) |
-| `shrimpk-mcp` | MCP server (stdio): 12 tools for memory management and graph navigation |
+| `shrimpk-mcp` | MCP server (stdio): 14 tools for memory management and graph navigation |
 | `shrimpk-context` | ContextAssembler: token-budgeted prompt compilation |
 | `shrimpk-router` | CascadeRouter: provider routing (not yet wired in daemon) |
 | `shrimpk-security` | PII masking (stub -- 6 categories, 14 regex patterns) |
@@ -79,10 +79,10 @@ Background consolidation using a local LLM via Ollama with schema-driven fact ex
 Child memory pipeline creates atomic facts from raw memories, supports supersession for
 knowledge updates. Default reader model: qwen2.5:1.5b.
 
-**MCP server (12 tools)**
+**MCP server (14 tools)**
 
-`shrimpk-mcp` exposes 12 tools over stdio: `store`, `echo`, `memory_graph`,
-`memory_related`, `memory_get`, `stats`, `forget`, `status`, `config_show`, `config_set`,
+`shrimpk-mcp` exposes 14 tools over stdio: `store`, `echo`, `memory_graph`,
+`memory_related`, `memory_get`, `entity_search`, `community_summaries`, `stats`, `forget`, `status`, `config_show`, `config_set`,
 `dump`, `persist`. Additional multimodal tools (`store_image`, `store_audio`) available
 when feature flags are enabled. Compatible with Claude Desktop and any MCP client.
 
