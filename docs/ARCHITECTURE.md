@@ -223,7 +223,7 @@ boost = min(boost, 0.4)   -- capped to prevent Hebbian dominance
 
 The `Supersedes` relationship deserves special mention. When a newer memory contradicts an older one (e.g., "Now uses Vim" supersedes "Uses Neovim"), the consolidator creates a `Supersedes` edge from old to new. During ranking:
 - The newer memory receives an additional +0.1 boost.
-- The older (superseded) memory receives a configurable demotion (`supersedes_demotion`, default 0.0).
+- The older (superseded) memory receives a configurable demotion (`supersedes_demotion`, default 0.40).
 
 **Exponential decay:** Every edge decays continuously according to the formula:
 
@@ -754,7 +754,7 @@ use_bloom = true                    # enable Bloom pre-filter
 quantization = "f32"                # f32 | f16 | int8 | binary
 recency_weight = 0.05               # recency boost coefficient
 child_rescue_only = true            # isolate child memories from direct ranking
-supersedes_demotion = 0.0           # score penalty for superseded memories
+supersedes_demotion = 0.40          # score penalty for superseded memories
 
 [consolidation]
 consolidation_provider = "ollama"   # "ollama" | "http" | "none"
