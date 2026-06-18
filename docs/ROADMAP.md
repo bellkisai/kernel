@@ -6,10 +6,11 @@ section for specific items you can pick up today.
 
 ---
 
-## Current State -- v0.7.5
+## Current State -- v0.7.5 (in progress)
 
-Released April 2026. The kernel is a mature push-based AI memory system with hybrid GraphRAG
-retrieval, entity unification, configurable embedding, and universal prompt support.
+Current released version is 0.7.0; v0.7.5 is in development (not yet tagged). The kernel is a
+mature push-based AI memory system with hybrid GraphRAG retrieval, entity unification,
+configurable embedding, and universal prompt support.
 
 ### Workspace
 

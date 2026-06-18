@@ -4,9 +4,7 @@ All notable changes to ShrimPK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
-
-## [0.7.5] — 2026-04-10
+## [0.7.5] — Unreleased
 
 ### Added
 - **GraphRAG hybrid retrieval (KS61-KS64):** Full hybrid GraphRAG pipeline with label-graph navigation, 14 MCP tools, 517 tests
@@ -17,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Universal prompt (KS76):** Single prompt template for all reader models (no per-model tuning); temporal boost and 5-signal importance scoring
 - **Temporal boost (KS76):** Temporal-aware retrieval weighting for time-sensitive queries
 - **Multiplicative supersession demotion (KS78):** Superseded memories receive 0.40x multiplicative penalty (configurable)
-- **14 MCP tools:** Added `memory_graph`, `memory_related`, `memory_get` for graph navigation; `entity_search` and `community_summaries` for GraphRAG; `config_set` and `persist` for management
+- **14 MCP tools:** Added 5 tools over the v0.7.0 nine-tool set — `memory_graph`, `memory_related`, `memory_get` for graph navigation; `entity_search` and `community_summaries` for GraphRAG
 
 ### Changed
 - **MCP tool count:** 9 to 14 tools (graph navigation + GraphRAG + management tools)
