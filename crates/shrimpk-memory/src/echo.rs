@@ -6,7 +6,7 @@
 //! Phase 1: brute-force cosine similarity against all stored embeddings.
 //! Phase 2: LSH for sub-linear candidate retrieval, with brute-force fallback.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use shrimpk_core::{
     EchoConfig, EchoResult, GraphCluster, GraphEdge, GraphInterEdge, GraphNeighbor,
     GraphNeighborsResult, GraphNode, GraphNodePreview, GraphOverviewResult, GraphSubgraphResult,
@@ -1627,22 +1627,21 @@ impl EchoEngine {
             }
         }
 
-        // 7c7. KS78: Recency tie-breaker (#13) — after all boosts and caps, add a
-        // negligible epsilon derived from created_at so newer memories win ties.
-        // NOTE: This intentionally follows the inflation cap and may exceed it
-        // by up to ~1.75e-3. The epsilon only breaks ties, never meaningful score differences.
-        for result in &mut results {
-            if let Some(entry) = store.get(&result.memory_id) {
-                let recency_epsilon = (entry.created_at.timestamp_micros() as f64) * 1e-18;
-                result.final_score += recency_epsilon;
-            }
-        }
-
-        // 7d. Re-sort by final_score (similarity + hebbian boost)
+        // 7d. Re-sort by final_score (similarity + hebbian boost), breaking exact
+        // f64 ties by recency so newer memories win (KS78 #13). The tie-break is a
+        // pure comparator — it never mutates final_score, so the 7c6 inflation cap
+        // invariant still holds and only genuine ties (e.g. two memories clamped to
+        // the same cap value) are reordered by age.
         results.sort_by(|a, b| {
-            b.final_score
-                .partial_cmp(&a.final_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            let a_created = store
+                .get(&a.memory_id)
+                .map(|e| e.created_at)
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+            let b_created = store
+                .get(&b.memory_id)
+                .map(|e| e.created_at)
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+            cmp_score_then_recency(a.final_score, a_created, b.final_score, b_created)
         });
 
         // 7d2. Subject diversity cap (KS67/KS68): prevent identity gravity well
@@ -3253,6 +3252,25 @@ fn co_occurrence_boost(content: &str) -> f64 {
     }
 }
 
+/// Rank comparator for echo results (KS78 #13): order by descending `final_score`,
+/// breaking *exact* f64 ties by descending `created_at` so newer memories win.
+///
+/// This is a pure tie-breaker. Because the recency dimension is only consulted when
+/// `partial_cmp` reports `Equal`, a genuine score difference (however small) is never
+/// overridden by age. Scores are read, never mutated, so the 7c6 inflation-cap
+/// invariant is preserved.
+fn cmp_score_then_recency(
+    a_score: f64,
+    a_created: DateTime<Utc>,
+    b_score: f64,
+    b_created: DateTime<Utc>,
+) -> std::cmp::Ordering {
+    b_score
+        .partial_cmp(&a_score)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| b_created.cmp(&a_created))
+}
+
 /// Temporal query boost (KS68 TR-3, KS76 Track 2): if the query contains temporal
 /// keywords, boost results that have `temporal:*` labels by +0.08.
 /// Uses the shared `TEMPORAL_QUERY_KEYWORDS` constant from `shrimpk_core`.
@@ -3630,21 +3648,66 @@ mod tests {
 
         assert!(results.len() >= 2, "Should have at least 2 results");
 
-        // Find both memories in results
-        let meta_result = results.iter().find(|r| r.content.contains("Meta"));
-        let google_result = results
+        // Assert ranking ORDER: the newer memory (Meta) must rank above the older,
+        // now-superseded one (Google) — the #13 "expected" behaviour. Under current
+        // scoring Meta wins on score outright (supersession demotion, KS78 #11, pushes
+        // the "I left Google" memory well below Meta), so this guards recency/supersession
+        // ranking generally. The recency comparator's job — deciding genuine *exact*
+        // final_score ties — is covered directly by the model-free unit test
+        // `cmp_score_then_recency_breaks_exact_ties_by_recency`, since real embeddings
+        // here no longer produce the exact tie that originally triggered #13.
+        let meta_idx = results.iter().position(|r| r.content.contains("Meta"));
+        let google_idx = results
             .iter()
-            .find(|r| r.content.contains("Google") && !r.content.contains("Meta"));
+            .position(|r| r.content.contains("Google") && !r.content.contains("Meta"));
 
-        assert!(meta_result.is_some(), "Meta memory should surface");
-        assert!(google_result.is_some(), "Google memory should surface");
+        assert!(meta_idx.is_some(), "Meta memory should surface");
+        assert!(google_idx.is_some(), "Google memory should surface");
 
-        // Newer memory (Meta) should have a higher final_score than older (Google)
-        let meta_score = meta_result.unwrap().final_score;
-        let google_score = google_result.unwrap().final_score;
+        let meta_idx = meta_idx.unwrap();
+        let google_idx = google_idx.unwrap();
         assert!(
-            meta_score > google_score,
-            "Newer memory (Meta, score={meta_score:.6}) should rank higher than older (Google, score={google_score:.6})"
+            meta_idx < google_idx,
+            "Newer memory (Meta, rank={meta_idx}) should rank above older (Google, rank={google_idx})"
+        );
+    }
+
+    #[test]
+    fn cmp_score_then_recency_breaks_exact_ties_by_recency() {
+        use std::cmp::Ordering;
+        let older = Utc::now() - chrono::Duration::days(30);
+        let newer = Utc::now();
+
+        // Exact score tie: the newer memory must sort first (sort_by treats the
+        // smaller-ordering element as earlier). a=older vs b=newer -> a sorts after b.
+        assert_eq!(
+            cmp_score_then_recency(0.5, older, 0.5, newer),
+            Ordering::Greater,
+            "on an exact tie, the older memory must sort after the newer one"
+        );
+        assert_eq!(
+            cmp_score_then_recency(0.5, newer, 0.5, older),
+            Ordering::Less,
+            "on an exact tie, the newer memory must sort before the older one"
+        );
+
+        // A genuine score difference is never overridden by recency, even a tiny one
+        // favouring the older memory (this is the core "pure tie-breaker" guarantee).
+        assert_eq!(
+            cmp_score_then_recency(0.7502, older, 0.7500, newer),
+            Ordering::Less,
+            "higher-scored older memory must still outrank a newer lower-scored one"
+        );
+        assert_eq!(
+            cmp_score_then_recency(0.9, older, 0.5, newer),
+            Ordering::Less,
+            "higher score wins regardless of age"
+        );
+
+        // Identical created_at + identical score -> Equal (stable, no reordering).
+        assert_eq!(
+            cmp_score_then_recency(0.5, newer, 0.5, newer),
+            Ordering::Equal
         );
     }
 
