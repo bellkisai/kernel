@@ -4,7 +4,30 @@ All notable changes to ShrimPK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.7.5] — Unreleased
+
+### Added
+- **GraphRAG hybrid retrieval (KS61-KS64):** Full hybrid GraphRAG pipeline with label-graph navigation, 14 MCP tools, 517 tests
+- **GraphRAG Viz MVP (KS65):** Tauri + Sigma.js graph visualization app with 3 daemon endpoints and LOD architecture
+- **Schema-driven fact extraction (KS67):** LLM-based structured extraction with supersession for knowledge updates; 80% micro-benchmark recall
+- **Entity unification (KS73):** EntityFrame, EntityId-based supersession for structured entity tracking
+- **Configurable embedding (KS75):** EmbeddingProvider trait with 10 fastembed models and OpenAI API support
+- **Universal prompt (KS76):** Single prompt template for all reader models (no per-model tuning); temporal boost and 5-signal importance scoring
+- **Temporal boost (KS76):** Temporal-aware retrieval weighting for time-sensitive queries
+- **Multiplicative supersession demotion (KS78):** Superseded memories receive 0.40x multiplicative penalty (configurable)
+- **14 MCP tools:** Added 5 tools over the v0.7.0 nine-tool set — `memory_graph`, `memory_related`, `memory_get` for graph navigation; `entity_search` and `community_summaries` for GraphRAG
+
+### Changed
+- **MCP tool count:** 9 to 14 tools (graph navigation + GraphRAG + management tools)
+- **Benchmark results:** 19/20 seeded micro-benchmark, 5/5 abstention, 3/3 NR, 24.2% LME-S (GPT-4o judge)
+- **Default reader model:** qwen2.5:1.5b for consolidation
+
+### Fixed
+- **Persistence format bug (Issue #16):** Format version mismatch causing MCP store/echo to fail
+- **KU-3 knowledge update (KS77):** Fixed retrieval for updated knowledge entries
+- **Temporal label dedup trap (KS77):** Prevent adverse dedup interaction when parent has temporal content
+- **Child memory pipeline rewrite (KS69):** Consolidation redesign fixing IE-1 and KU-1 categories
+- **Superseded_count declaration (KS78):** Variable declared in both temporal and standard code paths
 
 ## [0.7.0] — 2026-04-02
 
