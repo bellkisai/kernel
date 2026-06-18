@@ -2163,7 +2163,7 @@ impl EchoEngine {
         }
 
         // Sort connections by count descending
-        connections.sort_by(|a, b| b.count.cmp(&a.count));
+        connections.sort_by_key(|b| std::cmp::Reverse(b.count));
 
         // Count unique connected memories across all labels
         let mut all_indices: Vec<u32> = grouped.values().flat_map(|v| v.iter().copied()).collect();
@@ -2490,7 +2490,7 @@ impl EchoEngine {
             let store = self.store.read().await;
 
             let mut label_clusters = store.labels_with_min_members(min_members);
-            label_clusters.sort_by(|a, b| b.1.cmp(&a.1));
+            label_clusters.sort_by_key(|b| std::cmp::Reverse(b.1));
             label_clusters.truncate(max_clusters);
 
             let mut clusters: Vec<GraphCluster> = Vec::with_capacity(label_clusters.len());
@@ -2553,7 +2553,7 @@ impl EchoEngine {
             }
         }
 
-        inter_edges.sort_by(|a, b| b.shared_count.cmp(&a.shared_count));
+        inter_edges.sort_by_key(|b| std::cmp::Reverse(b.shared_count));
 
         Ok(GraphOverviewResult {
             clusters,

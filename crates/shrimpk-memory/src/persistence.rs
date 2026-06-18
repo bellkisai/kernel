@@ -569,7 +569,7 @@ fn load_binary_v1(data: &[u8]) -> Result<EchoStore> {
 
     // Rebuild store — v1 entries are text-only (vision/speech = None)
     let mut store = EchoStore::new();
-    for (meta, embedding) in metas.into_iter().zip(embeddings.into_iter()) {
+    for (meta, embedding) in metas.into_iter().zip(embeddings) {
         let entry = meta.into_entry(embedding);
         store.add(entry);
     }
@@ -737,7 +737,7 @@ fn load_binary_v2(data: &[u8]) -> Result<EchoStore> {
 
     // --- Rebuild EchoStore ---
     let mut store = EchoStore::new();
-    for (i, (meta, text_emb)) in metas.into_iter().zip(embeddings.into_iter()).enumerate() {
+    for (i, (meta, text_emb)) in metas.into_iter().zip(embeddings).enumerate() {
         let mut entry = meta.into_entry(text_emb);
         entry.vision_embedding = vision_embeddings[i].take();
         entry.speech_embedding = speech_embeddings[i].take();
