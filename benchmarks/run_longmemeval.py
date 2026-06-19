@@ -14,7 +14,7 @@ Flow:
   4. Output JSONL for evaluation with evaluate_qa.py
 
 Usage:
-  python run_longmemeval.py --model gemma3:1b --limit 5
+  python run_longmemeval.py --model qwen2.5:1.5b --limit 5
   python run_longmemeval.py --model qwen2.5:7b
 """
 

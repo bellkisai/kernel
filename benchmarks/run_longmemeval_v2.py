@@ -9,7 +9,7 @@ Fixes applied (from 3-way architect/ML-engineer/QA analysis):
   4. Smart truncation: 2K per item (rarely triggers with turn-pairs)
 
 Usage:
-  python run_longmemeval_v2.py --model gemma3:1b --limit 50
+  python run_longmemeval_v2.py --model qwen2.5:1.5b --limit 50
   python run_longmemeval_v2.py --model qwen2.5:7b
 """
 
@@ -57,7 +57,7 @@ def store_memory(text, source="benchmark"):
         return False
 
 
-def echo_query(query, max_results=15):
+def echo_query(query, max_results=5):
     try:
         r = requests.post(
             f"{DAEMON_URL}/api/echo",
