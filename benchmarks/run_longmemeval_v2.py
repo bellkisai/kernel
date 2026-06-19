@@ -9,7 +9,7 @@ Fixes applied (from 3-way architect/ML-engineer/QA analysis):
   4. Smart truncation: 2K per item (rarely triggers with turn-pairs)
 
 Usage:
-  python run_longmemeval_v2.py --model gemma3:1b --limit 50
+  python run_longmemeval_v2.py --model qwen2.5:1.5b --limit 50
   python run_longmemeval_v2.py --model qwen2.5:7b
 """
 
@@ -57,7 +57,7 @@ def store_memory(text, source="benchmark"):
         return False
 
 
-def echo_query(query, max_results=15):
+def echo_query(query, max_results=5):
     try:
         r = requests.post(
             f"{DAEMON_URL}/api/echo",
@@ -210,7 +210,7 @@ READER_USER_TEMPLATE = (
 )
 
 
-def ask_ollama(question, context, model="gemma3:1b"):
+def ask_ollama(question, context, model="qwen2.5:1.5b"):
     """Ask Ollama with extraction-focused prompt."""
     r = requests.post(
         f"{OLLAMA_URL}/api/chat",
@@ -235,7 +235,7 @@ def ask_ollama(question, context, model="gemma3:1b"):
 # Benchmark runner
 # ---------------------------------------------------------------------------
 
-def run_benchmark(dataset_path, output_path, model="gemma3:1b", max_results=15,
+def run_benchmark(dataset_path, output_path, model="qwen2.5:1.5b", max_results=5,
                   limit=None, resume=False):
     if not daemon_healthy():
         print("ERROR: ShrimPK daemon not running at", DAEMON_URL)
@@ -354,8 +354,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ShrimPK LongMemEval v2")
     parser.add_argument("--dataset", default="LongMemEval/data/longmemeval_s_cleaned.json")
     parser.add_argument("--output", default=None)
-    parser.add_argument("--model", default="gemma3:1b")
-    parser.add_argument("--max-results", type=int, default=15)
+    parser.add_argument("--model", default="qwen2.5:1.5b")
+    parser.add_argument("--max-results", type=int, default=5)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
