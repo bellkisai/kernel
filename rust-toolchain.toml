@@ -1,0 +1,13 @@
+# Pinned Rust toolchain — single source of truth for local dev AND CI.
+#
+# Why pinned: CI previously used a floating `stable`, so a new Rust release
+# (1.96) silently turned already-committed code into hard `-D warnings` clippy
+# errors, breaking master and every branch with zero code changes. Pinning makes
+# toolchain bumps deliberate and keeps local clippy identical to CI.
+#
+# To bump: change `channel` here AND the `dtolnay/rust-toolchain@<version>` pins
+# in .github/workflows/ci.yml to the same version, in one PR, then fix any new
+# lints that release introduces.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]

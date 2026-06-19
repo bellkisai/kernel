@@ -16,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned — keep in sync with rust-toolchain.toml (see that file's header)
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt
       - run: cargo fmt --all --check
@@ -26,7 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned — keep in sync with rust-toolchain.toml (see that file's header)
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -48,7 +50,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned — keep in sync with rust-toolchain.toml (see that file's header)
+      - uses: dtolnay/rust-toolchain@1.96.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace ${{ matrix.exclude_crates }}
         # Integration tests requiring fastembed model download are #[ignore]
@@ -61,6 +64,7 @@ jobs:
       RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned — keep in sync with rust-toolchain.toml (see that file's header)
+      - uses: dtolnay/rust-toolchain@1.96.0
       # Exclude platform-specific crates that need system libs not available in CI
       - run: cargo doc --workspace --no-deps --exclude shrimpk-tray --exclude shrimpk-viz
