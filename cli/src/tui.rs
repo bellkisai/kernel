@@ -565,15 +565,11 @@ async fn handle_key(app: &mut App, code: KeyCode, engine: &EchoEngine) {
                 app.sort_mode = app.sort_mode.next();
                 app.apply_sort();
             }
-            KeyCode::Home => {
-                if !app.filtered.is_empty() {
-                    app.list_state.select(Some(0));
-                }
+            KeyCode::Home if !app.filtered.is_empty() => {
+                app.list_state.select(Some(0));
             }
-            KeyCode::End => {
-                if !app.filtered.is_empty() {
-                    app.list_state.select(Some(app.filtered.len() - 1));
-                }
+            KeyCode::End if !app.filtered.is_empty() => {
+                app.list_state.select(Some(app.filtered.len() - 1));
             }
             _ => {}
         },
