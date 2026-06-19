@@ -57,6 +57,14 @@ const MAGIC: &[u8; 4] = b"SHRM";
 /// Current binary format version (multimodal: text + optional vision/speech).
 const FORMAT_VERSION: u32 = 2;
 
+/// Format versions this binary can read, in ascending order.
+///
+/// Single source of truth for the "unsupported version" error message. v1 is
+/// read-only (we always write `FORMAT_VERSION`), so this is distinct from the
+/// write version. Keep in sync with the `version_byte` match arms in
+/// `load_binary` / `validate_binary` when adding a new format version.
+const SUPPORTED_VERSIONS: &[u8] = &[1, 2];
+
 /// v1 header size in bytes.
 const HEADER_SIZE_V1: u64 = 64;
 
@@ -489,10 +497,14 @@ pub fn load_binary(path: &Path) -> Result<EchoStore> {
         );
         Ok(store)
     } else {
+        let supported = SUPPORTED_VERSIONS
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
         Err(ShrimPKError::Persistence(format!(
-            "Unsupported format version: {} (supported: 1, 2). \
-             If your data was written by a newer ShrimPK version, update your binary.",
-            version_byte
+            "Unsupported format version: {version_byte} (supported: {supported}). \
+             If your data was written by a newer ShrimPK version, update your binary."
         )))
     }
 }
