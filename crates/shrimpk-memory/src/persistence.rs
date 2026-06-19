@@ -57,12 +57,13 @@ const MAGIC: &[u8; 4] = b"SHRM";
 /// Current binary format version (multimodal: text + optional vision/speech).
 const FORMAT_VERSION: u32 = 2;
 
-/// Format versions this binary can read, in ascending order.
+/// Versions this binary can read, in ascending order, used ONLY to render the
+/// unsupported-version error message.
 ///
-/// Single source of truth for the "unsupported version" error message. v1 is
-/// read-only (we always write `FORMAT_VERSION`), so this is distinct from the
-/// write version. Keep in sync with the `version_byte` match arms in
-/// `load_binary` / `validate_binary` when adding a new format version.
+/// Display-only: this constant does not enforce version dispatch. Adding a new
+/// version also requires a new `version_byte` match arm in both `load_binary`
+/// and `validate_binary` — keep all three in sync. v1 is read-only (we always
+/// write `FORMAT_VERSION`), so this set is distinct from the write version.
 const SUPPORTED_VERSIONS: &[u8] = &[1, 2];
 
 /// v1 header size in bytes.
