@@ -165,7 +165,7 @@ READER_USER_TEMPLATE = (
 )
 
 
-def ask_ollama(question, context, model="qwen2.5:3b"):
+def ask_ollama(question, context, model="qwen2.5:1.5b"):
     """Ask Ollama to answer based on retrieved context."""
     r = requests.post(
         f"{OLLAMA_URL}/api/chat",
@@ -186,7 +186,7 @@ def ask_ollama(question, context, model="qwen2.5:3b"):
     raise Exception(f"Ollama returned {r.status_code}: {r.text[:200]}")
 
 
-def run_benchmark(dataset_path, output_path, model="qwen2.5:3b", max_results=10,
+def run_benchmark(dataset_path, output_path, model="qwen2.5:1.5b", max_results=10,
                   limit=None, resume=False):
     # Check services
     if not daemon_healthy():
@@ -315,7 +315,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ShrimPK LongMemEval Benchmark")
     parser.add_argument("--dataset", default="LongMemEval/data/longmemeval_s_cleaned.json")
     parser.add_argument("--output", default=None, help="Output JSONL (auto-named if omitted)")
-    parser.add_argument("--model", default="qwen2.5:3b", help="Ollama model name")
+    parser.add_argument("--model", default="qwen2.5:1.5b", help="Ollama model name")
     parser.add_argument("--max-results", type=int, default=10, help="Max echo results")
     parser.add_argument("--limit", type=int, default=None, help="Limit questions (for testing)")
     parser.add_argument("--resume", action="store_true", help="Resume from existing output")
